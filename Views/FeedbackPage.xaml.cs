@@ -1,17 +1,21 @@
 using System;
+using DTTS.Common;
 using DTTS.Services.Database;
 using DTTS.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml;
 using Windows.Storage.Pickers;
 using Windows.System;
 
 namespace DTTS.Views;
 
-public sealed partial class FeedbackPage : Page
+public sealed partial class FeedbackPage : Page, IBackRequestHandler
 {
+    /// <inheritdoc />
+    public void OnBackRequested() => ViewModel.GoBackCommand.Execute(null);
+
     public FeedbackViewModel ViewModel { get; }
 
     public FeedbackPage()

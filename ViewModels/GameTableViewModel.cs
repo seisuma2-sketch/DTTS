@@ -36,6 +36,15 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private RemoteGameClient? _client;
     private int _myPlayerId = 0;
 
+    // --- 後始末用 ---
+    private DispatcherQueueNpcScheduler? _npcScheduler;
+    private EventHandler<GameEvent>? _engineHandler;
+    private Task? _shutdownTask;
+    private bool _isShutDown;
+    private bool _connectionLost;
+    private Task _saveTask = Task.CompletedTask;
+    private int _guestResultRound;
+
     // --- プレイヤー ---
     public PlayerViewModel Player0 { get; } = new(0, "あなた", true);
     public PlayerViewModel Player1 { get; } = new(1, "NPC 東", false);
@@ -99,6 +108,31 @@ public sealed partial class GameTableViewModel : ViewModelBase
     [ObservableProperty]
     public partial bool IsGameOver { get; set; }
 
+    /// <summary>通信対戦のゲスト（参加者）か。ラウンドの進行はホストが行う。</summary>
+    [ObservableProperty]
+    public partial bool IsGuest { get; set; }
+
+    /// <summary>ラウンド結果画面の決定ボタンを押せるか（ゲストは対戦中のラウンド進行ができない）。</summary>
+    [ObservableProperty]
+    public partial bool CanAdvanceRound { get; set; } = true;
+
+    /// <summary>ラウンド結果画面の決定ボタンの文言。</summary>
+    [ObservableProperty]
+    public partial string NextRoundButtonText { get; set; } = "次のラウンドへ進む";
+
+    /// <summary>
+    /// タイトルへ戻る前に確認が必要か（対戦中のみ。ラウンド結果表示中・ゲーム終了後は不要）。
+    /// </summary>
+    public bool NeedsLeaveConfirmation
+        => !_isShutDown && !_connectionLost && (_engine is not null || _client is not null) && !IsRoundResultOpen && !IsGameOver;
+
+    /// <summary>中断確認ダイアログの本文。</summary>
+    public string LeaveConfirmationMessage => _hostSession is not null
+        ? "対戦を中断してタイトルに戻りますか？\n（進行中のゲームは破棄され、参加者との部屋も閉じられます）"
+        : _client is not null
+            ? "対戦を中断してタイトルに戻りますか？\n（部屋から退出します。あなたの席はNPCが引き継ぎます）"
+            : "対戦を中断してタイトルに戻りますか？\n（進行中のゲームは破棄されます）";
+
     public event EventHandler<CutInEventArgs>? CutInTriggered;
     public event EventHandler? FieldFlushedTriggered;
     public event EventHandler? HandDealtTriggered;
@@ -123,6 +157,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
             // ゲスト（クライアント）モード
             _client = netParams.Client;
             _rules = netParams.Rules;
+            IsGuest = true;
             _client.ViewUpdated += OnClientViewUpdated;
             _client.Disconnected += OnClientDisconnected;
             _client.NoticeReceived += OnClientNoticeReceived;
@@ -142,7 +177,9 @@ public sealed partial class GameTableViewModel : ViewModelBase
             _rules = netParams.Rules;
             _myPlayerId = 0;
 
-            _engine.EventOccurred += (sender, ev) => OnEngineEvent(ev);
+            _engineHandler = (sender, ev) => OnEngineEvent(ev);
+            _engine.EventOccurred += _engineHandler;
+            RoundInfoText = $"第 {Math.Max(1, _engine.RoundNumber)} / {_engine.Rules.Progress.RoundCount} ラウンド";
             UpdateAllPlayersInfo();
             UpdateHumanHandVisuals();
             return;
@@ -176,18 +213,20 @@ public sealed partial class GameTableViewModel : ViewModelBase
         _engine = new GameEngine(_rules, setups);
 
         // NPCコントローラー初期化（UIのワンショットタイマーを渡す）
-        var scheduler = new DispatcherQueueNpcScheduler(_dispatcherQueue);
-        _npcController = new NpcController(_engine, scheduler);
+        _npcScheduler = new DispatcherQueueNpcScheduler(_dispatcherQueue);
+        _npcController = new NpcController(_engine, _npcScheduler);
 
         _npcController.Assign(1, _npcProfiles[1]);
         _npcController.Assign(2, _npcProfiles[2]);
         _npcController.Assign(3, _npcProfiles[3]);
 
-        // イベント購読
-        _engine.EventOccurred += (sender, ev) => OnEngineEvent(ev);
+        // イベント購読（後始末で解除するためハンドラを保持）
+        _engineHandler = (sender, ev) => OnEngineEvent(ev);
+        _engine.EventOccurred += _engineHandler;
 
-        // ゲーム開始
+        // ゲーム開始（ラウンド表示は実際のルールのラウンド数で初期化する）
         _engine.StartGame();
+        RoundInfoText = $"第 {_engine.RoundNumber} / {_engine.Rules.Progress.RoundCount} ラウンド";
         UpdateAllPlayersInfo();
         UpdateHumanHandVisuals();
     }
@@ -199,7 +238,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
     private void HandleEngineEvent(GameEvent ev)
     {
-        if (_engine == null) return;
+        // 後始末の後に、UIスレッドの待ち行列に残っていたイベントが届いても無視する
+        if (_engine == null || _isShutDown) return;
 
         switch (ev)
         {
@@ -426,13 +466,39 @@ public sealed partial class GameTableViewModel : ViewModelBase
         }
     }
 
-    /// <summary>ゲスト（通信対戦の参加者）側：ホストからの演出用通知で効果音を鳴らす。</summary>
+    private void PlayGuestRoundEndSound(StandingDto[] standings)
+    {
+        var mine = standings.FirstOrDefault(s => s.PlayerId == _myPlayerId);
+        if (mine is not null && mine.Rank == PlayerRank.Daihinmin)
+        {
+            _audio.Play(SoundEffect.DefeatJingle);
+        }
+    }
+
+    /// <summary>ゲスト（通信対戦の参加者）側：ホストからの演出用通知で効果音とラウンド結果を反映する。</summary>
     private void OnClientNoticeReceived(object? sender, NoticeDto notice)
     {
         _dispatcherQueue.TryEnqueue(() =>
         {
+            if (_isShutDown) return;
             switch (notice.Kind)
             {
+                case "RoundEnded" when notice.Standings is { } standings:
+                    // ゲスト：ラウンド結果を表示し、ホストの進行を待つ（Applied はゲーム終了かどうか）
+                    _guestResultRound = notice.Count;
+                    RoundResultText = string.Join("\n", standings
+                        .OrderBy(s => s.Position)
+                        .Select(s => $"{s.Position}位: {GetPlayerVm(s.PlayerId).Name} ({s.Rank}) -> 得点: {s.Points}pt"));
+                    IsGameOver = notice.Applied;
+                    IsRoundResultOpen = true;
+                    UpdateRoundResultActions();
+                    PlayGuestRoundEndSound(standings);
+                    break;
+                case "GameEnded":
+                    IsGameOver = true;
+                    StatusMessage = "全ラウンドが終了しました！";
+                    UpdateRoundResultActions();
+                    break;
                 case "RoundStarted":
                     _audio.Play(SoundEffect.CardDeal);
                     break;
@@ -500,14 +566,31 @@ public sealed partial class GameTableViewModel : ViewModelBase
     {
         _dispatcherQueue.TryEnqueue(() =>
         {
-            StatusMessage = $"ホストから切断されました: {reason}";
+            if (_isShutDown) return;
+            _connectionLost = true;
+            StatusMessage = $"ホストから切断されました: {reason}（Esc でタイトルに戻れます）";
+            CanPlay = false;
+            CanPass = false;
         });
     }
 
     private void ApplyClientView(ClientView view)
     {
+        if (_isShutDown) return;
         _myPlayerId = view.MyPlayerId;
         RoundInfoText = $"第 {view.RoundNumber} / {view.RoundCount} ラウンド";
+
+        // ゲスト：ホストが次のラウンドを始めたら結果画面を閉じる
+        if (IsRoundResultOpen && !IsGameOver && view.RoundNumber > _guestResultRound
+            && view.Phase is GamePhase.Dealing or GamePhase.Exchanging or GamePhase.Playing)
+        {
+            IsRoundResultOpen = false;
+            for (int i = 0; i < 4; i++)
+            {
+                GetPlayerVm(i).FinishPlace = null;
+                GetPlayerVm(i).IsPassed = false;
+            }
+        }
 
         // 状態バッジ
         IsRevolution = view.Field.IsRevolution;
@@ -613,19 +696,35 @@ public sealed partial class GameTableViewModel : ViewModelBase
     [RelayCommand]
     private void SubmitCardSelectionDecision()
     {
-        if (_engine == null) return;
+        if (_engine == null || _currentDecision is null) return;
         var selected = HumanHand.Where(vm => vm.IsSelected).Select(vm => vm.Card).ToList();
+
+        // 枚数が合わないまま閉じるとエンジンに拒否されて進めなくなるため、送信前に確認する
+        if (selected.Count < _currentDecision.MinCount || selected.Count > _currentDecision.MaxCount)
+        {
+            DecisionMessage = _currentDecision.MinCount == _currentDecision.MaxCount
+                ? $"{_currentDecision.MinCount}枚選んでください（現在 {selected.Count}枚）"
+                : $"{_currentDecision.MinCount}〜{_currentDecision.MaxCount}枚選んでください（現在 {selected.Count}枚）";
+            return;
+        }
+
+        var result = _engine.SubmitCardSelection(0, selected);
+        if (!result.IsAccepted && !result.IsDeferred)
+        {
+            DecisionMessage = $"そのカードは選べません（{result.Error}）";
+            return;
+        }
         IsDecisionDialogOpen = false;
-        _engine.SubmitCardSelection(0, selected);
         UpdateHumanHandVisuals();
     }
 
     private void HandleRoundEnded(RoundResult result)
     {
-        RoundInfoText = $"第 {_engine?.RoundNumber} / 5 ラウンド終了";
+        RoundInfoText = $"第 {_engine?.RoundNumber} / {_rules.Progress.RoundCount} ラウンド終了";
         var lines = result.Standings.Select(s => $"{s.Position}位: {GetPlayerVm(s.PlayerId).Name} ({s.Rank}) -> 得点: {s.Points}pt");
         RoundResultText = string.Join("\n", lines);
         IsRoundResultOpen = true;
+        UpdateRoundResultActions();
         PlayRoundEndSound(result);
 
         if (result.MiyakoOchiPlayerId.HasValue)
@@ -772,19 +871,59 @@ public sealed partial class GameTableViewModel : ViewModelBase
         }
     }
 
-    [RelayCommand]
-    private void StartNextRound()
+    /// <summary>ラウンド結果画面の決定ボタンの状態（文言・押せるか）を更新する。</summary>
+    private void UpdateRoundResultActions()
     {
-        IsRoundResultOpen = false;
-        if (_engine == null) return;
+        if (IsGameOver)
+        {
+            // ゲストは戦績を保存しないため、戦績画面ではなくタイトルへ戻す
+            NextRoundButtonText = IsGuest ? "タイトルに戻る" : "最終戦績を見る";
+            CanAdvanceRound = true;
+        }
+        else if (IsGuest)
+        {
+            NextRoundButtonText = "ホストの進行を待っています...";
+            CanAdvanceRound = false;
+        }
+        else
+        {
+            NextRoundButtonText = "次のラウンドへ進む";
+            CanAdvanceRound = true;
+        }
+    }
+
+    /// <summary>
+    /// ラウンド結果画面の決定操作（ボタン・Space・Enter）。
+    /// 対戦中は次のラウンドへ、ゲーム終了後は戦績画面（ゲストはタイトル）へ進む。
+    /// </summary>
+    [RelayCommand]
+    private async Task StartNextRoundAsync()
+    {
+        if (!IsRoundResultOpen || !CanAdvanceRound || _isShutDown) return;
 
         if (IsGameOver)
         {
-            ReturnToTitle();
+            IsRoundResultOpen = false;
+            if (IsGuest)
+            {
+                await LeaveToTitleAsync();
+                return;
+            }
+            // 戦績の保存が終わってから遷移する（遷移先で今回の対戦が見えるように）
+            try
+            {
+                await _saveTask;
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"戦績の保存に失敗しました: {ex.Message}";
+            }
+            _navigation.NavigateToResult();
             return;
         }
 
-        // 次のラウンドへ進む
+        if (_engine == null) return;
+        IsRoundResultOpen = false;
         for (int i = 0; i < 4; i++)
         {
             var p = GetPlayerVm(i);
@@ -793,23 +932,122 @@ public sealed partial class GameTableViewModel : ViewModelBase
         }
         FieldCards.Clear();
         _engine.StartNextRound();
-        RoundInfoText = $"第 {_engine.RoundNumber} / 5 ラウンド";
+        RoundInfoText = $"第 {_engine.RoundNumber} / {_rules.Progress.RoundCount} ラウンド";
     }
 
     private void HandleGameEnded(GameResult result)
     {
         IsGameOver = true;
         StatusMessage = "全ラウンドが終了しました！";
+        UpdateRoundResultActions();
         if (_engine != null)
         {
-            var record = MatchRecord.FromGame(_engine, result, 0, _npcProfiles, isNetwork: false);
-            _ = _historyRepo.SaveAsync(record);
+            var record = MatchRecord.FromGame(_engine, result, _myPlayerId, _npcProfiles, isNetwork: _hostSession is not null);
+            _saveTask = _historyRepo.SaveAsync(record);
         }
     }
 
-    [RelayCommand]
-    private void ReturnToTitle()
+    // ------------------------------------------------------------------
+    // タイトルへ戻る・後始末
+    // ------------------------------------------------------------------
+
+    /// <summary>後始末をしてタイトルへ戻る（確認ダイアログはページ側で出す）。</summary>
+    public async Task LeaveToTitleAsync()
     {
+        await ShutdownAsync();
         _navigation.NavigateToTitle();
+    }
+
+    /// <summary>
+    /// 対戦の後始末。何度呼んでも1回だけ実行される（タイトル復帰時と画面離脱時の両方から呼ばれる）。
+    /// <list type="bullet">
+    /// <item>1人用：NPCのタイマーを止め、NPCコントローラーを破棄し、エンジンの購読を解除する。</item>
+    /// <item>ホスト：エンジンの購読を解除し、部屋を閉じる（参加者へ退出を通知し、ポートを解放）。</item>
+    /// <item>ゲスト：購読を解除し、ホストへ退出を通知して切断する。</item>
+    /// </list>
+    /// </summary>
+    public Task ShutdownAsync() => _shutdownTask ??= ShutdownCoreAsync();
+
+    private async Task ShutdownCoreAsync()
+    {
+        _isShutDown = true;
+        IsDecisionDialogOpen = false;
+        CanPlay = false;
+        CanPass = false;
+
+        _npcScheduler?.StopAll();
+        _npcController?.Dispose();
+        _npcController = null;
+
+        if (_engine is not null && _engineHandler is not null)
+        {
+            _engine.EventOccurred -= _engineHandler;
+        }
+        _engineHandler = null;
+
+        if (_client is not null)
+        {
+            var client = _client;
+            client.ViewUpdated -= OnClientViewUpdated;
+            client.Disconnected -= OnClientDisconnected;
+            client.NoticeReceived -= OnClientNoticeReceived;
+            try
+            {
+                if (client.IsConnected)
+                {
+                    await client.LeaveAsync();
+                }
+                await client.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GameTable] 退出処理に失敗しました: {ex.Message}");
+            }
+        }
+
+        if (_hostSession is not null)
+        {
+            try
+            {
+                await _hostSession.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[GameTable] 部屋を閉じる処理に失敗しました: {ex.Message}");
+            }
+        }
+
+        // 戦績の保存は止めずに完了させる（ゲーム終了直後に戻った場合でも記録を残す）
+        try
+        {
+            await _saveTask;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[GameTable] 戦績の保存に失敗しました: {ex.Message}");
+        }
+    }
+
+    /// <summary>決定操作（Enter/Space）を判断ダイアログに適用する。処理したら true。</summary>
+    public bool TryConfirmDecisionDialog()
+    {
+        if (!IsDecisionDialogOpen) return false;
+        if (IsRevolutionChoice)
+        {
+            SubmitRevolutionDecision(true);
+        }
+        else
+        {
+            SubmitCardSelectionDecision();
+        }
+        return true;
+    }
+
+    /// <summary>取り消し操作（Esc）を判断ダイアログに適用する。革命選択なら「起こさない」。処理したら true。</summary>
+    public bool TryCancelDecisionDialog()
+    {
+        if (!IsDecisionDialogOpen || !IsRevolutionChoice) return false;
+        SubmitRevolutionDecision(false);
+        return true;
     }
 }

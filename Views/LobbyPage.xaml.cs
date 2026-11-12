@@ -1,14 +1,18 @@
 using System;
+using DTTS.Common;
 using DTTS.Services.Network;
 using DTTS.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml;
 
 namespace DTTS.Views;
 
-public sealed partial class LobbyPage : Page
+public sealed partial class LobbyPage : Page, IBackRequestHandler
 {
+    /// <inheritdoc />
+    public void OnBackRequested() => ViewModel.GoBackCommand.Execute(null);
+
     public LobbyViewModel ViewModel { get; }
 
     public LobbyPage()

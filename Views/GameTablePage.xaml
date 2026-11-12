@@ -9,7 +9,9 @@
     mc:Ignorable="d"
     Background="{StaticResource AppBackgroundDeepBrush}"
     Loaded="OnPageLoaded"
-    KeyDown="OnPageKeyDown">
+    KeyDown="OnPageKeyDown"
+    IsTabStop="True"
+    UseSystemFocusVisuals="False">
 
     <Grid x:Name="RootPageGrid">
         <!-- VisualStateManager による横フル画面 / 縦長コンパクトモードの自動切替 -->
@@ -67,7 +69,8 @@
             <!-- ヘッダー情報バー (ラウンド表示 & 戻るボタン) -->
             <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="12">
                 <Button
-                    Command="{x:Bind ViewModel.ReturnToTitleCommand}"
+                    Click="OnTitleButtonClicked"
+                    ToolTipService.ToolTip="タイトルに戻る（Esc / Alt+←）"
                     Background="Transparent"
                     BorderThickness="0"
                     Padding="6,4">
@@ -319,7 +322,8 @@
                         <TextBlock Text="{x:Bind ViewModel.RoundResultText, Mode=OneWay}" FontSize="15" LineHeight="26" Foreground="{StaticResource AppTextPrimaryBrush}" />
                     </Border>
                     <Button
-                        Content="次のラウンドへ進む"
+                        Content="{x:Bind ViewModel.NextRoundButtonText, Mode=OneWay}"
+                        IsEnabled="{x:Bind ViewModel.CanAdvanceRound, Mode=OneWay}"
                         Command="{x:Bind ViewModel.StartNextRoundCommand}"
                         HorizontalAlignment="Stretch"
                         Height="48"

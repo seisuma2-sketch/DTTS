@@ -1,15 +1,19 @@
 using System;
+using DTTS.Common;
 using DTTS.Services.Settings;
 using DTTS.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml;
 using Windows.Storage.Pickers;
 
 namespace DTTS.Views;
 
-public sealed partial class RuleSettingsPage : Page
+public sealed partial class RuleSettingsPage : Page, IBackRequestHandler
 {
+    /// <inheritdoc />
+    public void OnBackRequested() => ViewModel.GoBackCommand.Execute(null);
+
     public RuleSettingsViewModel ViewModel { get; }
 
     public RuleSettingsPage()

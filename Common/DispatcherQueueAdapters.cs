@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using DTTS.Core.Ai;
 using DTTS.Services.Network;
 using Microsoft.UI.Dispatching;
@@ -33,6 +34,10 @@ public sealed class DispatcherQueueNpcScheduler : INpcScheduler
 {
     private readonly DispatcherQueue _dispatcherQueue;
 
+    // 発火待ちのタイマー（UIスレッドでのみ操作する）。停止時にまとめて止めるために保持する
+    private readonly HashSet<DispatcherQueueTimer> _pending = new();
+    private bool _stopped;
+
     public DispatcherQueueNpcScheduler(DispatcherQueue dispatcherQueue)
     {
         _dispatcherQueue = dispatcherQueue ?? throw new ArgumentNullException(nameof(dispatcherQueue));
@@ -44,6 +49,10 @@ public sealed class DispatcherQueueNpcScheduler : INpcScheduler
 
         _dispatcherQueue.TryEnqueue(() =>
         {
+            if (_stopped)
+            {
+                return;
+            }
             if (delay <= TimeSpan.Zero)
             {
                 action();
@@ -56,10 +65,28 @@ public sealed class DispatcherQueueNpcScheduler : INpcScheduler
             timer.Tick += (s, e) =>
             {
                 timer.Stop();
-                action();
+                _pending.Remove(timer);
+                if (!_stopped)
+                {
+                    action();
+                }
             };
+            _pending.Add(timer);
             timer.Start();
         });
+    }
+
+    /// <summary>
+    /// 発火待ちのタイマーをすべて止め、以後の予約も無視する（対戦の終了・画面離脱時）。UIスレッドから呼ぶこと。
+    /// </summary>
+    public void StopAll()
+    {
+        _stopped = true;
+        foreach (var timer in _pending)
+        {
+            timer.Stop();
+        }
+        _pending.Clear();
     }
 }
 

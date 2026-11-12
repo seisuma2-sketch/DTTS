@@ -26,9 +26,51 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+
+        // 未処理例外をアプリのデータフォルダの crash.log に残す（起動直後のクラッシュの原因調査用）
+        UnhandledException += (s, e) => WriteCrashLog("XAML", e.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (s, e) => WriteCrashLog("AppDomain", e.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (s, e) => WriteCrashLog("UnobservedTask", e.Exception);    }
+
+    /// <summary>例外の内容を crash.log に追記する（ログ出力自体の失敗は無視する）。</summary>
+    internal static void WriteCrashLog(string source, Exception? exception)
+    {
+        try
+        {
+            string folder;
+            try
+            {
+                folder = ApplicationData.Current.LocalFolder.Path;
+            }
+            catch
+            {
+                folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DTTS");
+            }
+            Directory.CreateDirectory(folder);
+            File.AppendAllText(
+                Path.Combine(folder, "crash.log"),
+                $"[{DateTimeOffset.Now:O}] {source}: {exception}{Environment.NewLine}{Environment.NewLine}");
+        }
+        catch
+        {
+        }
     }
 
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        // 起動処理の例外は未処理例外ハンドラを経由せずにプロセスが終了するため、ここで記録してから再送出する
+        try
+        {
+            await LaunchAsync();
+        }
+        catch (Exception ex)
+        {
+            WriteCrashLog("OnLaunched", ex);
+            throw;
+        }
+    }
+
+    private async Task LaunchAsync()
     {
         // 1. データフォルダのパス決定
         string appDataPath;
