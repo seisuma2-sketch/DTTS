@@ -147,6 +147,7 @@
 
                     <!-- 場札リスト -->
                     <Border
+                        x:Name="FieldCardsContainer"
                         MinWidth="300"
                         MinHeight="130"
                         CornerRadius="16"
@@ -163,7 +164,7 @@
                                 FontSize="14"
                                 Visibility="{x:Bind ViewModel.FieldCards.Count, Mode=OneWay, Converter={StaticResource ZeroToVisibleConverter}}" />
 
-                            <ItemsControl ItemsSource="{x:Bind ViewModel.FieldCards, Mode=OneWay}">
+                            <ItemsControl x:Name="FieldCardsItemsControl" ItemsSource="{x:Bind ViewModel.FieldCards, Mode=OneWay}">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
                                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="-12" />
@@ -209,7 +210,7 @@
                     VerticalScrollBarVisibility="Disabled"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Bottom">
-                    <ItemsControl ItemsSource="{x:Bind ViewModel.HumanHand, Mode=OneWay}">
+                    <ItemsControl x:Name="HumanHandItemsControl" ItemsSource="{x:Bind ViewModel.HumanHand, Mode=OneWay}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <StackPanel Orientation="Horizontal" Spacing="-16" Padding="20,20,20,0" />
@@ -330,6 +331,45 @@
                 </StackPanel>
             </Border>
         </Border>
+
+        <!-- 特殊効果・役カットイン演出オーバーレイ (Composition API Spring 物理アニメーション) -->
+        <Grid
+            x:Name="CutInOverlay"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            IsHitTestVisible="False"
+            Visibility="Collapsed">
+            <Border
+                x:Name="CutInBorder"
+                CornerRadius="20"
+                Padding="36,20"
+                BorderThickness="2"
+                BorderBrush="#FFD700"
+                Background="#F010131B">
+                <StackPanel Orientation="Vertical" HorizontalAlignment="Center" Spacing="6">
+                    <TextBlock
+                        x:Name="CutInSubText"
+                        FontSize="13"
+                        FontWeight="Bold"
+                        Foreground="#AAAAAA"
+                        HorizontalAlignment="Center"
+                        Text="SPECIAL EFFECT" />
+                    <TextBlock
+                        x:Name="CutInTitleText"
+                        FontSize="36"
+                        FontWeight="Black"
+                        Foreground="#FFD700"
+                        HorizontalAlignment="Center"
+                        Text="🔥 革命 REVOLUTION" />
+                    <TextBlock
+                        x:Name="CutInDetailText"
+                        FontSize="14"
+                        Foreground="#DDDDDD"
+                        HorizontalAlignment="Center"
+                        Text="カードの強弱が逆転しました！" />
+                </StackPanel>
+            </Border>
+        </Grid>
 
     </Grid>
 </Page>

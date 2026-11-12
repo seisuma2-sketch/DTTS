@@ -1,4 +1,5 @@
 using System;
+using DTTS.Common;
 using DTTS.Core.Enums;
 using DTTS.Core.Models;
 using DTTS.Services.Skin;
@@ -28,6 +29,7 @@ public sealed partial class CardControl : UserControl
     public event EventHandler<Card>? CardDoubleClicked;
 
     private static ICardSkinManager? _skinManager;
+    private bool _isPointerOver;
 
     public static void InitializeSkinManager(ICardSkinManager skinManager)
     {
@@ -64,6 +66,14 @@ public sealed partial class CardControl : UserControl
         UpdateVisuals();
     }
 
+    /// <summary>
+    /// ポップイン登場アニメーションを再生します。
+    /// </summary>
+    public void PopIn(int delayMs = 0)
+    {
+        CompositionAnimationHelper.AnimateCardPopIn(this, delayMs);
+    }
+
     private static void OnCardChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is CardControl control) control.UpdateVisuals();
@@ -74,8 +84,35 @@ public sealed partial class CardControl : UserControl
         if (d is CardControl control)
         {
             bool sel = (bool)e.NewValue;
-            control.CardTranslate.Y = sel ? -16 : 0;
             control.SelectionOverlay.Visibility = sel ? Visibility.Visible : Visibility.Collapsed;
+
+            // Composition API による Spring 物理アニメーション（60fps）
+            float targetY = sel ? -16f : (control._isPointerOver ? -4f : 0f);
+            CompositionAnimationHelper.AnimateSpringTranslationY(control, targetY, dampingRatio: 0.62f, periodMs: 200f);
+        }
+    }
+
+    private void OnPointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        _isPointerOver = true;
+        if (!IsFacedDown)
+        {
+            CompositionAnimationHelper.AnimateSpringScale(this, 1.05f, dampingRatio: 0.7f, periodMs: 200f);
+            if (!IsSelected)
+            {
+                CompositionAnimationHelper.AnimateSpringTranslationY(this, -5f, dampingRatio: 0.7f, periodMs: 200f);
+            }
+        }
+    }
+
+    private void OnPointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        _isPointerOver = false;
+        if (!IsFacedDown)
+        {
+            CompositionAnimationHelper.AnimateSpringScale(this, 1.0f, dampingRatio: 0.7f, periodMs: 220f);
+            float targetY = IsSelected ? -16f : 0f;
+            CompositionAnimationHelper.AnimateSpringTranslationY(this, targetY, dampingRatio: 0.65f, periodMs: 220f);
         }
     }
 
@@ -85,7 +122,7 @@ public sealed partial class CardControl : UserControl
         {
             bool can = (bool)e.NewValue;
             control.DisabledOverlay.Visibility = can ? Visibility.Collapsed : Visibility.Visible;
-            control.Opacity = can ? 1.0 : 0.6;
+            CompositionAnimationHelper.AnimateOpacity(control, can ? 1.0f : 0.55f, 150);
         }
     }
 

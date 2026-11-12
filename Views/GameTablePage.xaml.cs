@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Specialized;
 using System.ComponentModel;
+using DTTS.Common;
 using DTTS.Core.Models;
 using DTTS.ViewModels;
 using DTTS.Views.Controls;
@@ -7,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using Windows.System;
 
@@ -30,6 +33,68 @@ public sealed partial class GameTablePage : Page
         ViewModel.Player1.PropertyChanged += OnPlayerPropertyChanged;
         ViewModel.Player2.PropertyChanged += OnPlayerPropertyChanged;
         ViewModel.Player3.PropertyChanged += OnPlayerPropertyChanged;
+
+        // アニメーション・カットイン演出イベント購読
+        ViewModel.CutInTriggered += OnCutInTriggered;
+        ViewModel.FieldFlushedTriggered += OnFieldFlushedTriggered;
+        ViewModel.HandDealtTriggered += OnHandDealtTriggered;
+        ViewModel.FieldCards.CollectionChanged += OnFieldCardsCollectionChanged;
+    }
+
+    private void OnCutInTriggered(object? sender, CutInEventArgs e)
+    {
+        CutInTitleText.Text = e.Title;
+        CutInSubText.Text = e.SubTitle;
+        CutInDetailText.Text = e.Detail;
+
+        var color = ThemeManager.ParseHexColor(e.AccentColorHex);
+        var brush = new SolidColorBrush(color);
+        CutInTitleText.Foreground = brush;
+        CutInBorder.BorderBrush = brush;
+
+        CompositionAnimationHelper.AnimateCutIn(CutInOverlay);
+    }
+
+    private void OnFieldFlushedTriggered(object? sender, EventArgs e)
+    {
+        CompositionAnimationHelper.AnimateFlushOut(FieldCardsContainer);
+    }
+
+    private void OnHandDealtTriggered(object? sender, EventArgs e)
+    {
+        AnimateHandDeal();
+    }
+
+    private void OnFieldCardsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action == NotifyCollectionChangedAction.Add && e.NewItems != null)
+        {
+            // 場にカードが出されたときのポップイン演出
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                for (int i = 0; i < FieldCardsItemsControl.Items.Count; i++)
+                {
+                    if (FieldCardsItemsControl.ContainerFromIndex(i) is ContentPresenter cp)
+                    {
+                        CompositionAnimationHelper.AnimateCardPopIn(cp, i * 40);
+                    }
+                }
+            });
+        }
+    }
+
+    private void AnimateHandDeal()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            for (int i = 0; i < HumanHandItemsControl.Items.Count; i++)
+            {
+                if (HumanHandItemsControl.ContainerFromIndex(i) is ContentPresenter cp)
+                {
+                    CompositionAnimationHelper.AnimateCardPopIn(cp, i * 35);
+                }
+            }
+        });
     }
 
     private NetworkGameParams? _navParams;

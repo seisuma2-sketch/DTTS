@@ -8,13 +8,11 @@
     Width="70"
     Height="102"
     PointerPressed="OnPointerPressed"
+    PointerEntered="OnPointerEntered"
+    PointerExited="OnPointerExited"
     DoubleTapped="OnDoubleTapped">
 
-    <Grid x:Name="RootGrid" RenderTransformOrigin="0.5,0.5">
-        <Grid.RenderTransform>
-            <TranslateTransform x:Name="CardTranslate" Y="0" />
-        </Grid.RenderTransform>
-
+    <Grid x:Name="RootGrid">
         <!-- カードベース外枠＆背景 -->
         <Border
             x:Name="CardBorder"
