@@ -10,6 +10,7 @@ using DTTS.Core.Ai;
 using DTTS.Core.Enums;
 using DTTS.Core.Logic;
 using DTTS.Core.Models;
+using DTTS.Services.Audio;
 using DTTS.Services.Database;
 using DTTS.Services.Network;
 using DTTS.Services.Settings;
@@ -22,6 +23,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private readonly INavigationService _navigation;
     private readonly SettingsRepository _settingsRepo;
     private readonly MatchHistoryRepository _historyRepo;
+    private readonly IAudioService _audio;
     private readonly DispatcherQueue _dispatcherQueue;
 
     private GameEngine? _engine;
@@ -104,11 +106,13 @@ public sealed partial class GameTableViewModel : ViewModelBase
     public GameTableViewModel(
         INavigationService navigation,
         SettingsRepository settingsRepo,
-        MatchHistoryRepository historyRepo)
+        MatchHistoryRepository historyRepo,
+        IAudioService audio)
     {
         _navigation = navigation;
         _settingsRepo = settingsRepo;
         _historyRepo = historyRepo;
+        _audio = audio;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
     }
 
@@ -121,6 +125,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
             _rules = netParams.Rules;
             _client.ViewUpdated += OnClientViewUpdated;
             _client.Disconnected += OnClientDisconnected;
+            _client.NoticeReceived += OnClientNoticeReceived;
 
             if (_client.View != null)
             {
@@ -200,6 +205,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
         {
             case HandsDealtEvent:
                 HandDealtTriggered?.Invoke(this, EventArgs.Empty);
+                _audio.Play(SoundEffect.CardDeal);
                 break;
 
             case DecisionRequestedEvent dr:
@@ -216,6 +222,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 GetPlayerVm(cp.PlayerId).IsPassed = false;
                 StatusMessage = $"{GetPlayerVm(cp.PlayerId).Name} がカードを出しました";
                 UpdateAllPlayersInfo();
+                _audio.Play(SoundEffect.CardPlay);
                 break;
 
             case PlayerPassedEvent pp:
@@ -230,6 +237,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 if (ea.Applied)
                 {
                     TriggerCutInForEffect(ea.Effect.Type, ea.PlayerId);
+                    PlayEffectSound(ea.Effect.Type);
                 }
                 break;
 
@@ -238,12 +246,14 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 StatusMessage = ff.Cause.HasValue ? $"場が流れました（{ff.Cause.Value}）" : "場が流れました";
                 for (int i = 0; i < 4; i++) GetPlayerVm(i).IsPassed = false;
                 FieldFlushedTriggered?.Invoke(this, EventArgs.Empty);
+                _audio.Play(SoundEffect.FieldFlush);
                 break;
 
             case PlayerFinishedEvent pf:
                 var pos = _engine.GetPlayer(pf.PlayerId).FinishPosition;
                 GetPlayerVm(pf.PlayerId).FinishPlace = pos;
                 StatusMessage = $"{GetPlayerVm(pf.PlayerId).Name} が {pos}位 であがりました！";
+                PlayFinishSound(pf.PlayerId, pf.Kind);
                 break;
 
             case RoundEndedEvent re:
@@ -341,7 +351,105 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private void ToggleCardSelection(CardViewModel cardVm)
     {
         cardVm.IsSelected = !cardVm.IsSelected;
+        _audio.Play(SoundEffect.CardSelect);
         UpdateHumanHandVisuals();
+    }
+
+    // ------------------------------------------------------------------
+    // 効果音（イベントを受けて鳴らすだけ。再生完了は待たない）
+    // ------------------------------------------------------------------
+
+    /// <summary>特殊効果に対応する効果音を鳴らす。場流し系は FieldFlushedEvent 側の音と重ねる。</summary>
+    private void PlayEffectSound(SpecialEffectType effectType)
+    {
+        if (effectType.IsRevolutionTrigger())
+        {
+            _audio.Play(SoundEffect.CutInRevolution);
+            return;
+        }
+        switch (effectType)
+        {
+            case SpecialEffectType.EightCut:
+            case SpecialEffectType.ElevenBack:
+            case SpecialEffectType.StrongElevenBack:
+            case SpecialEffectType.SpadeThreeReturn:
+            case SpecialEffectType.Emperor:
+            case SpecialEffectType.Sandstorm:
+            case SpecialEffectType.Ambulance:
+            case SpecialEffectType.Rokurokubi:
+            case SpecialEffectType.TwelveBomber:
+            case SpecialEffectType.SevenPass:
+            case SpecialEffectType.TenDiscard:
+            case SpecialEffectType.SuitLock:
+            case SpecialEffectType.NumberLock:
+            case SpecialEffectType.FourStop:
+                _audio.Play(SoundEffect.CutInSpecial);
+                break;
+        }
+    }
+
+    /// <summary>自分があがった・転落したときのジングル（他人のあがりでは鳴らさない）。</summary>
+    private void PlayFinishSound(int playerId, FinishKind kind)
+    {
+        if (playerId != _myPlayerId)
+        {
+            return;
+        }
+        switch (kind)
+        {
+            case FinishKind.Normal:
+                _audio.Play(SoundEffect.VictoryJingle);
+                break;
+            case FinishKind.Foul:
+            case FinishKind.MiyakoOchi:
+                _audio.Play(SoundEffect.DefeatJingle);
+                break;
+        }
+    }
+
+    /// <summary>ラウンド終了時：自分が下剋上を達成したら勝利、大貧民が確定したら転落のジングル。</summary>
+    private void PlayRoundEndSound(RoundResult result)
+    {
+        var mine = result.Standings.FirstOrDefault(s => s.PlayerId == _myPlayerId);
+        if (mine is null)
+        {
+            return;
+        }
+        if (result.IsGekokujo)
+        {
+            _audio.Play(mine.Rank == PlayerRank.Daifugo ? SoundEffect.VictoryJingle : SoundEffect.CutInSpecial);
+        }
+        else if (mine.Rank == PlayerRank.Daihinmin && mine.Kind is FinishKind.Normal or FinishKind.LastRemaining)
+        {
+            // 反則・都落ちはあがり確定時に鳴らし済み
+            _audio.Play(SoundEffect.DefeatJingle);
+        }
+    }
+
+    /// <summary>ゲスト（通信対戦の参加者）側：ホストからの演出用通知で効果音を鳴らす。</summary>
+    private void OnClientNoticeReceived(object? sender, NoticeDto notice)
+    {
+        _dispatcherQueue.TryEnqueue(() =>
+        {
+            switch (notice.Kind)
+            {
+                case "RoundStarted":
+                    _audio.Play(SoundEffect.CardDeal);
+                    break;
+                case "CardsPlayed":
+                    _audio.Play(SoundEffect.CardPlay);
+                    break;
+                case "FieldFlushed":
+                    _audio.Play(SoundEffect.FieldFlush);
+                    break;
+                case "EffectApplied" when notice.Applied && notice.Effect is { } effect:
+                    PlayEffectSound(effect);
+                    break;
+                case "PlayerFinished" when notice.PlayerId is { } pid && notice.FinishKind is { } kind:
+                    PlayFinishSound(pid, kind);
+                    break;
+            }
+        });
     }
 
     [RelayCommand]
@@ -518,6 +626,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
         var lines = result.Standings.Select(s => $"{s.Position}位: {GetPlayerVm(s.PlayerId).Name} ({s.Rank}) -> 得点: {s.Points}pt");
         RoundResultText = string.Join("\n", lines);
         IsRoundResultOpen = true;
+        PlayRoundEndSound(result);
 
         if (result.MiyakoOchiPlayerId.HasValue)
         {

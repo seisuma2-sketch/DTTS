@@ -27,6 +27,8 @@
   <ItemGroup>
     <Content Include="Assets\*.png" />
     <Content Include="Assets\WindowIcon.ico" />
+    <!-- 効果音（tools/audio/gen_audio.py で生成） -->
+    <Content Include="Assets\Audio\*.wav" />
   </ItemGroup>
 
   <ItemGroup>

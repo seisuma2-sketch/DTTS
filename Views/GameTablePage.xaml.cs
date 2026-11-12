@@ -139,7 +139,8 @@ public sealed partial class GameTablePage : Page
     {
         if (sender is CardControl ctrl && ctrl.DataContext is CardViewModel vm)
         {
-            vm.IsSelected = !vm.IsSelected;
+            // 選択の切り替えは ViewModel のコマンドに集約（選択音・出せるかの再計算もここで行う）
+            ViewModel.ToggleCardSelectionCommand.Execute(vm);
         }
     }
 
@@ -178,7 +179,7 @@ public sealed partial class GameTablePage : Page
                     if (_focusedCardIndex >= 0 && _focusedCardIndex < ViewModel.HumanHand.Count)
                     {
                         var vm = ViewModel.HumanHand[_focusedCardIndex];
-                        vm.IsSelected = !vm.IsSelected;
+                        ViewModel.ToggleCardSelectionCommand.Execute(vm);
                     }
                     e.Handled = true;
                 }

@@ -15,7 +15,7 @@
 
   <ItemGroup>
     <Compile Include="..\..\Core\**\*.cs" LinkBase="Core" />
-    <Compile Include="..\..\Services\**\*.cs" Exclude="..\..\Services\Skin\CardSkinManager.cs" LinkBase="Services" />
+    <Compile Include="..\..\Services\**\*.cs" Exclude="..\..\Services\Skin\CardSkinManager.cs;..\..\Services\Audio\AudioGraphService.cs" LinkBase="Services" />
     <Compile Include="*.cs" />
   </ItemGroup>
 </Project>

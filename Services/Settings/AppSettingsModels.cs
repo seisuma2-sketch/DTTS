@@ -65,6 +65,32 @@ public sealed class AppearanceSettings
 
     /// <summary>効果音を有効にする。</summary>
     public bool SoundEnabled { get; set; } = true;
+
+    /// <summary>効果音の音量（0〜100）。</summary>
+    public int SeVolume { get; set; } = DefaultSeVolume;
+
+    /// <summary>BGM の音量（0〜100）。BGM は未実装で、将来の追加に備えて値だけ保持する。</summary>
+    public int BgmVolume { get; set; } = DefaultBgmVolume;
+
+    /// <summary>効果音の既定音量。</summary>
+    public const int DefaultSeVolume = 80;
+
+    /// <summary>BGM の既定音量。</summary>
+    public const int DefaultBgmVolume = 60;
+
+    /// <summary>範囲外の値を補正する（破損データ・旧バージョンの設定対策）。</summary>
+    public void Normalize()
+    {
+        if (!Enum.IsDefined(ThemeColor))
+        {
+            ThemeColor = ThemeColor.DeepAzure;
+        }
+        SeVolume = Math.Clamp(SeVolume, 0, 100);
+        BgmVolume = Math.Clamp(BgmVolume, 0, 100);
+    }
+
+    /// <summary>0〜100 の音量を 0.0〜1.0 に変換する。</summary>
+    public static double ToUnitVolume(int volume) => Math.Clamp(volume, 0, 100) / 100.0;
 }
 
 /// <summary>NPC席の設定。</summary>

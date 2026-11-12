@@ -99,10 +99,7 @@ public sealed class SettingsRepository
     {
         var json = await GetAsync(AppearanceKey, cancellationToken).ConfigureAwait(false);
         var value = Deserialize(json, SettingsJsonContext.Default.AppearanceSettings) ?? new AppearanceSettings();
-        if (!Enum.IsDefined(value.ThemeColor))
-        {
-            value.ThemeColor = ThemeColor.DeepAzure;
-        }
+        value.Normalize();
         return value;
     }
 

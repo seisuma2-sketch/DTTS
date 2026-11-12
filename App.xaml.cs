@@ -3,6 +3,7 @@ using System.IO;
 using System.Net.Http;
 using System.Threading.Tasks;
 using DTTS.Common;
+using DTTS.Services.Audio;
 using DTTS.Services.Database;
 using DTTS.Services.Feedback;
 using DTTS.Services.Network;
@@ -85,6 +86,10 @@ public partial class App : Application
             );
         });
 
+        // 効果音（AudioGraph）
+        var audio = AudioGraphService.CreateDefault();
+        services.AddSingleton<IAudioService>(audio);
+
         // ナビゲーション
         services.AddSingleton<INavigationService, NavigationService>();
 
@@ -118,6 +123,10 @@ public partial class App : Application
         {
             skinManager.SetActivePack(appearance.SkinPackId);
         }
+
+        // 効果音：設定を反映し、読み込みはバックグラウンドで行う（起動を待たせない）
+        audio.ApplySettings(appearance);
+        _ = audio.InitializeAsync();
 
         // 6. ウィンドウ表示
         _window = new MainWindow();

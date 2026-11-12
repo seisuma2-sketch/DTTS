@@ -101,6 +101,35 @@ internal static class ServicesTests
         await settings.SetAsync(SettingsRepository.AppearanceKey, "{\"themeColor\":\"NoSuchColor\"}");
         Check((await settings.LoadAppearanceAsync()).ThemeColor == ThemeColor.DeepAzure, "bad enum -> default");
 
+        // サウンド設定
+        var defaults = await settings.LoadAppearanceAsync();
+        Check(defaults.SoundEnabled && defaults.SeVolume == AppearanceSettings.DefaultSeVolume && defaults.BgmVolume == AppearanceSettings.DefaultBgmVolume, "sound defaults when missing");
+        await settings.SaveAppearanceAsync(new AppearanceSettings { SoundEnabled = false, SeVolume = 35, BgmVolume = 0 });
+        var snd = await settings.LoadAppearanceAsync();
+        Check(!snd.SoundEnabled && snd.SeVolume == 35 && snd.BgmVolume == 0, "sound settings roundtrip");
+        await settings.SetAsync(SettingsRepository.AppearanceKey, "{\"seVolume\":250,\"bgmVolume\":-5}");
+        var clamped = await settings.LoadAppearanceAsync();
+        Check(clamped.SeVolume == 100 && clamped.BgmVolume == 0, "volume clamped");
+        Check(AppearanceSettings.ToUnitVolume(80) == 0.8 && AppearanceSettings.ToUnitVolume(999) == 1.0, "unit volume");
+        Check(DTTS.Services.Audio.SoundEffectCatalog.ToGain(0.5) == 0.25 && DTTS.Services.Audio.SoundEffectCatalog.ToGain(double.NaN) == 0.0
+            && DTTS.Services.Audio.SoundEffectCatalog.ToGain(2.0) == 1.0, "gain curve");
+
+        // 全効果音のファイルが実在し、44.1kHz/16bit の PCM であること
+        var audioDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Assets", "Audio"));
+        foreach (var effect in Enum.GetValues<DTTS.Services.Audio.SoundEffect>())
+        {
+            var path = Path.Combine(audioDir, DTTS.Services.Audio.SoundEffectCatalog.FileName(effect));
+            bool ok = File.Exists(path);
+            if (ok)
+            {
+                var header = File.ReadAllBytes(path).AsSpan(0, 44).ToArray();
+                ok = Encoding.ASCII.GetString(header, 0, 4) == "RIFF" && Encoding.ASCII.GetString(header, 8, 4) == "WAVE"
+                    && BitConverter.ToInt16(header, 20) == 1 && BitConverter.ToInt32(header, 24) == 44100 && BitConverter.ToInt16(header, 34) == 16;
+            }
+            Check(ok, $"sound file {effect}: {path}");
+            Check(DTTS.Services.Audio.SoundEffectCatalog.Polyphony(effect) >= 1, $"polyphony {effect}");
+        }
+
         var npc = await settings.LoadNpcAsync();
         Check(npc.Seats.Count == 3, "npc default seats");
         npc.Seats[1].Difficulty = NpcDifficulty.Hard;

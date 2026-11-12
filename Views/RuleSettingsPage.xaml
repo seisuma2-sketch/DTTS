@@ -105,6 +105,40 @@
                                 <TextBlock Text="ZIPからスキンパックをインポート..." FontSize="13" Foreground="{StaticResource AppAccentBrush}" />
                             </Button>
                         </StackPanel>
+
+                        <!-- サウンド（変更は即座に反映・保存） -->
+                        <TextBlock Text="🔊 サウンド" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" Margin="0,8,0,0" />
+                        <ToggleSwitch Header="効果音" IsOn="{x:Bind ViewModel.SoundEnabled, Mode=TwoWay}" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <Slider
+                                Header="効果音の音量"
+                                Width="320"
+                                Minimum="0"
+                                Maximum="100"
+                                StepFrequency="1"
+                                TickFrequency="10"
+                                Value="{x:Bind ViewModel.SeVolume, Mode=TwoWay}"
+                                IsEnabled="{x:Bind ViewModel.SoundEnabled, Mode=OneWay}" />
+                            <Button
+                                VerticalAlignment="Bottom"
+                                Command="{x:Bind ViewModel.PreviewSoundCommand}"
+                                IsEnabled="{x:Bind ViewModel.SoundEnabled, Mode=OneWay}"
+                                Background="#262A36"
+                                CornerRadius="6"
+                                BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                                BorderThickness="1">
+                                <TextBlock Text="▶ 試聴" FontSize="13" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                            </Button>
+                        </StackPanel>
+                        <Slider
+                            Header="BGM の音量（BGM は今後追加予定）"
+                            Width="320"
+                            HorizontalAlignment="Left"
+                            Minimum="0"
+                            Maximum="100"
+                            StepFrequency="1"
+                            TickFrequency="10"
+                            Value="{x:Bind ViewModel.BgmVolume, Mode=TwoWay}" />
                     </StackPanel>
                 </Border>
 
