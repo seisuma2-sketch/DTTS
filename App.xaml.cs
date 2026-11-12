@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using DTTS.Common;
 using DTTS.Services.Database;
 using DTTS.Services.Feedback;
+using DTTS.Services.Network;
 using DTTS.Services.Skin;
 using DTTS.ViewModels;
 using DTTS.Views.Controls;
@@ -60,6 +61,13 @@ public partial class App : Application
 
         // ネットワーク & 接続モニター
         services.AddSingleton<IConnectivityMonitor, WindowsConnectivityMonitor>();
+        services.AddSingleton<INetworkService>(sp =>
+        {
+            var dispatcher = new DispatcherQueueSerialDispatcher(DispatcherQueue.GetForCurrentThread());
+            var settingsRepo = sp.GetRequiredService<SettingsRepository>();
+            var clientId = settingsRepo.GetAsync("device_id").GetAwaiter().GetResult() ?? Guid.NewGuid().ToString("N");
+            return new LanNetworkService(dispatcher, clientId);
+        });
 
         // フィードバックサービス
         services.AddSingleton(sp =>
@@ -82,6 +90,7 @@ public partial class App : Application
 
         // ViewModels
         services.AddTransient<TitleViewModel>();
+        services.AddTransient<LobbyViewModel>();
         services.AddTransient<GameTableViewModel>();
         services.AddTransient<RuleSettingsViewModel>();
         services.AddTransient<ResultViewModel>();

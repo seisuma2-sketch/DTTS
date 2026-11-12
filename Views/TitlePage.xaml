@@ -48,6 +48,21 @@
                     </Button>
 
                     <Button
+                        Command="{x:Bind ViewModel.OpenLobbyCommand}"
+                        HorizontalAlignment="Stretch"
+                        Height="48"
+                        CornerRadius="{StaticResource ButtonCornerRadius}"
+                        Background="{StaticResource AppBackgroundElevatedBrush}"
+                        Foreground="{StaticResource AppTextPrimaryBrush}"
+                        BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                        BorderThickness="1">
+                        <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
+                            <TextBlock Text="📶" FontSize="18" VerticalAlignment="Center" />
+                            <TextBlock Text="通信対戦（ローカル LAN 対戦）" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+
+                    <Button
                         Command="{x:Bind ViewModel.OpenRuleSettingsCommand}"
                         HorizontalAlignment="Stretch"
                         Height="46"

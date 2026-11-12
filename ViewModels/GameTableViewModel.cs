@@ -11,6 +11,7 @@ using DTTS.Core.Enums;
 using DTTS.Core.Logic;
 using DTTS.Core.Models;
 using DTTS.Services.Database;
+using DTTS.Services.Network;
 using DTTS.Services.Settings;
 using Microsoft.UI.Dispatching;
 
@@ -28,6 +29,10 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private RuleSettings _rules = RuleSettings.CreateDefault();
     private PendingDecision? _currentDecision;
     private Dictionary<int, NpcProfile> _npcProfiles = new();
+
+    private GameHostSession? _hostSession;
+    private RemoteGameClient? _client;
+    private int _myPlayerId = 0;
 
     // --- プレイヤー ---
     public PlayerViewModel Player0 { get; } = new(0, "あなた", true);
@@ -103,8 +108,38 @@ public sealed partial class GameTableViewModel : ViewModelBase
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
     }
 
-    public async Task InitializeAsync()
+    public async Task InitializeAsync(NetworkGameParams? netParams = null)
     {
+        if (netParams?.Client != null)
+        {
+            // ゲスト（クライアント）モード
+            _client = netParams.Client;
+            _rules = netParams.Rules;
+            _client.ViewUpdated += OnClientViewUpdated;
+            _client.Disconnected += OnClientDisconnected;
+
+            if (_client.View != null)
+            {
+                ApplyClientView(_client.View);
+            }
+            return;
+        }
+
+        if (netParams?.HostSession != null)
+        {
+            // ホストモード
+            _hostSession = netParams.HostSession;
+            _engine = _hostSession.Engine ?? throw new InvalidOperationException("Host Engine is null");
+            _rules = netParams.Rules;
+            _myPlayerId = 0;
+
+            _engine.EventOccurred += (sender, ev) => OnEngineEvent(ev);
+            UpdateAllPlayersInfo();
+            UpdateHumanHandVisuals();
+            return;
+        }
+
+        // 1人用モード
         _rules = await _settingsRepo.LoadRulesAsync();
         var npcSettings = await _settingsRepo.LoadNpcAsync();
 
@@ -297,27 +332,122 @@ public sealed partial class GameTableViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void PlaySelectedCards()
+    private async Task PlaySelectedCardsAsync()
     {
-        if (_engine == null) return;
-
         var selected = HumanHand.Where(vm => vm.IsSelected).Select(vm => vm.Card).ToList();
         if (selected.Count == 0) return;
 
-        var result = _engine.SubmitPlay(0, selected);
-        if (result.IsAccepted)
+        if (_client != null)
         {
-            HumanHand.Clear();
-            UpdateHumanHandVisuals();
+            await _client.PlayAsync(selected);
+            return;
+        }
+
+        if (_engine != null)
+        {
+            var result = _engine.SubmitPlay(_myPlayerId, selected);
+            if (result.IsAccepted)
+            {
+                HumanHand.Clear();
+                UpdateHumanHandVisuals();
+            }
         }
     }
 
     [RelayCommand]
-    private void Pass()
+    private async Task PassAsync()
     {
-        if (_engine == null) return;
-        _engine.SubmitPass(0);
-        Player0.IsPassed = true;
+        if (_client != null)
+        {
+            await _client.PassAsync();
+            return;
+        }
+
+        if (_engine != null)
+        {
+            _engine.SubmitPass(_myPlayerId);
+            GetPlayerVm(_myPlayerId).IsPassed = true;
+        }
+    }
+
+    private void OnClientViewUpdated(object? sender, ClientView view)
+    {
+        _dispatcherQueue.TryEnqueue(() => ApplyClientView(view));
+    }
+
+    private void OnClientDisconnected(object? sender, string reason)
+    {
+        _dispatcherQueue.TryEnqueue(() =>
+        {
+            StatusMessage = $"ホストから切断されました: {reason}";
+        });
+    }
+
+    private void ApplyClientView(ClientView view)
+    {
+        _myPlayerId = view.MyPlayerId;
+        RoundInfoText = $"第 {view.RoundNumber} / {view.RoundCount} ラウンド";
+
+        // 状態バッジ
+        IsRevolution = view.Field.IsRevolution;
+        IsElevenBack = view.Field.IsElevenBack;
+        
+        var lockList = new List<string>();
+        if (view.Field.LockedSuits != null && view.Field.LockedSuits.Length > 0) lockList.Add("スート縛り");
+        if (view.Field.IsNumberLocked) lockList.Add("数しば");
+        LockDescription = lockList.Count > 0 ? $"【{string.Join("+", lockList)}】" : "";
+
+        // 場札
+        FieldCards.Clear();
+        if (view.Field.CurrentCardIds != null)
+        {
+            foreach (var id in view.Field.CurrentCardIds)
+            {
+                FieldCards.Add(Card.FromId(id));
+            }
+        }
+
+        // プレイヤー情報
+        foreach (var p in view.Players)
+        {
+            var vm = GetPlayerVm(p.Id);
+            vm.Name = p.Name;
+            vm.HandCount = p.HandCount;
+            vm.Rank = p.Rank;
+            vm.TotalScore = p.TotalScore;
+            vm.IsTurn = (view.Decision?.PlayerId == p.Id);
+            vm.IsThinking = (view.Decision?.PlayerId == p.Id && p.Id != _myPlayerId);
+        }
+
+        // 手札
+        var handCards = view.MyHand != null ? view.MyHand.Select(Card.FromId).ToList() : new List<Card>();
+        var currentCards = HumanHand.Select(vm => vm.Card).ToList();
+        if (!currentCards.SequenceEqual(handCards))
+        {
+            HumanHand.Clear();
+            foreach (var c in handCards)
+            {
+                HumanHand.Add(new CardViewModel(c));
+            }
+        }
+
+        // 判断・合法手
+        bool isMyDecision = (view.Decision?.PlayerId == _myPlayerId);
+        CanPass = isMyDecision && (view.Decision?.CanPass ?? false);
+
+        var legalSet = view.LegalPlays != null
+            ? view.LegalPlays.Select(arr => arr.Select(Card.FromId).ToList()).ToList()
+            : new List<List<Card>>();
+
+        var selected = HumanHand.Where(vm => vm.IsSelected).Select(vm => vm.Card).ToList();
+        CanPlay = legalSet.Any(lp => lp.Count == selected.Count && lp.All(selected.Contains));
+
+        foreach (var cardVm in HumanHand)
+        {
+            cardVm.CanPlay = !isMyDecision || legalSet.Any(lp => lp.Contains(cardVm.Card));
+        }
+
+        StatusMessage = isMyDecision ? "あなたのターンです" : "相手のターンです...";
     }
 
     private void HandleDecisionRequested(PendingDecision dec)

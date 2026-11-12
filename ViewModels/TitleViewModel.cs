@@ -24,6 +24,12 @@ public sealed partial class TitleViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    private void OpenLobby()
+    {
+        _navigation.NavigateToLobby();
+    }
+
+    [RelayCommand]
     private void OpenRuleSettings()
     {
         _navigation.NavigateToRuleSettings();

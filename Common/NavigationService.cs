@@ -13,6 +13,7 @@ public interface INavigationService
     void GoBack();
     bool Navigate(Type pageType, object? parameter = null);
     bool NavigateToTitle();
+    bool NavigateToLobby();
     bool NavigateToGameTable(object? parameter = null);
     bool NavigateToRuleSettings();
     bool NavigateToResult(object? parameter = null);
@@ -41,6 +42,7 @@ public sealed class NavigationService : INavigationService
     }
 
     public bool NavigateToTitle() => Navigate(typeof(Views.TitlePage));
+    public bool NavigateToLobby() => Navigate(typeof(Views.LobbyPage));
     public bool NavigateToGameTable(object? parameter = null) => Navigate(typeof(Views.GameTablePage), parameter);
     public bool NavigateToRuleSettings() => Navigate(typeof(Views.RuleSettingsPage));
     public bool NavigateToResult(object? parameter = null) => Navigate(typeof(Views.ResultPage), parameter);

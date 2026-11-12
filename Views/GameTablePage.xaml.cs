@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Navigation;
 using Windows.System;
 
 namespace DTTS.Views;
@@ -31,9 +32,17 @@ public sealed partial class GameTablePage : Page
         ViewModel.Player3.PropertyChanged += OnPlayerPropertyChanged;
     }
 
+    private NetworkGameParams? _navParams;
+
+    protected override void OnNavigatedTo(NavigationEventArgs e)
+    {
+        base.OnNavigatedTo(e);
+        _navParams = e.Parameter as NetworkGameParams;
+    }
+
     private async void OnPageLoaded(object sender, RoutedEventArgs e)
     {
-        await ViewModel.InitializeAsync();
+        await ViewModel.InitializeAsync(_navParams);
         UpdateAllPanels();
         Focus(FocusState.Programmatic);
     }
