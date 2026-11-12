@@ -4,6 +4,7 @@
     xmlns:conv="using:DTTS.Common.Converters">
 
     <!-- 値コンバーター -->
+    <conv:HexToBrushConverter x:Key="HexToBrushConverter" />
     <conv:StringToVisibilityConverter x:Key="StringToVisibilityConverter" />
     <conv:ZeroToVisibleConverter x:Key="ZeroToVisibleConverter" />
     <conv:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibilityConverter" />

@@ -4,8 +4,11 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:db="using:DTTS.Services.Database"
+    xmlns:vm="using:DTTS.ViewModels"
     mc:Ignorable="d"
-    Background="{StaticResource AppBackgroundDeepBrush}">
+    Background="{StaticResource AppBackgroundDeepBrush}"
+    Loaded="OnPageLoaded">
 
     <Grid Padding="24">
         <Grid.RowDefinitions>
@@ -13,16 +16,167 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="16" Margin="0,0,0,24">
-            <Button Click="OnBackClicked" Background="Transparent" BorderThickness="0" Padding="8,4">
-                <TextBlock Text="← タイトルへ戻る" Foreground="{StaticResource AppTextSecondaryBrush}" FontSize="14" />
-            </Button>
-            <TextBlock Text="通算戦績 ＆ 履歴" FontSize="20" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
-        </StackPanel>
+        <!-- ヘッダー -->
+        <Grid Grid.Row="0" Margin="0,0,0,20">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-        <ScrollViewer Grid.Row="1">
-            <TextBlock Text="SQLiteに蓄積された通算戦績・履歴を表示します。" Foreground="{StaticResource AppTextSecondaryBrush}" />
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                <Button Command="{x:Bind ViewModel.GoBackCommand}" Background="Transparent" BorderThickness="0" Padding="8,4">
+                    <TextBlock Text="← タイトルへ戻る" Foreground="{StaticResource AppTextSecondaryBrush}" FontSize="14" />
+                </Button>
+                <TextBlock Text="通算戦績 ＆ 履歴" FontSize="22" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <Button
+                Grid.Column="2"
+                Command="{x:Bind ViewModel.ClearHistoryCommand}"
+                Background="{StaticResource AppBackgroundElevatedBrush}"
+                BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                BorderThickness="1"
+                CornerRadius="{StaticResource ButtonCornerRadius}">
+                <TextBlock Text="戦績をリセット" FontSize="13" Foreground="{StaticResource AppTextMutedBrush}" />
+            </Button>
+        </Grid>
+
+        <!-- メインコンテンツ -->
+        <ScrollViewer Grid.Row="1" Padding="0,0,16,0">
+            <StackPanel Spacing="24" MaxWidth="800" HorizontalAlignment="Left">
+
+                <!-- 1. 総合統計サマリーカード -->
+                <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- 総対戦数 -->
+                    <Border Grid.Column="0" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="総対戦数" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                            <TextBlock Text="{x:Bind ViewModel.TotalGames, Mode=OneWay}" FontSize="24" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 勝率 (1位率) -->
+                    <Border Grid.Column="1" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="勝率 (1位率)" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                            <TextBlock Text="{x:Bind ViewModel.WinRateText, Mode=OneWay}" FontSize="24" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 平均順位 -->
+                    <Border Grid.Column="2" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="平均順位" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                            <TextBlock Text="{x:Bind ViewModel.AveragePlaceText, Mode=OneWay}" FontSize="24" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 最高得点 -->
+                    <Border Grid.Column="3" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="16">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="最高得点" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                            <TextBlock Text="{x:Bind ViewModel.BestScore, Mode=OneWay}" FontSize="24" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <!-- 2. 階級獲得分布 -->
+                <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
+                    <StackPanel Spacing="16">
+                        <TextBlock Text="🏆 ラウンド最終階級の獲得回数" FontSize="15" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                        
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0" CornerRadius="8" Background="#222018" BorderBrush="#504820" BorderThickness="1" Padding="12">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="大富豪" FontSize="12" Foreground="#EBC020" FontWeight="Bold" />
+                                    <TextBlock Text="{x:Bind ViewModel.DaifugoCount, Mode=OneWay}" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="1" CornerRadius="8" Background="#18202A" BorderBrush="#204060" BorderThickness="1" Padding="12">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="富豪" FontSize="12" Foreground="#40A0F0" FontWeight="Bold" />
+                                    <TextBlock Text="{x:Bind ViewModel.FugoCount, Mode=OneWay}" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="2" CornerRadius="8" Background="#261E1A" BorderBrush="#503020" BorderThickness="1" Padding="12">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="貧民" FontSize="12" Foreground="#D07050" FontWeight="Bold" />
+                                    <TextBlock Text="{x:Bind ViewModel.HinminCount, Mode=OneWay}" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="3" CornerRadius="8" Background="#281818" BorderBrush="#602020" BorderThickness="1" Padding="12">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="大貧民" FontSize="12" Foreground="#E05050" FontWeight="Bold" />
+                                    <TextBlock Text="{x:Bind ViewModel.DaihinminCount, Mode=OneWay}" FontSize="20" FontWeight="Bold" Foreground="#FFFFFF" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- 3. 最近の対戦履歴一覧 -->
+                <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
+                    <StackPanel Spacing="16">
+                        <TextBlock Text="📜 最近の対戦履歴（直近15戦）" FontSize="15" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+
+                        <TextBlock
+                            Text="対戦履歴はまだありません"
+                            Foreground="{StaticResource AppTextMutedBrush}"
+                            Visibility="{x:Bind ViewModel.RecentMatches.Count, Mode=OneWay, Converter={StaticResource ZeroToVisibleConverter}}" />
+
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.RecentMatches}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:MatchHistoryItemViewModel">
+                                    <Border Margin="0,0,0,8" Padding="12" CornerRadius="8" Background="#1A1D24" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <!-- 順位バッジ -->
+                                            <Border Grid.Column="0" CornerRadius="6" Background="{StaticResource AppAccentBrush}" Padding="8,4" VerticalAlignment="Center">
+                                                <TextBlock Text="{x:Bind Place}" FontWeight="Bold" FontSize="13" Foreground="{StaticResource AppOnAccentBrush}" />
+                                            </Border>
+
+                                            <!-- 日時とラウンド数 -->
+                                            <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" Spacing="2">
+                                                <TextBlock Text="{x:Bind PlayedAtText}" FontSize="13" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                                <TextBlock Text="{x:Bind RoundsText}" FontSize="11" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                            </StackPanel>
+
+                                            <!-- 獲得得点 -->
+                                            <StackPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right">
+                                                <TextBlock Text="{x:Bind ScoreText}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+            </StackPanel>
         </ScrollViewer>
     </Grid>
 </Page>
-

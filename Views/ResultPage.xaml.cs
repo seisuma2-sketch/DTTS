@@ -1,4 +1,5 @@
-using DTTS.Common;
+using System;
+using DTTS.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -7,17 +8,16 @@ namespace DTTS.Views;
 
 public sealed partial class ResultPage : Page
 {
-    private readonly INavigationService _navigation;
+    public ResultViewModel ViewModel { get; }
 
     public ResultPage()
     {
-        _navigation = App.Services.GetRequiredService<INavigationService>();
+        ViewModel = App.Services.GetRequiredService<ResultViewModel>();
         InitializeComponent();
     }
 
-    private void OnBackClicked(object sender, RoutedEventArgs e)
+    private async void OnPageLoaded(object sender, RoutedEventArgs e)
     {
-        _navigation.NavigateToTitle();
+        await ViewModel.InitializeAsync();
     }
 }
-

@@ -8,28 +8,60 @@
     xmlns:vm="using:DTTS.ViewModels"
     mc:Ignorable="d"
     Background="{StaticResource AppBackgroundDeepBrush}"
-    Loaded="OnPageLoaded">
+    Loaded="OnPageLoaded"
+    KeyDown="OnPageKeyDown">
 
-    <Grid>
-        <!-- 背景のマット調グリーン/ダークテーブル -->
+    <Grid x:Name="RootPageGrid">
+        <!-- VisualStateManager による横フル画面 / 縦長コンパクトモードの自動切替 -->
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="LayoutStates">
+                <!-- 1. 横フル画面モード (幅800px以上: 4人囲み配置) -->
+                <VisualState x:Name="WideLayout">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="800" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="OpponentRow.Visibility" Value="Collapsed" />
+                        <Setter Target="Player2Panel.Visibility" Value="Visible" />
+                        <Setter Target="Player3Panel.Visibility" Value="Visible" />
+                        <Setter Target="Player1Panel.Visibility" Value="Visible" />
+                    </VisualState.Setters>
+                </VisualState>
+
+                <!-- 2. 縦長・コンパクトモード (幅800px未満: 上部3人スリム並び) -->
+                <VisualState x:Name="CompactLayout">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="0" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="OpponentRow.Visibility" Value="Visible" />
+                        <Setter Target="Player2Panel.Visibility" Value="Collapsed" />
+                        <Setter Target="Player3Panel.Visibility" Value="Collapsed" />
+                        <Setter Target="Player1Panel.Visibility" Value="Collapsed" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+
+        <!-- 背景テーブル枠 -->
         <Border
-            Margin="20"
+            Margin="16"
             CornerRadius="24"
             Background="#14171E"
             BorderBrush="{StaticResource AppBorderSubtleBrush}"
             BorderThickness="2" />
 
-        <!-- メイン対戦レイアウト (4人配置) -->
-        <Grid Margin="32">
+        <!-- メイン対戦レイアウト -->
+        <Grid Margin="24">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="200" />
+                <ColumnDefinition Width="180" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="200" />
+                <ColumnDefinition Width="180" />
             </Grid.ColumnDefinitions>
 
             <!-- ヘッダー情報バー (ラウンド表示 & 戻るボタン) -->
@@ -39,7 +71,7 @@
                     Background="Transparent"
                     BorderThickness="0"
                     Padding="6,4">
-                    <TextBlock Text="← タイトルへ" Foreground="{StaticResource AppTextSecondaryBrush}" FontSize="13" />
+                    <TextBlock Text="← タイトル" Foreground="{StaticResource AppTextSecondaryBrush}" FontSize="13" />
                 </Button>
                 <TextBlock
                     Text="{x:Bind ViewModel.RoundInfoText, Mode=OneWay}"
@@ -49,7 +81,16 @@
                     VerticalAlignment="Center" />
             </StackPanel>
 
-            <!-- 北 (Seat 2) -->
+            <!-- コンパクトモード用：上部3人並びパネル (幅800px未満で表示) -->
+            <Grid x:Name="OpponentRow" Grid.Row="0" Grid.Column="1" HorizontalAlignment="Center" Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <ctrl:PlayerPanelControl x:Name="Player3SlimPanel" MinWidth="130" />
+                    <ctrl:PlayerPanelControl x:Name="Player2SlimPanel" MinWidth="130" />
+                    <ctrl:PlayerPanelControl x:Name="Player1SlimPanel" MinWidth="130" />
+                </StackPanel>
+            </Grid>
+
+            <!-- 北 (Seat 2: WideLayout時) -->
             <ctrl:PlayerPanelControl
                 x:Name="Player2Panel"
                 Grid.Row="0"
@@ -57,7 +98,7 @@
                 HorizontalAlignment="Center"
                 VerticalAlignment="Top" />
 
-            <!-- 西 (Seat 3) -->
+            <!-- 西 (Seat 3: WideLayout時) -->
             <ctrl:PlayerPanelControl
                 x:Name="Player3Panel"
                 Grid.Row="1"
@@ -65,7 +106,7 @@
                 HorizontalAlignment="Left"
                 VerticalAlignment="Center" />
 
-            <!-- 東 (Seat 1) -->
+            <!-- 東 (Seat 1: WideLayout時) -->
             <ctrl:PlayerPanelControl
                 x:Name="Player1Panel"
                 Grid.Row="1"
@@ -106,8 +147,8 @@
 
                     <!-- 場札リスト -->
                     <Border
-                        MinWidth="320"
-                        MinHeight="140"
+                        MinWidth="300"
+                        MinHeight="130"
                         CornerRadius="16"
                         Background="#1A1E27"
                         BorderBrush="{StaticResource AppBorderSubtleBrush}"
@@ -148,7 +189,7 @@
             </Grid>
 
             <!-- 南 (Seat 0: 自分) & 手札 & アクション操作 -->
-            <Grid Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,16,0,0">
+            <Grid Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,12,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -187,30 +228,36 @@
                     </ItemsControl>
                 </ScrollViewer>
 
-                <!-- 操作ボタン群 (パス / 出す) -->
+                <!-- 操作ボタン群 (パス / 出す) & ショートカット案内 -->
                 <StackPanel Grid.Column="2" Spacing="8" VerticalAlignment="Bottom" Margin="12,0,0,0">
                     <Button
                         Command="{x:Bind ViewModel.PassCommand}"
                         IsEnabled="{x:Bind ViewModel.CanPass, Mode=OneWay}"
                         Width="100"
-                        Height="44"
+                        Height="40"
                         CornerRadius="{StaticResource ButtonCornerRadius}"
                         Background="{StaticResource AppBackgroundElevatedBrush}"
                         Foreground="{StaticResource AppTextPrimaryBrush}"
                         BorderBrush="{StaticResource AppBorderSubtleBrush}"
                         BorderThickness="1">
-                        <TextBlock Text="パス" FontSize="14" FontWeight="SemiBold" />
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="パス" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Text="[BS]" FontSize="10" Foreground="{StaticResource AppTextMutedBrush}" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Button>
 
                     <Button
                         Command="{x:Bind ViewModel.PlaySelectedCardsCommand}"
                         IsEnabled="{x:Bind ViewModel.CanPlay, Mode=OneWay}"
                         Width="100"
-                        Height="48"
+                        Height="44"
                         CornerRadius="{StaticResource ButtonCornerRadius}"
                         Background="{StaticResource AppAccentBrush}"
                         Foreground="{StaticResource AppOnAccentBrush}">
-                        <TextBlock Text="出す" FontSize="16" FontWeight="Bold" />
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="出す" FontSize="15" FontWeight="Bold" />
+                            <TextBlock Text="[Enter]" FontSize="10" Foreground="{StaticResource AppOnAccentBrush}" Opacity="0.8" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Button>
                 </StackPanel>
             </Grid>
@@ -286,4 +333,3 @@
 
     </Grid>
 </Page>
-

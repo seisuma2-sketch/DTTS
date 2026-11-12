@@ -4,8 +4,11 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:settings="using:DTTS.Services.Settings"
+    xmlns:vm="using:DTTS.ViewModels"
     mc:Ignorable="d"
-    Background="{StaticResource AppBackgroundDeepBrush}">
+    Background="{StaticResource AppBackgroundDeepBrush}"
+    Loaded="OnPageLoaded">
 
     <Grid Padding="24">
         <Grid.RowDefinitions>
@@ -13,18 +16,237 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="16" Margin="0,0,0,24">
-            <Button x:Name="BackButton" Click="OnBackClicked" Background="Transparent" BorderThickness="0" Padding="8,4">
-                <TextBlock Text="← タイトルへ戻る" Foreground="{StaticResource AppTextSecondaryBrush}" FontSize="14" />
-            </Button>
-            <TextBlock Text="ルール ＆ 外見設定" FontSize="20" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
-        </StackPanel>
+        <!-- ヘッダーバー -->
+        <Grid Grid.Row="0" Margin="0,0,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-        <ScrollViewer Grid.Row="1">
-            <StackPanel Spacing="16" MaxWidth="600" HorizontalAlignment="Left">
-                <TextBlock Text="全12カテゴリのローカルルール設定、テーマカラー（8色）、スキン設定は次回フェーズで詳細UIを展開します。" Foreground="{StaticResource AppTextSecondaryBrush}" />
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                <Button Command="{x:Bind ViewModel.GoBackCommand}" Background="Transparent" BorderThickness="0" Padding="8,4">
+                    <TextBlock Text="← タイトルへ戻る" Foreground="{StaticResource AppTextSecondaryBrush}" FontSize="14" />
+                </Button>
+                <TextBlock Text="設定 ＆ カスタマイズ" FontSize="22" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12">
+                <Button
+                    Command="{x:Bind ViewModel.ResetRulesToDefaultCommand}"
+                    Background="{StaticResource AppBackgroundElevatedBrush}"
+                    BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                    BorderThickness="1"
+                    CornerRadius="{StaticResource ButtonCornerRadius}">
+                    <TextBlock Text="ルールを既定に戻す" FontSize="13" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                </Button>
+                <Button
+                    Command="{x:Bind ViewModel.SaveAllCommand}"
+                    Background="{StaticResource AppAccentBrush}"
+                    Foreground="{StaticResource AppOnAccentBrush}"
+                    CornerRadius="{StaticResource ButtonCornerRadius}">
+                    <TextBlock Text="設定を保存" FontSize="13" FontWeight="Bold" />
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- メイン設定リスト -->
+        <ScrollViewer Grid.Row="1" Padding="0,0,16,0">
+            <StackPanel Spacing="24" MaxWidth="800" HorizontalAlignment="Left">
+
+                <!-- ステータスメッセージ通知 -->
+                <TextBlock
+                    Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+                    Foreground="{StaticResource AppAccentBrush}"
+                    FontSize="14"
+                    FontWeight="Medium"
+                    Visibility="{x:Bind ViewModel.StatusMessage, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}" />
+
+                <!-- 1. 外見設定（テーマカラー 8色 & スキン） -->
+                <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
+                    <StackPanel Spacing="16">
+                        <TextBlock Text="🎨 テーマカラー（8色プリセット）" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                        
+                        <!-- 8色のカラーピッカーボタン -->
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.AvailableThemes}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <VariableSizedWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="4" ItemWidth="180" ItemHeight="44" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="settings:ThemeColorInfo">
+                                    <Button
+                                        Click="OnThemeButtonClicked"
+                                        Tag="{x:Bind Color}"
+                                        HorizontalAlignment="Stretch"
+                                        VerticalAlignment="Stretch"
+                                        Margin="4"
+                                        CornerRadius="6"
+                                        Background="#1E222B"
+                                        BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                                        BorderThickness="1">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <Border Width="16" Height="16" CornerRadius="8" Background="{x:Bind AccentHex, Converter={StaticResource HexToBrushConverter}}" />
+                                            <TextBlock Text="{x:Bind DisplayName}" FontSize="12" Foreground="{StaticResource AppTextPrimaryBrush}" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <!-- スキン着せ替え -->
+                        <TextBlock Text="🃏 カードスキン設定" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" Margin="0,8,0,0" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <Button Click="OnSelectDefaultSkinClicked" Background="#262A36" CornerRadius="6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1">
+                                <TextBlock Text="標準ベクター描画を使用" FontSize="13" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                            </Button>
+                            <Button Click="OnImportZipClicked" Background="#262A36" CornerRadius="6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1">
+                                <TextBlock Text="ZIPからスキンパックをインポート..." FontSize="13" Foreground="{StaticResource AppAccentBrush}" />
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- 2. NPC（対戦相手）設定 -->
+                <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
+                    <StackPanel Spacing="16">
+                        <TextBlock Text="🤖 NPC（CPU）設定" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                        
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <!-- 席1 (東) -->
+                            <StackPanel Grid.Column="0" Spacing="8">
+                                <TextBlock Text="席 1 (東)" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
+                                <TextBox Header="名前" Text="{x:Bind ViewModel.Seat1Name, Mode=TwoWay}" />
+                            </StackPanel>
+
+                            <!-- 席2 (北) -->
+                            <StackPanel Grid.Column="1" Spacing="8">
+                                <TextBlock Text="席 2 (北)" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
+                                <TextBox Header="名前" Text="{x:Bind ViewModel.Seat2Name, Mode=TwoWay}" />
+                            </StackPanel>
+
+                            <!-- 席3 (西) -->
+                            <StackPanel Grid.Column="2" Spacing="8">
+                                <TextBlock Text="席 3 (西)" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
+                                <TextBox Header="名前" Text="{x:Bind ViewModel.Seat3Name, Mode=TwoWay}" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- 3. 全12カテゴリのローカルルール設定 -->
+                <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
+                    <StackPanel Spacing="20">
+                        <TextBlock Text="⚖️ ローカルルール設定（全12カテゴリ）" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+
+                        <!-- 1. 革命系 -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="1. 革命系" FontWeight="SemiBold" Foreground="{StaticResource AppAccentBrush}" />
+                            <ToggleSwitch Header="革命 (4枚以上)" IsOn="{x:Bind ViewModel.Rules.Revolution.Enabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="階段革命" IsOn="{x:Bind ViewModel.Rules.Revolution.SequenceRevolutionEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="革命返し" IsOn="{x:Bind ViewModel.Rules.Revolution.CounterRevolutionEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="革命にJokerを含める" IsOn="{x:Bind ViewModel.Rules.Revolution.JokerCountsForRevolution, Mode=TwoWay}" />
+                            <ToggleSwitch Header="革命選択（起こすか選択可能）" IsOn="{x:Bind ViewModel.Rules.Revolution.RevolutionIsOptional, Mode=TwoWay}" />
+                            <ToggleSwitch Header="クーデター (9×3枚)" IsOn="{x:Bind ViewModel.Rules.Revolution.CoupEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="オーメン (6×3枚)" IsOn="{x:Bind ViewModel.Rules.Revolution.OmenEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="ナナサン革命 (7×3枚)" IsOn="{x:Bind ViewModel.Rules.Revolution.NanasanEnabled, Mode=TwoWay}" />
+                        </StackPanel>
+
+                        <!-- 2. 階段系 -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="2. 階段系" FontWeight="SemiBold" Foreground="{StaticResource AppAccentBrush}" />
+                            <ToggleSwitch Header="階段 (3枚以上の同スート連番)" IsOn="{x:Bind ViewModel.Rules.Sequence.Enabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="階段中のカード効果を発動" IsOn="{x:Bind ViewModel.Rules.Sequence.EffectsInSequence, Mode=TwoWay}" />
+                            <ToggleSwitch Header="エンペラー (4スート別連番)" IsOn="{x:Bind ViewModel.Rules.Sequence.EmperorEnabled, Mode=TwoWay}" />
+                        </StackPanel>
+
+                        <!-- 3. 縛り系 -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="3. 縛り系" FontWeight="SemiBold" Foreground="{StaticResource AppAccentBrush}" />
+                            <ToggleSwitch Header="スート縛り" IsOn="{x:Bind ViewModel.Rules.Lock.SuitLockEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="数縛り (連番数字)" IsOn="{x:Bind ViewModel.Rules.Lock.NumberLockEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="両しば" IsOn="{x:Bind ViewModel.Rules.Lock.PartialSuitLockEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="激しば" IsOn="{x:Bind ViewModel.Rules.Lock.StrictLockEnabled, Mode=TwoWay}" />
+                        </StackPanel>
+
+                        <!-- 4. 流し・切り系 -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="4. 流し・切り系" FontWeight="SemiBold" Foreground="{StaticResource AppAccentBrush}" />
+                            <ToggleSwitch Header="8切り" IsOn="{x:Bind ViewModel.Rules.Flow.EightCutEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="4止め (8単体への4返し)" IsOn="{x:Bind ViewModel.Rules.Flow.FourStopEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="砂嵐 (3×3枚で即流し)" IsOn="{x:Bind ViewModel.Rules.Flow.SandstormEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="99車 (9×2枚で即流し)" IsOn="{x:Bind ViewModel.Rules.Flow.AmbulanceEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="ろくろ首 (6×2枚で流し)" IsOn="{x:Bind ViewModel.Rules.Flow.RokurokubiEnabled, Mode=TwoWay}" />
+                        </StackPanel>
+
+                        <!-- 5. 11バック系 -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="5. 11バック系" FontWeight="SemiBold" Foreground="{StaticResource AppAccentBrush}" />
+                            <ToggleSwitch Header="11バック (一時的な強さ反転)" IsOn="{x:Bind ViewModel.Rules.ElevenBack.Enabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="強化11バック (場が流れても継続)" IsOn="{x:Bind ViewModel.Rules.ElevenBack.StrongElevenBackEnabled, Mode=TwoWay}" />
+                        </StackPanel>
+
+                        <!-- 6. スキップ・リバース系 -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="6. スキップ・リバース系" FontWeight="SemiBold" Foreground="{StaticResource AppAccentBrush}" />
+                            <ToggleSwitch Header="5スキップ" IsOn="{x:Bind ViewModel.Rules.SkipReverse.FiveSkipEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="13スキップ" IsOn="{x:Bind ViewModel.Rules.SkipReverse.ThirteenSkipEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="9リバース" IsOn="{x:Bind ViewModel.Rules.SkipReverse.NineReverseEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="12リバース" IsOn="{x:Bind ViewModel.Rules.SkipReverse.TwelveReverseEnabled, Mode=TwoWay}" />
+                        </StackPanel>
+
+                        <!-- 7. 特殊効果系 -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="7. 特殊効果系" FontWeight="SemiBold" Foreground="{StaticResource AppAccentBrush}" />
+                            <ToggleSwitch Header="7渡し (次の人にカードを渡す)" IsOn="{x:Bind ViewModel.Rules.Special.SevenPassEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="10捨て (カードを任意に捨てる)" IsOn="{x:Bind ViewModel.Rules.Special.TenDiscardEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="12ボンバー (指定数字を全員捨てる)" IsOn="{x:Bind ViewModel.Rules.Special.TwelveBomberEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="ダウンナンバー" IsOn="{x:Bind ViewModel.Rules.Special.DownNumberEnabled, Mode=TwoWay}" />
+                        </StackPanel>
+
+                        <!-- 8. ジョーカー・切り返し -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="8. ジョーカー・切り返し" FontWeight="SemiBold" Foreground="{StaticResource AppAccentBrush}" />
+                            <ToggleSwitch Header="スペ3返し (Joker単体にスペード3で即流し)" IsOn="{x:Bind ViewModel.Rules.Joker.SpadeThreeReturnEnabled, Mode=TwoWay}" />
+                        </StackPanel>
+
+                        <!-- 9. 階級変動 -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="9. 階級変動" FontWeight="SemiBold" Foreground="{StaticResource AppAccentBrush}" />
+                            <ToggleSwitch Header="都落ち (大富豪が1位を逃すと大貧民転落)" IsOn="{x:Bind ViewModel.Rules.RankChange.MiyakoOchiEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="下剋上 (大貧民が1位であがると階級全反転)" IsOn="{x:Bind ViewModel.Rules.RankChange.GekokujoEnabled, Mode=TwoWay}" />
+                        </StackPanel>
+
+                        <!-- 10. 禁止あがり -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="10. 禁止あがり" FontWeight="SemiBold" Foreground="{StaticResource AppAccentBrush}" />
+                            <ToggleSwitch Header="禁止あがりルール有効" IsOn="{x:Bind ViewModel.Rules.ForbiddenFinish.Enabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="2あがり禁止" IsOn="{x:Bind ViewModel.Rules.ForbiddenFinish.ForbidStrongestNumber, Mode=TwoWay}" />
+                            <ToggleSwitch Header="8切りあがり禁止" IsOn="{x:Bind ViewModel.Rules.ForbiddenFinish.ForbidEightCut, Mode=TwoWay}" />
+                            <ToggleSwitch Header="Jokerあがり禁止" IsOn="{x:Bind ViewModel.Rules.ForbiddenFinish.ForbidJoker, Mode=TwoWay}" />
+                            <ToggleSwitch Header="スペ3あがり禁止" IsOn="{x:Bind ViewModel.Rules.ForbiddenFinish.ForbidSpadeThree, Mode=TwoWay}" />
+                            <ToggleSwitch Header="12ボンバーあがり禁止" IsOn="{x:Bind ViewModel.Rules.ForbiddenFinish.ForbidTwelveBomber, Mode=TwoWay}" />
+                        </StackPanel>
+
+                        <!-- 11. カード交換 -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="11. カード交換" FontWeight="SemiBold" Foreground="{StaticResource AppAccentBrush}" />
+                            <ToggleSwitch Header="カード交換有効" IsOn="{x:Bind ViewModel.Rules.Exchange.Enabled, Mode=TwoWay}" />
+                            <ToggleSwitch Header="Jokerを交換から保護する" IsOn="{x:Bind ViewModel.Rules.Exchange.JokerProtected, Mode=TwoWay}" />
+                            <ToggleSwitch Header="天変地異 (大貧民の手札が10以下で全交換)" IsOn="{x:Bind ViewModel.Rules.Exchange.TenpenChiiEnabled, Mode=TwoWay}" />
+                        </StackPanel>
+
+                    </StackPanel>
+                </Border>
+
             </StackPanel>
         </ScrollViewer>
     </Grid>
 </Page>
-

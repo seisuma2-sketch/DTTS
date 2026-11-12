@@ -4,25 +4,63 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:DTTS.ViewModels"
     mc:Ignorable="d"
     Background="{StaticResource AppBackgroundDeepBrush}">
 
     <Grid Padding="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="16" Margin="0,0,0,24">
-            <Button Click="OnBackClicked" Background="Transparent" BorderThickness="0" Padding="8,4">
-                <TextBlock Text="← タイトルへ戻る" Foreground="{StaticResource AppTextSecondaryBrush}" FontSize="14" />
-            </Button>
-            <TextBlock Text="遊び方 ＆ ルール解説" FontSize="20" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
-        </StackPanel>
+        <!-- ヘッダー -->
+        <Grid Grid.Row="0" Margin="0,0,0,16">
+            <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                <Button Command="{x:Bind ViewModel.GoBackCommand}" Background="Transparent" BorderThickness="0" Padding="8,4">
+                    <TextBlock Text="← タイトルへ戻る" Foreground="{StaticResource AppTextSecondaryBrush}" FontSize="14" />
+                </Button>
+                <TextBlock Text="遊び方 ＆ ルール解説（全12カテゴリ）" FontSize="22" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
+            </StackPanel>
+        </Grid>
 
-        <ScrollViewer Grid.Row="1">
-            <TextBlock Text="全ローカルルールの詳細解説（「？」マーク）を表示します。" Foreground="{StaticResource AppTextSecondaryBrush}" />
+        <!-- 検索バー -->
+        <TextBox
+            Grid.Row="1"
+            Margin="0,0,0,16"
+            MaxWidth="600"
+            HorizontalAlignment="Left"
+            PlaceholderText="ルール名や効果で検索 (例: 8切り, 革命, 階段...)"
+            Text="{x:Bind ViewModel.SearchQuery, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+        <!-- ルール一覧 (カテゴリごとのカード展開) -->
+        <ScrollViewer Grid.Row="2" Padding="0,0,16,0">
+            <ItemsControl ItemsSource="{x:Bind ViewModel.FilteredCategories, Mode=OneWay}" MaxWidth="800" HorizontalAlignment="Left">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:RuleHelpCategory">
+                        <Border Margin="0,0,0,20" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="{x:Bind Name}" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
+
+                                <ItemsControl ItemsSource="{x:Bind Items}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:RuleHelpItem">
+                                            <Border Margin="0,4" Padding="12" CornerRadius="8" Background="#1B1E26" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1">
+                                                <StackPanel Spacing="4">
+                                                    <TextBlock Text="{x:Bind Title}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                                    <TextBlock Text="{x:Bind Summary}" FontSize="12" Foreground="{StaticResource AppAccentBrush}" FontWeight="Medium" />
+                                                    <TextBlock Text="{x:Bind Detail}" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
         </ScrollViewer>
     </Grid>
 </Page>
-

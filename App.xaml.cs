@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Net.Http;
 using System.Threading.Tasks;
 using DTTS.Common;
 using DTTS.Services.Database;
@@ -17,6 +18,7 @@ namespace DTTS;
 public partial class App : Application
 {
     private Window? _window;
+    public static Window MainWindowInstance { get; private set; } = null!;
     public static IServiceProvider Services { get; private set; } = null!;
 
     public App()
@@ -59,12 +61,32 @@ public partial class App : Application
         // ネットワーク & 接続モニター
         services.AddSingleton<IConnectivityMonitor, WindowsConnectivityMonitor>();
 
+        // フィードバックサービス
+        services.AddSingleton(sp =>
+        {
+            var repo = sp.GetRequiredService<FeedbackRepository>();
+            var settings = sp.GetRequiredService<SettingsRepository>();
+            var connectivity = sp.GetRequiredService<IConnectivityMonitor>();
+            var http = new HttpClient();
+            return new FeedbackService(
+                repo,
+                () => settings.LoadFeedbackOptionsAsync().GetAwaiter().GetResult(),
+                http,
+                connectivity,
+                "1.0.0"
+            );
+        });
+
         // ナビゲーション
         services.AddSingleton<INavigationService, NavigationService>();
 
         // ViewModels
         services.AddTransient<TitleViewModel>();
         services.AddTransient<GameTableViewModel>();
+        services.AddTransient<RuleSettingsViewModel>();
+        services.AddTransient<ResultViewModel>();
+        services.AddTransient<HelpViewModel>();
+        services.AddTransient<FeedbackViewModel>();
 
         Services = services.BuildServiceProvider();
 
@@ -90,6 +112,7 @@ public partial class App : Application
 
         // 6. ウィンドウ表示
         _window = new MainWindow();
+        MainWindowInstance = _window;
         _window.Activate();
     }
 }

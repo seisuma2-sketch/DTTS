@@ -28,6 +28,21 @@ public sealed class ZeroToVisibleConverter : IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, string language) => throw new NotImplementedException();
 }
 
+public sealed class HexToBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        if (value is string hex)
+        {
+            var color = ThemeManager.ParseHexColor(hex);
+            return new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
+        }
+        return new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) => throw new NotImplementedException();
+}
+
 public sealed class InverseBoolToVisibilityConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, string language)

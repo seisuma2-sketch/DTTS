@@ -4,25 +4,127 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:db="using:DTTS.Services.Database"
+    xmlns:vm="using:DTTS.ViewModels"
     mc:Ignorable="d"
-    Background="{StaticResource AppBackgroundDeepBrush}">
+    Background="{StaticResource AppBackgroundDeepBrush}"
+    Loaded="OnPageLoaded">
 
     <Grid Padding="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="16" Margin="0,0,0,24">
-            <Button Click="OnBackClicked" Background="Transparent" BorderThickness="0" Padding="8,4">
-                <TextBlock Text="← タイトルへ戻る" Foreground="{StaticResource AppTextSecondaryBrush}" FontSize="14" />
-            </Button>
-            <TextBlock Text="フィードバック ＆ 要望" FontSize="20" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
-        </StackPanel>
+        <!-- ヘッダー -->
+        <Grid Grid.Row="0" Margin="0,0,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-        <ScrollViewer Grid.Row="1">
-            <TextBlock Text="チャット風タイムラインUIで要望・バグ報告を随時書き込み・蓄積できます。" Foreground="{StaticResource AppTextSecondaryBrush}" />
-        </ScrollViewer>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+                <Button Command="{x:Bind ViewModel.GoBackCommand}" Background="Transparent" BorderThickness="0" Padding="8,4">
+                    <TextBlock Text="← タイトルへ戻る" Foreground="{StaticResource AppTextSecondaryBrush}" FontSize="14" />
+                </Button>
+                <TextBlock Text="フィードバック ＆ 要望（オフライン対応）" FontSize="22" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12">
+                <Button Click="OnExportJsonClicked" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="{StaticResource ButtonCornerRadius}">
+                    <TextBlock Text="JSONエクスポート..." FontSize="13" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                </Button>
+                <Button Command="{x:Bind ViewModel.SyncPendingCommand}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="{StaticResource ButtonCornerRadius}">
+                    <TextBlock Text="クラウドへ同期" FontSize="13" Foreground="{StaticResource AppAccentBrush}" />
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- メインチャットタイムライン -->
+        <Border Grid.Row="1" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="16" Margin="0,0,0,16">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="12">
+                    <TextBlock
+                        Text="フィードバックや要望を書き込むとローカルDBに安全に蓄積されます。オンライン時にGoogle DriveやWebhookへ送信できます。"
+                        FontSize="12"
+                        Foreground="{StaticResource AppTextMutedBrush}"
+                        HorizontalAlignment="Center"
+                        Margin="0,0,0,8" />
+
+                    <ItemsControl ItemsSource="{x:Bind ViewModel.Messages}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:FeedbackItemViewModel">
+                                <!-- 右寄せ（User）の吹き出し -->
+                                <Grid Margin="0,4">
+                                    <Border
+                                        CornerRadius="12"
+                                        Padding="14,10"
+                                        MaxWidth="500"
+                                        HorizontalAlignment="Right"
+                                        Background="{StaticResource AppAccentBrush}">
+                                        <StackPanel Spacing="4">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <Border CornerRadius="4" Background="#30000000" Padding="6,1">
+                                                    <TextBlock Text="{x:Bind CategoryText}" FontSize="10" FontWeight="Bold" Foreground="{StaticResource AppOnAccentBrush}" />
+                                                </Border>
+                                                <TextBlock Text="{x:Bind TimeText}" FontSize="10" Foreground="{StaticResource AppOnAccentBrush}" Opacity="0.8" VerticalAlignment="Center" />
+                                                <TextBlock Text="{x:Bind StatusText}" FontSize="10" Foreground="{StaticResource AppOnAccentBrush}" Opacity="0.7" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <TextBlock Text="{x:Bind Message}" FontSize="14" Foreground="{StaticResource AppOnAccentBrush}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- 下部入力バー -->
+        <Border Grid.Row="2" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="16">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="140" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <!-- カテゴリ選択 -->
+                <ComboBox
+                    Grid.Column="0"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center"
+                    SelectedIndex="1"
+                    SelectionChanged="OnCategoryChanged">
+                    <ComboBoxItem Content="不具合報告" Tag="Bug" />
+                    <ComboBoxItem Content="機能要望" Tag="Request" />
+                    <ComboBoxItem Content="感想・その他" Tag="Comment" />
+                </ComboBox>
+
+                <!-- テキスト入力 -->
+                <TextBox
+                    Grid.Column="1"
+                    PlaceholderText="メッセージを入力してください..."
+                    Text="{x:Bind ViewModel.InputMessage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    VerticalAlignment="Center"
+                    KeyDown="OnInputKeyDown" />
+
+                <!-- 送信ボタン -->
+                <Button
+                    Grid.Column="2"
+                    Command="{x:Bind ViewModel.SendMessageCommand}"
+                    Background="{StaticResource AppAccentBrush}"
+                    Foreground="{StaticResource AppOnAccentBrush}"
+                    CornerRadius="{StaticResource ButtonCornerRadius}"
+                    Height="40"
+                    Padding="20,0"
+                    VerticalAlignment="Center">
+                    <TextBlock Text="送信" FontWeight="Bold" FontSize="14" />
+                </Button>
+            </Grid>
+        </Border>
     </Grid>
 </Page>
-

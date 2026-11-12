@@ -1,23 +1,66 @@
-using DTTS.Common;
+using System;
+using DTTS.Services.Database;
+using DTTS.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Windows.Storage.Pickers;
+using Windows.System;
 
 namespace DTTS.Views;
 
 public sealed partial class FeedbackPage : Page
 {
-    private readonly INavigationService _navigation;
+    public FeedbackViewModel ViewModel { get; }
 
     public FeedbackPage()
     {
-        _navigation = App.Services.GetRequiredService<INavigationService>();
+        ViewModel = App.Services.GetRequiredService<FeedbackViewModel>();
         InitializeComponent();
     }
 
-    private void OnBackClicked(object sender, RoutedEventArgs e)
+    private async void OnPageLoaded(object sender, RoutedEventArgs e)
     {
-        _navigation.NavigateToTitle();
+        await ViewModel.InitializeAsync();
+    }
+
+    private void OnCategoryChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ComboBox cb && cb.SelectedItem is ComboBoxItem item && item.Tag is string tag)
+        {
+            ViewModel.SelectedCategory = tag switch
+            {
+                "Bug" => FeedbackCategory.Bug,
+                "Request" => FeedbackCategory.Request,
+                _ => FeedbackCategory.Comment
+            };
+        }
+    }
+
+    private void OnInputKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Enter)
+        {
+            ViewModel.SendMessageCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    private async void OnExportJsonClicked(object sender, RoutedEventArgs e)
+    {
+        var picker = new FileSavePicker();
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindowInstance);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+
+        picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+        picker.FileTypeChoices.Add("JSON File", new[] { ".json" });
+        picker.SuggestedFileName = $"dtts_feedback_{DateTime.Now:yyyyMMdd_HHmm}.json";
+
+        var file = await picker.PickSaveFileAsync();
+        if (file != null)
+        {
+            await ViewModel.ExportJsonCommand.ExecuteAsync(file.Path);
+        }
     }
 }
-

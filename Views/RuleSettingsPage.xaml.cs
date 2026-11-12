@@ -1,23 +1,55 @@
-using DTTS.Common;
+using System;
+using DTTS.Services.Settings;
+using DTTS.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.Storage.Pickers;
 
 namespace DTTS.Views;
 
 public sealed partial class RuleSettingsPage : Page
 {
-    private readonly INavigationService _navigation;
+    public RuleSettingsViewModel ViewModel { get; }
 
     public RuleSettingsPage()
     {
-        _navigation = App.Services.GetRequiredService<INavigationService>();
+        ViewModel = App.Services.GetRequiredService<RuleSettingsViewModel>();
         InitializeComponent();
     }
 
-    private void OnBackClicked(object sender, RoutedEventArgs e)
+    private async void OnPageLoaded(object sender, RoutedEventArgs e)
     {
-        _navigation.NavigateToTitle();
+        await ViewModel.InitializeAsync();
+    }
+
+    private void OnThemeButtonClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is ThemeColor color)
+        {
+            ViewModel.SelectThemeCommand.Execute(color);
+        }
+    }
+
+    private void OnSelectDefaultSkinClicked(object sender, RoutedEventArgs e)
+    {
+        ViewModel.SelectSkinCommand.Execute(null);
+    }
+
+    private async void OnImportZipClicked(object sender, RoutedEventArgs e)
+    {
+        var picker = new FileOpenPicker();
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindowInstance);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+
+        picker.ViewMode = PickerViewMode.Thumbnail;
+        picker.SuggestedStartLocation = PickerLocationId.Downloads;
+        picker.FileTypeFilter.Add(".zip");
+
+        var file = await picker.PickSingleFileAsync();
+        if (file != null)
+        {
+            await ViewModel.ImportSkinZipCommand.ExecuteAsync(file.Path);
+        }
     }
 }
-
