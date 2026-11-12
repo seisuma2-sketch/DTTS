@@ -23,16 +23,16 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
     private readonly ICardSkinManager _skinManager;
 
     [ObservableProperty]
-    private RuleSettings _rules = RuleSettings.CreateDefault();
+    public partial RuleSettings Rules { get; set; } = RuleSettings.CreateDefault();
 
     [ObservableProperty]
-    private AppearanceSettings _appearance = new();
+    public partial AppearanceSettings Appearance { get; set; } = new();
 
     [ObservableProperty]
-    private NpcSettings _npc = new();
+    public partial NpcSettings Npc { get; set; } = new();
 
     [ObservableProperty]
-    private string _statusMessage = "";
+    public partial string StatusMessage { get; set; } = "";
 
     public string Seat1Name
     {

@@ -22,31 +22,31 @@ public sealed partial class ResultViewModel : ViewModelBase
     private readonly MatchHistoryRepository _historyRepo;
 
     [ObservableProperty]
-    private int _totalGames;
+    public partial int TotalGames { get; set; }
 
     [ObservableProperty]
-    private string _winRateText = "0%";
+    public partial string WinRateText { get; set; } = "0%";
 
     [ObservableProperty]
-    private string _averagePlaceText = "- 位";
+    public partial string AveragePlaceText { get; set; } = "- 位";
 
     [ObservableProperty]
-    private int _bestScore;
+    public partial int BestScore { get; set; }
 
     [ObservableProperty]
-    private int _winStreak;
+    public partial int WinStreak { get; set; }
 
     [ObservableProperty]
-    private int _daifugoCount;
+    public partial int DaifugoCount { get; set; }
 
     [ObservableProperty]
-    private int _fugoCount;
+    public partial int FugoCount { get; set; }
 
     [ObservableProperty]
-    private int _hinminCount;
+    public partial int HinminCount { get; set; }
 
     [ObservableProperty]
-    private int _daihinminCount;
+    public partial int DaihinminCount { get; set; }
 
     public ObservableCollection<MatchHistoryItemViewModel> RecentMatches { get; } = new();
 

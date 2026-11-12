@@ -8,10 +8,10 @@ public sealed partial class CardViewModel : ObservableObject
     public Card Card { get; }
 
     [ObservableProperty]
-    private bool _isSelected;
+    public partial bool IsSelected { get; set; }
 
     [ObservableProperty]
-    private bool _canPlay = true;
+    public partial bool CanPlay { get; set; } = true;
 
     public CardViewModel(Card card)
     {

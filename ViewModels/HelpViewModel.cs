@@ -16,7 +16,7 @@ public sealed partial class HelpViewModel : ViewModelBase
     private readonly INavigationService _navigation;
 
     [ObservableProperty]
-    private string _searchQuery = "";
+    public partial string SearchQuery { get; set; } = "";
 
     public ObservableCollection<RuleHelpCategory> FilteredCategories { get; } = new();
 

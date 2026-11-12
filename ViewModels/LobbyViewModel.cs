@@ -31,31 +31,31 @@ public sealed partial class LobbyViewModel : ViewModelBase
     private RuleSettings _rules = RuleSettings.CreateDefault();
 
     [ObservableProperty]
-    private bool _isInRoom;
+    public partial bool IsInRoom { get; set; }
 
     [ObservableProperty]
-    private bool _isHost;
+    public partial bool IsHost { get; set; }
 
     [ObservableProperty]
-    private string _roomTitle = "";
+    public partial string RoomTitle { get; set; } = "";
 
     [ObservableProperty]
-    private string _hostRoomName = "DTTSの対戦部屋";
+    public partial string HostRoomName { get; set; } = "DTTSの対戦部屋";
 
     [ObservableProperty]
-    private string _directJoinHost = "127.0.0.1";
+    public partial string DirectJoinHost { get; set; } = "127.0.0.1";
 
     [ObservableProperty]
-    private int _directJoinPort = NetProtocol.DefaultTcpPort;
+    public partial int DirectJoinPort { get; set; } = NetProtocol.DefaultTcpPort;
 
     [ObservableProperty]
-    private string _playerName = "あなた";
+    public partial string PlayerName { get; set; } = "あなた";
 
     [ObservableProperty]
-    private string _statusMessage = "";
+    public partial string StatusMessage { get; set; } = "";
 
     [ObservableProperty]
-    private bool _isSearching;
+    public partial bool IsSearching { get; set; }
 
     public ObservableCollection<SeatInfo> Seats { get; } = new();
     public ObservableCollection<RoomInfo> DiscoveredRooms { get; } = new();

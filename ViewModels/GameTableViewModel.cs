@@ -55,47 +55,47 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
     // --- 状態プロパティ ---
     [ObservableProperty]
-    private string _roundInfoText = "第 1 / 5 ラウンド";
+    public partial string RoundInfoText { get; set; } = "第 1 / 5 ラウンド";
 
     [ObservableProperty]
-    private string _statusMessage = "ゲームを開始しています...";
+    public partial string StatusMessage { get; set; } = "ゲームを開始しています...";
 
     [ObservableProperty]
-    private bool _isRevolution;
+    public partial bool IsRevolution { get; set; }
 
     [ObservableProperty]
-    private bool _isElevenBack;
+    public partial bool IsElevenBack { get; set; }
 
     [ObservableProperty]
-    private string _lockDescription = "";
+    public partial string LockDescription { get; set; } = "";
 
     [ObservableProperty]
-    private bool _canPlay;
+    public partial bool CanPlay { get; set; }
 
     [ObservableProperty]
-    private bool _canPass;
+    public partial bool CanPass { get; set; }
 
     // --- モーダル・ダイアログ ---
     [ObservableProperty]
-    private bool _isDecisionDialogOpen;
+    public partial bool IsDecisionDialogOpen { get; set; }
 
     [ObservableProperty]
-    private string _decisionTitle = "";
+    public partial string DecisionTitle { get; set; } = "";
 
     [ObservableProperty]
-    private string _decisionMessage = "";
+    public partial string DecisionMessage { get; set; } = "";
 
     [ObservableProperty]
-    private bool _isRevolutionChoice;
+    public partial bool IsRevolutionChoice { get; set; }
 
     [ObservableProperty]
-    private bool _isRoundResultOpen;
+    public partial bool IsRoundResultOpen { get; set; }
 
     [ObservableProperty]
-    private string _roundResultText = "";
+    public partial string RoundResultText { get; set; } = "";
 
     [ObservableProperty]
-    private bool _isGameOver;
+    public partial bool IsGameOver { get; set; }
 
     public event EventHandler<CutInEventArgs>? CutInTriggered;
     public event EventHandler? FieldFlushedTriggered;

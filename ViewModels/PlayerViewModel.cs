@@ -9,33 +9,33 @@ public sealed partial class PlayerViewModel : ObservableObject
     public bool IsHuman { get; }
 
     [ObservableProperty]
-    private string _name;
+    public partial string Name { get; set; }
 
     [ObservableProperty]
-    private int _handCount;
+    public partial int HandCount { get; set; }
 
     [ObservableProperty]
-    private PlayerRank _rank = PlayerRank.Heimin;
+    public partial PlayerRank Rank { get; set; } = PlayerRank.Heimin;
 
     [ObservableProperty]
-    private int _totalScore;
+    public partial int TotalScore { get; set; }
 
     [ObservableProperty]
-    private bool _isTurn;
+    public partial bool IsTurn { get; set; }
 
     [ObservableProperty]
-    private bool _isThinking;
+    public partial bool IsThinking { get; set; }
 
     [ObservableProperty]
-    private bool _isPassed;
+    public partial bool IsPassed { get; set; }
 
     [ObservableProperty]
-    private int? _finishPlace;
+    public partial int? FinishPlace { get; set; }
 
     public PlayerViewModel(int playerId, string name, bool isHuman)
     {
         PlayerId = playerId;
-        _name = name;
+        Name = name;
         IsHuman = isHuman;
     }
 }

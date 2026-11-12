@@ -27,16 +27,16 @@ public sealed partial class FeedbackViewModel : ViewModelBase
     public ObservableCollection<FeedbackItemViewModel> Messages { get; } = new();
 
     [ObservableProperty]
-    private string _inputMessage = "";
+    public partial string InputMessage { get; set; } = "";
 
     [ObservableProperty]
-    private FeedbackCategory _selectedCategory = FeedbackCategory.Request;
+    public partial FeedbackCategory SelectedCategory { get; set; } = FeedbackCategory.Request;
 
     [ObservableProperty]
-    private string _statusMessage = "";
+    public partial string StatusMessage { get; set; } = "";
 
     [ObservableProperty]
-    private string _webhookUrl = "";
+    public partial string WebhookUrl { get; set; } = "";
 
     public FeedbackViewModel(
         INavigationService navigation,
