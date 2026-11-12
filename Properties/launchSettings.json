@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "DTTS (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "DTTS (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

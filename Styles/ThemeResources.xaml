@@ -1,0 +1,42 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:conv="using:DTTS.Common.Converters">
+
+    <!-- 値コンバーター -->
+    <conv:StringToVisibilityConverter x:Key="StringToVisibilityConverter" />
+    <conv:ZeroToVisibleConverter x:Key="ZeroToVisibleConverter" />
+    <conv:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibilityConverter" />
+
+    <!-- ソフトダーク パレット (Material 3 Dark 調) -->
+    <Color x:Key="AppBackgroundDeepColor">#0F1115</Color>
+    <Color x:Key="AppBackgroundSurfaceColor">#181B20</Color>
+    <Color x:Key="AppBackgroundElevatedColor">#22262E</Color>
+    <Color x:Key="AppBorderSubtleColor">#323742</Color>
+
+    <Color x:Key="AppTextPrimaryColor">#F2F4F8</Color>
+    <Color x:Key="AppTextSecondaryColor">#A2A8B6</Color>
+    <Color x:Key="AppTextMutedColor">#606675</Color>
+
+    <!-- 初期アクセントカラー（ディープアズール） -->
+    <Color x:Key="AppAccentColor">#3E8EF7</Color>
+
+    <SolidColorBrush x:Key="AppBackgroundDeepBrush" Color="{StaticResource AppBackgroundDeepColor}" />
+    <SolidColorBrush x:Key="AppBackgroundSurfaceBrush" Color="{StaticResource AppBackgroundSurfaceColor}" />
+    <SolidColorBrush x:Key="AppBackgroundElevatedBrush" Color="{StaticResource AppBackgroundElevatedColor}" />
+    <SolidColorBrush x:Key="AppBorderSubtleBrush" Color="{StaticResource AppBorderSubtleColor}" />
+
+    <SolidColorBrush x:Key="AppTextPrimaryBrush" Color="{StaticResource AppTextPrimaryColor}" />
+    <SolidColorBrush x:Key="AppTextSecondaryBrush" Color="{StaticResource AppTextSecondaryColor}" />
+    <SolidColorBrush x:Key="AppTextMutedBrush" Color="{StaticResource AppTextMutedColor}" />
+
+    <SolidColorBrush x:Key="AppAccentBrush" Color="{StaticResource AppAccentColor}" />
+    <SolidColorBrush x:Key="AppOnAccentBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="AppAccentSubtleBrush" Color="#303E8EF7" />
+
+    <!-- カード用スタイル -->
+    <CornerRadius x:Key="CardCornerRadius">10</CornerRadius>
+    <CornerRadius x:Key="PanelCornerRadius">12</CornerRadius>
+    <CornerRadius x:Key="ButtonCornerRadius">8</CornerRadius>
+
+</ResourceDictionary>

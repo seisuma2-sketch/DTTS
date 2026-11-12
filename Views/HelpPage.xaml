@@ -1,0 +1,28 @@
+<Page
+    x:Class="DTTS.Views.HelpPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Background="{StaticResource AppBackgroundDeepBrush}">
+
+    <Grid Padding="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="16" Margin="0,0,0,24">
+            <Button Click="OnBackClicked" Background="Transparent" BorderThickness="0" Padding="8,4">
+                <TextBlock Text="← タイトルへ戻る" Foreground="{StaticResource AppTextSecondaryBrush}" FontSize="14" />
+            </Button>
+            <TextBlock Text="遊び方 ＆ ルール解説" FontSize="20" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1">
+            <TextBlock Text="全ローカルルールの詳細解説（「？」マーク）を表示します。" Foreground="{StaticResource AppTextSecondaryBrush}" />
+        </ScrollViewer>
+    </Grid>
+</Page>
+

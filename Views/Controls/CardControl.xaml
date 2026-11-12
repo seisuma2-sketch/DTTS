@@ -1,0 +1,123 @@
+<UserControl
+    x:Class="DTTS.Views.Controls.CardControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Width="70"
+    Height="102"
+    PointerPressed="OnPointerPressed"
+    DoubleTapped="OnDoubleTapped">
+
+    <Grid x:Name="RootGrid" RenderTransformOrigin="0.5,0.5">
+        <Grid.RenderTransform>
+            <TranslateTransform x:Name="CardTranslate" Y="0" />
+        </Grid.RenderTransform>
+
+        <!-- カードベース外枠＆背景 -->
+        <Border
+            x:Name="CardBorder"
+            CornerRadius="8"
+            BorderThickness="1.5"
+            BorderBrush="{StaticResource AppBorderSubtleBrush}"
+            Background="#242730">
+
+            <Grid>
+                <!-- 1. スキン画像表示レイヤー -->
+                <Image
+                    x:Name="SkinImage"
+                    Stretch="UniformToFill"
+                    ImageFailed="OnSkinImageFailed"
+                    Visibility="Collapsed" />
+
+                <!-- 2. ベクター描画表面レイヤー（スキン画像がない場合に表示） -->
+                <Grid x:Name="VectorSurface" Padding="5">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!-- 左上：数字とスート -->
+                    <StackPanel Grid.Row="0" HorizontalAlignment="Left" Orientation="Vertical">
+                        <TextBlock
+                            x:Name="TopRankText"
+                            FontSize="12"
+                            FontWeight="Bold"
+                            Text="A" />
+                        <TextBlock
+                            x:Name="TopSuitText"
+                            FontSize="10"
+                            Text="♠" />
+                    </StackPanel>
+
+                    <!-- 中央：大スート記号 -->
+                    <TextBlock
+                        x:Name="CenterSuitText"
+                        Grid.Row="1"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        FontSize="24"
+                        Text="♠" />
+
+                    <!-- 右下：回転数字とスート -->
+                    <StackPanel Grid.Row="2" HorizontalAlignment="Right" Orientation="Vertical" RenderTransformOrigin="0.5,0.5">
+                        <StackPanel.RenderTransform>
+                            <RotateTransform Angle="180" />
+                        </StackPanel.RenderTransform>
+                        <TextBlock
+                            x:Name="BottomRankText"
+                            FontSize="12"
+                            FontWeight="Bold"
+                            Text="A" />
+                        <TextBlock
+                            x:Name="BottomSuitText"
+                            FontSize="10"
+                            Text="♠" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- 3. 裏面レイヤー（IsFacedDown=true時） -->
+                <Border
+                    x:Name="BackSurface"
+                    CornerRadius="8"
+                    Background="#1A1C23"
+                    BorderBrush="#3D4455"
+                    BorderThickness="1"
+                    Visibility="Collapsed">
+                    <Grid>
+                        <Image x:Name="BackSkinImage" Stretch="UniformToFill" Visibility="Collapsed" />
+                        <!-- ベクター幾何学模様の裏面 -->
+                        <Border Margin="4" CornerRadius="5" BorderBrush="#2F3545" BorderThickness="1" Background="#222530">
+                            <TextBlock
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                FontSize="18"
+                                FontWeight="Bold"
+                                Foreground="{StaticResource AppAccentBrush}"
+                                Text="DTTS" />
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <!-- 4. 選択中ハイライトオーバーレイ -->
+                <Border
+                    x:Name="SelectionOverlay"
+                    CornerRadius="8"
+                    BorderThickness="2"
+                    BorderBrush="{StaticResource AppAccentBrush}"
+                    Background="{StaticResource AppAccentSubtleBrush}"
+                    Visibility="Collapsed" />
+
+                <!-- 5. プレイ不可時の半透明カバー -->
+                <Border
+                    x:Name="DisabledOverlay"
+                    CornerRadius="8"
+                    Background="#80000000"
+                    Visibility="Collapsed" />
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>
+

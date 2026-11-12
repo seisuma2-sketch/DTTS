@@ -1,0 +1,28 @@
+# Visual Studio / .NET / WinUI
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Packages
+packages/
+*.nupkg
+
+# Generated files
+Generated Files/
+x64/
+x86/
+ARM64/
+
+# Database / Local temp files
+*.db
+*.db-shm
+*.db-wal
+dtts.db
+skins/
+
+# Test outputs
+TestResults/

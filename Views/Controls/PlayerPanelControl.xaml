@@ -1,0 +1,85 @@
+<UserControl
+    x:Class="DTTS.Views.Controls.PlayerPanelControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    MinWidth="160"
+    MaxHeight="120">
+
+    <Border
+        x:Name="RootBorder"
+        CornerRadius="{StaticResource PanelCornerRadius}"
+        Background="{StaticResource AppBackgroundElevatedBrush}"
+        BorderBrush="{StaticResource AppBorderSubtleBrush}"
+        BorderThickness="1.5"
+        Padding="12,8">
+
+        <Grid RowSpacing="4">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- 1行目: 階級バッジ & プレイヤー名 -->
+            <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Border
+                    x:Name="RankBadge"
+                    CornerRadius="4"
+                    Padding="6,2"
+                    Background="{StaticResource AppAccentBrush}">
+                    <TextBlock
+                        x:Name="RankText"
+                        FontSize="11"
+                        FontWeight="Bold"
+                        Foreground="{StaticResource AppOnAccentBrush}"
+                        Text="平民" />
+                </Border>
+                <TextBlock
+                    x:Name="PlayerNameText"
+                    FontSize="14"
+                    FontWeight="SemiBold"
+                    Foreground="{StaticResource AppTextPrimaryBrush}"
+                    Text="Player 1"
+                    TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+
+            <!-- 2行目: 手札枚数 & スコア -->
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <TextBlock FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" Text="手札:" />
+                    <TextBlock x:Name="HandCountText" FontSize="14" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" Text="13枚" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <TextBlock FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" Text="得点:" />
+                    <TextBlock x:Name="ScoreText" FontSize="14" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" Text="+0pt" />
+                </StackPanel>
+            </Grid>
+
+            <!-- 3行目: 状態ステータス (ターン中 / 考え中 / パス / あがり) -->
+            <Grid Grid.Row="2" MinHeight="22">
+                <Border
+                    x:Name="StatusBadge"
+                    CornerRadius="4"
+                    Padding="6,2"
+                    HorizontalAlignment="Left"
+                    Background="#2A3040">
+                    <TextBlock
+                        x:Name="StatusText"
+                        FontSize="11"
+                        Foreground="{StaticResource AppTextSecondaryBrush}"
+                        Text="待機中" />
+                </Border>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>
+
