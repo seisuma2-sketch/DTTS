@@ -41,6 +41,7 @@ public sealed class LanDiscoveryResponder : IDisposable
         _udp = new UdpClient(AddressFamily.InterNetwork);
         _udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         _udp.Client.Bind(new IPEndPoint(bindAddress ?? IPAddress.Any, port));
+        UdpSocketHelper.IgnoreConnectionReset(_udp.Client);
         _ = Task.Run(ReceiveLoopAsync);
     }
 
@@ -50,7 +51,15 @@ public sealed class LanDiscoveryResponder : IDisposable
         {
             while (!_cts.IsCancellationRequested)
             {
-                var received = await _udp.ReceiveAsync(_cts.Token).ConfigureAwait(false);
+                UdpReceiveResult received;
+                try
+                {
+                    received = await _udp.ReceiveAsync(_cts.Token).ConfigureAwait(false);
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset)
+                {
+                    continue; // 返信先が既に閉じていた（ICMP 到達不能）。待ち受けは続ける
+                }
                 if (!received.Buffer.AsSpan().SequenceEqual(ProbeBytes))
                 {
                     continue; // 他アプリ・他バージョンの探索は無視
@@ -94,6 +103,7 @@ public static class LanDiscovery
         var local = localAddress ?? IPAddress.Any;
         using var udp = new UdpClient(AddressFamily.InterNetwork) { EnableBroadcast = !IPAddress.IsLoopback(local) };
         udp.Client.Bind(new IPEndPoint(local, 0));
+        UdpSocketHelper.IgnoreConnectionReset(udp.Client);
 
         var targets = IPAddress.IsLoopback(local) ? new[] { IPAddress.Loopback } : GetBroadcastTargets();
         foreach (var target in targets)
@@ -115,7 +125,15 @@ public static class LanDiscovery
             // 応答の受信を await する（収集期間が終わるとキャンセルで抜ける）
             while (!window.IsCancellationRequested)
             {
-                var received = await udp.ReceiveAsync(window.Token).ConfigureAwait(false);
+                UdpReceiveResult received;
+                try
+                {
+                    received = await udp.ReceiveAsync(window.Token).ConfigureAwait(false);
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset)
+                {
+                    continue; // 応答者のいない宛先（loopback 等）からの ICMP 到達不能。探索は続ける
+                }
                 RoomInfo? room;
                 try
                 {
@@ -187,5 +205,36 @@ public static class LanDiscovery
             // アダプタ情報が取れない環境では全体ブロードキャストのみ
         }
         return targets;
+    }
+}
+
+/// <summary>UDP ソケットの補助。</summary>
+internal static class UdpSocketHelper
+{
+    /// <summary>SIO_UDP_CONNRESET（Windows 固有の制御コード）。</summary>
+    private const int SioUdpConnReset = unchecked((int)0x9800000C);
+
+    /// <summary>
+    /// Windows では、送った UDP の宛先から ICMP「ポート到達不能」が返ると、以降の受信が
+    /// ConnectionReset（「既存の接続はリモート ホストに強制的に切断されました」）で失敗する。
+    /// 探索では応答者のいない宛先にも送るため、この通知を無効にする。
+    /// </summary>
+    public static void IgnoreConnectionReset(Socket socket)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        try
+        {
+            socket.IOControl(SioUdpConnReset, new byte[] { 0, 0, 0, 0 }, null);
+        }
+        catch (SocketException)
+        {
+            // 未対応の環境では受信側の ConnectionReset 無視で対応する
+        }
+        catch (PlatformNotSupportedException)
+        {
+        }
     }
 }

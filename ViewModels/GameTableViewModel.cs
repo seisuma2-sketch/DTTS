@@ -44,6 +44,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private bool _connectionLost;
     private Task _saveTask = Task.CompletedTask;
     private int _guestResultRound;
+    private bool _guestDecisionInFlight;
+    private List<List<Card>> _guestLegalPlays = new();
 
     // --- プレイヤー ---
     public PlayerViewModel Player0 { get; } = new(0, "あなた", true);
@@ -51,7 +53,11 @@ public sealed partial class GameTableViewModel : ViewModelBase
     public PlayerViewModel Player2 { get; } = new(2, "NPC 北", false);
     public PlayerViewModel Player3 { get; } = new(3, "NPC 西", false);
 
-    public PlayerViewModel GetPlayerVm(int id) => id switch
+    /// <summary>
+    /// プレイヤーID（エンジンの席番号）に対応する表示欄。Player0（画面下）が常に自分になるよう、
+    /// ゲストでは自分の席番号を基準に回して割り当てる（ホスト・1人用は自分が席 0）。
+    /// </summary>
+    public PlayerViewModel GetPlayerVm(int id) => (((id - _myPlayerId) % 4 + 4) % 4) switch
     {
         0 => Player0,
         1 => Player1,
@@ -177,10 +183,25 @@ public sealed partial class GameTableViewModel : ViewModelBase
             _rules = netParams.Rules;
             _myPlayerId = 0;
 
+            // 席の名前（ゲスト・補充NPC）はロビーで決まったものをエンジンから受け取る
+            for (int i = 0; i < 4; i++)
+            {
+                GetPlayerVm(i).Name = _engine.GetPlayer(i).Name;
+            }
+
             _engineHandler = (sender, ev) => OnEngineEvent(ev);
             _engine.EventOccurred += _engineHandler;
-            RoundInfoText = $"第 {Math.Max(1, _engine.RoundNumber)} / {_engine.Rules.Progress.RoundCount} ラウンド";
+            RoundInfoText = FormatRoundInfo(Math.Max(1, _engine.RoundNumber), _engine.Rules.Progress.RoundCount);
+            ApplyFieldBadges(_engine.Field);
             UpdateAllPlayersInfo();
+
+            // ロビーでゲームを開始してからこの画面が購読するまでに出た判断要求は届いていないため、
+            // 現在の判断待ちを直接反映する（再発行すると NPC にも二重に届くので行わない）
+            if (_engine.PendingDecision is { } pending)
+            {
+                UpdateTurnState(pending.PlayerId);
+                HandleDecisionRequested(pending);
+            }
             UpdateHumanHandVisuals();
             return;
         }
@@ -226,7 +247,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         // ゲーム開始（ラウンド表示は実際のルールのラウンド数で初期化する）
         _engine.StartGame();
-        RoundInfoText = $"第 {_engine.RoundNumber} / {_engine.Rules.Progress.RoundCount} ラウンド";
+        RoundInfoText = FormatRoundInfo(_engine.RoundNumber, _engine.Rules.Progress.RoundCount);
         UpdateAllPlayersInfo();
         UpdateHumanHandVisuals();
     }
@@ -244,6 +265,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
         switch (ev)
         {
             case HandsDealtEvent:
+                ApplyFieldBadges(_engine.Field); // 新しいラウンドの場の状態に戻す
                 HandDealtTriggered?.Invoke(this, EventArgs.Empty);
                 _audio.Play(SoundEffect.CardDeal);
                 break;
@@ -260,6 +282,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                     foreach (var c in cp.Judgement.Play.Cards) FieldCards.Add(c);
                 }
                 GetPlayerVm(cp.PlayerId).IsPassed = false;
+                ApplyFieldBadges(cp.Field);
                 StatusMessage = $"{GetPlayerVm(cp.PlayerId).Name} がカードを出しました";
                 UpdateAllPlayersInfo();
                 _audio.Play(SoundEffect.CardPlay);
@@ -271,9 +294,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 break;
 
             case EffectAppliedEvent ea:
-                IsRevolution = ea.Field.IsRevolution;
-                IsElevenBack = ea.Field.IsElevenBack;
-                UpdateLockState(ea.Field.Lock);
+                ApplyFieldBadges(ea.Field);
                 if (ea.Applied)
                 {
                     TriggerCutInForEffect(ea.Effect.Type, ea.PlayerId);
@@ -283,6 +304,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
             case FieldFlushedEvent ff:
                 FieldCards.Clear();
+                ApplyFieldBadges(ff.Field); // 11バック・縛りは場が流れると解除される
                 StatusMessage = ff.Cause.HasValue ? $"場が流れました（{ff.Cause.Value}）" : "場が流れました";
                 for (int i = 0; i < 4; i++) GetPlayerVm(i).IsPassed = false;
                 FieldFlushedTriggered?.Invoke(this, EventArgs.Empty);
@@ -307,6 +329,17 @@ public sealed partial class GameTableViewModel : ViewModelBase
         }
 
         UpdateHumanHandVisuals();
+    }
+
+    /// <summary>ラウンド表示。規定ラウンドを超えた同点決着の延長戦は「延長戦」と表示する。</summary>
+    private static string FormatRoundInfo(int roundNumber, int roundCount)
+    {
+        if (roundCount > 0 && roundNumber > roundCount)
+        {
+            int extra = roundNumber - roundCount;
+            return extra == 1 ? $"延長戦（第 {roundNumber} ラウンド）" : $"延長戦 {extra}（第 {roundNumber} ラウンド）";
+        }
+        return $"第 {roundNumber} / {roundCount} ラウンド";
     }
 
     private void UpdateTurnState(int activePlayerId)
@@ -340,6 +373,14 @@ public sealed partial class GameTableViewModel : ViewModelBase
             vm.TotalScore = enginePlayer.TotalScore;
             vm.IsPassed = _engine.Field.HasPassed(i);
         }
+    }
+
+    /// <summary>革命・11バック・縛りの表示を場の状態に合わせる。</summary>
+    private void ApplyFieldBadges(FieldState field)
+    {
+        IsRevolution = field.IsRevolution;
+        IsElevenBack = field.IsElevenBack;
+        UpdateLockState(field.Lock);
     }
 
     private void UpdateLockState(LockState lockState)
@@ -392,7 +433,22 @@ public sealed partial class GameTableViewModel : ViewModelBase
     {
         cardVm.IsSelected = !cardVm.IsSelected;
         _audio.Play(SoundEffect.CardSelect);
-        UpdateHumanHandVisuals();
+        if (_client != null)
+        {
+            UpdateGuestCanPlay(); // ゲストはホストから届いた合法手で判定する
+        }
+        else
+        {
+            UpdateHumanHandVisuals();
+        }
+    }
+
+    /// <summary>ゲスト：最後に届いた合法手と現在の選択から「出す」可否を決める。</summary>
+    private void UpdateGuestCanPlay()
+    {
+        var selected = HumanHand.Where(vm => vm.IsSelected).Select(vm => vm.Card).ToList();
+        CanPlay = selected.Count > 0
+            && _guestLegalPlays.Any(lp => lp.Count == selected.Count && lp.All(selected.Contains));
     }
 
     // ------------------------------------------------------------------
@@ -526,7 +582,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         if (_client != null)
         {
-            await _client.PlayAsync(selected);
+            ShowGuestRejected(await SendGuestCommandAsync(_client.PlayAsync(selected)));
             return;
         }
 
@@ -538,6 +594,10 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 HumanHand.Clear();
                 UpdateHumanHandVisuals();
             }
+            else if (!result.IsDeferred)
+            {
+                ShowRejected(result);
+            }
         }
     }
 
@@ -546,15 +606,48 @@ public sealed partial class GameTableViewModel : ViewModelBase
     {
         if (_client != null)
         {
-            await _client.PassAsync();
+            ShowGuestRejected(await SendGuestCommandAsync(_client.PassAsync()));
             return;
         }
 
         if (_engine != null)
         {
-            _engine.SubmitPass(_myPlayerId);
-            GetPlayerVm(_myPlayerId).IsPassed = true;
+            var result = _engine.SubmitPass(_myPlayerId);
+            if (result.IsAccepted || result.IsDeferred)
+            {
+                GetPlayerVm(_myPlayerId).IsPassed = true;
+            }
+            else
+            {
+                ShowRejected(result);
+            }
         }
+    }
+
+    /// <summary>ゲストのコマンドを送る。通信エラーは案内に出して null を返す。</summary>
+    private async Task<CommandResponse?> SendGuestCommandAsync(Task<CommandResponse> sending)
+    {
+        try
+        {
+            return await sending;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            if (!_isShutDown) StatusMessage = $"送信できませんでした: {ex.Message}";
+            return null;
+        }
+    }
+
+    private void ShowGuestRejected(CommandResponse? response)
+    {
+        if (_isShutDown || response is null || response.Error is CommandError.None or CommandError.Deferred) return;
+        ShowRejected(new CommandResult(response.Error, _myPlayerId, response.PlayReject));
+    }
+
+    /// <summary>操作がエンジンに受け付けられなかった理由を案内に出す。</summary>
+    private void ShowRejected(CommandResult result)
+    {
+        StatusMessage = $"その操作はできません（{result.Error}{(result.PlayReject != PlayRejectReason.None ? "/" + result.PlayReject : "")}）";
     }
 
     private void OnClientViewUpdated(object? sender, ClientView view)
@@ -578,7 +671,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
     {
         if (_isShutDown) return;
         _myPlayerId = view.MyPlayerId;
-        RoundInfoText = $"第 {view.RoundNumber} / {view.RoundCount} ラウンド";
+        RoundInfoText = FormatRoundInfo(view.RoundNumber, view.RoundCount);
 
         // ゲスト：ホストが次のラウンドを始めたら結果画面を閉じる
         if (IsRoundResultOpen && !IsGameOver && view.RoundNumber > _guestResultRound
@@ -642,9 +735,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
         var legalSet = view.LegalPlays != null
             ? view.LegalPlays.Select(arr => arr.Select(Card.FromId).ToList()).ToList()
             : new List<List<Card>>();
-
-        var selected = HumanHand.Where(vm => vm.IsSelected).Select(vm => vm.Card).ToList();
-        CanPlay = legalSet.Any(lp => lp.Count == selected.Count && lp.All(selected.Contains));
+        _guestLegalPlays = legalSet;
+        UpdateGuestCanPlay();
 
         foreach (var cardVm in HumanHand)
         {
@@ -652,11 +744,43 @@ public sealed partial class GameTableViewModel : ViewModelBase
         }
 
         StatusMessage = isMyDecision ? "あなたのターンです" : "相手のターンです...";
+
+        // 判断ダイアログ（革命選択・カード選択）。ホストの判断要求が自分宛てなら開き、解決されたら閉じる
+        var dec = view.Decision;
+        if (isMyDecision && dec is not null && dec.Kind is DecisionKind.RevolutionChoice or DecisionKind.SelectCards)
+        {
+            // 送信済みでホストの処理待ちの判断は開き直さない（同じ判断を二重に送らないため）
+            bool sameAsCurrent = _currentDecision is not null && _currentDecision.Kind == dec.Kind && _currentDecision.Purpose == dec.Purpose;
+            bool waitingHost = _guestDecisionInFlight && sameAsCurrent;
+            if (!waitingHost && !(IsDecisionDialogOpen && sameAsCurrent))
+            {
+                _guestDecisionInFlight = false;
+                HandleDecisionRequested(new PendingDecision(dec.Kind, dec.PlayerId)
+                {
+                    Purpose = dec.Purpose,
+                    MinCount = dec.MinCount,
+                    MaxCount = dec.MaxCount,
+                    TargetPlayerId = dec.TargetPlayerId,
+                    Effect = dec.Effect,
+                    CanPass = dec.CanPass,
+                });
+            }
+            StatusMessage = "あなたの選択を待っています";
+        }
+        else
+        {
+            _guestDecisionInFlight = false;
+            if (IsDecisionDialogOpen)
+            {
+                IsDecisionDialogOpen = false;
+                _currentDecision = null;
+            }
+        }
     }
 
     private void HandleDecisionRequested(PendingDecision dec)
     {
-        if (dec.PlayerId != 0) return;
+        if (dec.PlayerId != _myPlayerId) return;
 
         _currentDecision = dec;
 
@@ -688,15 +812,54 @@ public sealed partial class GameTableViewModel : ViewModelBase
     [RelayCommand]
     private void SubmitRevolutionDecision(bool accept)
     {
+        if (_client != null)
+        {
+            IsDecisionDialogOpen = false;
+            _ = SendGuestDecisionAsync(_client.ChooseRevolutionAsync(accept));
+            return;
+        }
         if (_engine == null) return;
         IsDecisionDialogOpen = false;
-        _engine.SubmitRevolutionChoice(0, accept);
+        _engine.SubmitRevolutionChoice(_myPlayerId, accept);
+    }
+
+    /// <summary>ゲストの判断をホストへ送る。拒否されたらダイアログを開き直して選び直してもらう。</summary>
+    private async Task SendGuestDecisionAsync(Task<CommandResponse> sending)
+    {
+        _guestDecisionInFlight = true;
+        var decision = _currentDecision;
+        try
+        {
+            var response = await sending;
+            if (response.Error is not (CommandError.None or CommandError.Deferred))
+            {
+                _dispatcherQueue.TryEnqueue(() =>
+                {
+                    if (_isShutDown) return;
+                    _guestDecisionInFlight = false;
+                    if (decision is not null)
+                    {
+                        HandleDecisionRequested(decision);
+                        DecisionMessage = $"選択が受け付けられませんでした（{response.Error}）";
+                    }
+                });
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _dispatcherQueue.TryEnqueue(() =>
+            {
+                if (_isShutDown) return;
+                _guestDecisionInFlight = false;
+                StatusMessage = $"選択を送れませんでした: {ex.Message}";
+            });
+        }
     }
 
     [RelayCommand]
     private void SubmitCardSelectionDecision()
     {
-        if (_engine == null || _currentDecision is null) return;
+        if ((_engine == null && _client == null) || _currentDecision is null) return;
         var selected = HumanHand.Where(vm => vm.IsSelected).Select(vm => vm.Card).ToList();
 
         // 枚数が合わないまま閉じるとエンジンに拒否されて進めなくなるため、送信前に確認する
@@ -708,7 +871,14 @@ public sealed partial class GameTableViewModel : ViewModelBase
             return;
         }
 
-        var result = _engine.SubmitCardSelection(0, selected);
+        if (_client != null)
+        {
+            IsDecisionDialogOpen = false;
+            _ = SendGuestDecisionAsync(_client.SelectCardsAsync(selected));
+            return;
+        }
+
+        var result = _engine!.SubmitCardSelection(_myPlayerId, selected);
         if (!result.IsAccepted && !result.IsDeferred)
         {
             DecisionMessage = $"そのカードは選べません（{result.Error}）";
@@ -720,7 +890,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
     private void HandleRoundEnded(RoundResult result)
     {
-        RoundInfoText = $"第 {_engine?.RoundNumber} / {_rules.Progress.RoundCount} ラウンド終了";
+        RoundInfoText = FormatRoundInfo(_engine?.RoundNumber ?? 0, _rules.Progress.RoundCount) + "終了";
         var lines = result.Standings.Select(s => $"{s.Position}位: {GetPlayerVm(s.PlayerId).Name} ({s.Rank}) -> 得点: {s.Points}pt");
         RoundResultText = string.Join("\n", lines);
         IsRoundResultOpen = true;
@@ -932,7 +1102,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
         }
         FieldCards.Clear();
         _engine.StartNextRound();
-        RoundInfoText = $"第 {_engine.RoundNumber} / {_rules.Progress.RoundCount} ラウンド";
+        RoundInfoText = FormatRoundInfo(_engine.RoundNumber, _rules.Progress.RoundCount);
     }
 
     private void HandleGameEnded(GameResult result)

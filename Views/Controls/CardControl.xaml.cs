@@ -25,6 +25,9 @@ public sealed partial class CardControl : UserControl
     public static readonly DependencyProperty IsFacedDownProperty =
         DependencyProperty.Register(nameof(IsFacedDown), typeof(bool), typeof(CardControl), new PropertyMetadata(false, OnIsFacedDownChanged));
 
+    public static readonly DependencyProperty IsKeyboardCursorProperty =
+        DependencyProperty.Register(nameof(IsKeyboardCursor), typeof(bool), typeof(CardControl), new PropertyMetadata(false, OnIsKeyboardCursorChanged));
+
     public event EventHandler<Card>? CardClicked;
     public event EventHandler<Card>? CardDoubleClicked;
 
@@ -58,6 +61,21 @@ public sealed partial class CardControl : UserControl
     {
         get => (bool)GetValue(IsFacedDownProperty);
         set => SetValue(IsFacedDownProperty, value);
+    }
+
+    /// <summary>キーボード操作のカーソルがこのカードにあるか（枠で示す）。</summary>
+    public bool IsKeyboardCursor
+    {
+        get => (bool)GetValue(IsKeyboardCursorProperty);
+        set => SetValue(IsKeyboardCursorProperty, value);
+    }
+
+    private static void OnIsKeyboardCursorChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CardControl control)
+        {
+            control.KeyboardCursorOverlay.Visibility = (bool)e.NewValue ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     public CardControl()

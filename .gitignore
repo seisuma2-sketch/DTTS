@@ -27,3 +27,8 @@ skins/
 # Test outputs
 TestResults/
 
+
+# Packaging outputs / signing keys
+artifacts/
+*.pfx
+

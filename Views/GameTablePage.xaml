@@ -27,6 +27,8 @@
                         <Setter Target="Player2Panel.Visibility" Value="Visible" />
                         <Setter Target="Player3Panel.Visibility" Value="Visible" />
                         <Setter Target="Player1Panel.Visibility" Value="Visible" />
+                        <Setter Target="LeftColumn.Width" Value="180" />
+                        <Setter Target="RightColumn.Width" Value="180" />
                     </VisualState.Setters>
                 </VisualState>
 
@@ -40,6 +42,9 @@
                         <Setter Target="Player2Panel.Visibility" Value="Collapsed" />
                         <Setter Target="Player3Panel.Visibility" Value="Collapsed" />
                         <Setter Target="Player1Panel.Visibility" Value="Collapsed" />
+                        <!-- 左右の相手パネルを出さないので、横の列は中身（ヘッダー）の幅だけにする -->
+                        <Setter Target="LeftColumn.Width" Value="Auto" />
+                        <Setter Target="RightColumn.Width" Value="Auto" />
                     </VisualState.Setters>
                 </VisualState>
             </VisualStateGroup>
@@ -61,9 +66,9 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="180" />
+                <ColumnDefinition x:Name="LeftColumn" Width="180" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="180" />
+                <ColumnDefinition x:Name="RightColumn" Width="180" />
             </Grid.ColumnDefinitions>
 
             <!-- ヘッダー情報バー (ラウンド表示 & 戻るボタン) -->
@@ -86,11 +91,14 @@
 
             <!-- コンパクトモード用：上部3人並びパネル (幅800px未満で表示) -->
             <Grid x:Name="OpponentRow" Grid.Row="0" Grid.Column="1" HorizontalAlignment="Center" Visibility="Collapsed">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <ctrl:PlayerPanelControl x:Name="Player3SlimPanel" MinWidth="130" />
-                    <ctrl:PlayerPanelControl x:Name="Player2SlimPanel" MinWidth="130" />
-                    <ctrl:PlayerPanelControl x:Name="Player1SlimPanel" MinWidth="130" />
-                </StackPanel>
+                <!-- 幅が足りないときは3人分をまとめて縮小して収める（はみ出して見切れないように） -->
+                <Viewbox StretchDirection="DownOnly" HorizontalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ctrl:PlayerPanelControl x:Name="Player3SlimPanel" MinWidth="130" />
+                        <ctrl:PlayerPanelControl x:Name="Player2SlimPanel" MinWidth="130" />
+                        <ctrl:PlayerPanelControl x:Name="Player1SlimPanel" MinWidth="130" />
+                    </StackPanel>
+                </Viewbox>
             </Grid>
 
             <!-- 北 (Seat 2: WideLayout時) -->
@@ -206,14 +214,16 @@
                     Grid.Column="0"
                     VerticalAlignment="Bottom" />
 
-                <!-- 手札カード一覧 (クリックで選択トグル) -->
+                <!-- 手札カード一覧 (クリックで選択トグル)。重なり幅は表示幅と枚数に応じてコードで調整する -->
                 <ScrollViewer
+                    x:Name="HandScrollViewer"
                     Grid.Column="1"
                     HorizontalScrollBarVisibility="Auto"
                     VerticalScrollBarVisibility="Disabled"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Bottom">
-                    <ItemsControl x:Name="HumanHandItemsControl" ItemsSource="{x:Bind ViewModel.HumanHand, Mode=OneWay}">
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Bottom"
+                    SizeChanged="OnHandAreaSizeChanged">
+                    <ItemsControl x:Name="HumanHandItemsControl" HorizontalAlignment="Center" ItemsSource="{x:Bind ViewModel.HumanHand, Mode=OneWay}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <StackPanel Orientation="Horizontal" Spacing="-16" Padding="20,20,20,0" />
@@ -225,6 +235,7 @@
                                     Card="{x:Bind Card}"
                                     IsSelected="{x:Bind IsSelected, Mode=TwoWay}"
                                     CanPlay="{x:Bind CanPlay, Mode=OneWay}"
+                                    IsKeyboardCursor="{x:Bind IsKeyboardCursor, Mode=OneWay}"
                                     CardClicked="OnCardClicked"
                                     CardDoubleClicked="OnCardDoubleClicked" />
                             </DataTemplate>

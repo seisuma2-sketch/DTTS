@@ -125,7 +125,7 @@
 
                 <!-- フッター -->
                 <TextBlock
-                    Text="v1.0.0 • Offline Ready"
+                    Text="{x:Bind VersionText}"
                     FontSize="12"
                     Foreground="{StaticResource AppTextMutedBrush}"
                     HorizontalAlignment="Center" />

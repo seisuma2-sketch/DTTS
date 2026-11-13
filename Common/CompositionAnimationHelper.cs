@@ -143,68 +143,80 @@ public static class CompositionAnimationHelper
     /// <summary>
     /// 大迫力のカットイン演出（中央でSpring拡大してバウンド着地後、一定時間後にフェードアウト）。
     /// </summary>
-    public static void AnimateCutIn(UIElement bannerElement, Action? onCompleted = null)
+    /// <remarks>
+    /// 登場・静止・退場を1本のキーフレームアニメーション（合計 <see cref="CutInDurationMs"/>）で表し、
+    /// 最終フレームで必ず透明になる。完了通知（ScopedBatch）には依存しないため、演出が重なったり
+    /// 途中で止められたりしても画面に残らない。非表示への切り替えは呼び出し側が <see cref="ResetCutIn"/> で行う。
+    /// </remarks>
+    public static void AnimateCutIn(UIElement bannerElement)
     {
         var visual = ElementCompositionPreview.GetElementVisual(bannerElement);
         var compositor = visual.Compositor;
+
+        StopCutInAnimations(bannerElement, visual);
+        bannerElement.Visibility = Visibility.Visible;
+        bannerElement.UpdateLayout(); // 中心点の計算に実サイズを使う
 
         if (bannerElement is FrameworkElement fe)
         {
             visual.CenterPoint = new Vector3((float)fe.ActualWidth / 2f, (float)fe.ActualHeight / 2f, 0f);
         }
-
-        bannerElement.Visibility = Visibility.Visible;
+        visual.Properties.InsertVector3("Translation", Vector3.Zero);
         visual.Scale = new Vector3(0.3f, 0.3f, 1f);
         visual.Opacity = 0f;
 
-        // フェーズ1: Spring バウンドイン
-        var scaleSpring = compositor.CreateSpringVector3Animation();
-        scaleSpring.Target = "Scale";
-        scaleSpring.FinalValue = new Vector3(1.05f, 1.05f, 1f);
-        scaleSpring.DampingRatio = 0.55f;
-        scaleSpring.Period = TimeSpan.FromMilliseconds(320);
+        var duration = TimeSpan.FromMilliseconds(CutInDurationMs);
 
-        var opacityAnim = compositor.CreateScalarKeyFrameAnimation();
-        opacityAnim.Target = "Opacity";
-        opacityAnim.InsertKeyFrame(1.0f, 1.0f);
-        opacityAnim.Duration = TimeSpan.FromMilliseconds(150);
+        // 0〜0.25: 弾むように拡大 → 0.25〜0.79: 静止 → 0.79〜1.0: 上へ流れて消える
+        var scale = compositor.CreateVector3KeyFrameAnimation();
+        scale.Target = "Scale";
+        scale.Duration = duration;
+        scale.InsertKeyFrame(0.00f, new Vector3(0.3f, 0.3f, 1f));
+        scale.InsertKeyFrame(0.17f, new Vector3(1.12f, 1.12f, 1f));
+        scale.InsertKeyFrame(0.25f, new Vector3(1.0f, 1.0f, 1f));
+        scale.InsertKeyFrame(1.00f, new Vector3(1.0f, 1.0f, 1f));
 
-        var inBatch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
-        inBatch.Completed += (s, e) =>
-        {
-            // 700ms 表示後、上方向にスライド＆フェードアウト
-            var outBatch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
-            outBatch.Completed += (s2, e2) =>
-            {
-                bannerElement.Visibility = Visibility.Collapsed;
-                visual.Opacity = 1f;
-                visual.Scale = new Vector3(1f, 1f, 1f);
-                ElementCompositionPreview.SetIsTranslationEnabled(bannerElement, false);
-                onCompleted?.Invoke();
-            };
+        var opacity = compositor.CreateScalarKeyFrameAnimation();
+        opacity.Target = "Opacity";
+        opacity.Duration = duration;
+        opacity.InsertKeyFrame(0.00f, 0f);
+        opacity.InsertKeyFrame(0.12f, 1f);
+        opacity.InsertKeyFrame(0.79f, 1f);
+        opacity.InsertKeyFrame(1.00f, 0f);
 
-            ElementCompositionPreview.SetIsTranslationEnabled(bannerElement, true);
+        var slide = compositor.CreateVector3KeyFrameAnimation();
+        slide.Target = "Translation";
+        slide.Duration = duration;
+        slide.InsertKeyFrame(0.00f, Vector3.Zero);
+        slide.InsertKeyFrame(0.79f, Vector3.Zero);
+        slide.InsertKeyFrame(1.00f, new Vector3(0f, -40f, 0f));
 
-            var slideOut = compositor.CreateVector3KeyFrameAnimation();
-            slideOut.Target = "Translation";
-            slideOut.InsertKeyFrame(1.0f, new Vector3(0f, -40f, 0f));
-            slideOut.Duration = TimeSpan.FromMilliseconds(250);
-            slideOut.DelayTime = TimeSpan.FromMilliseconds(700);
+        visual.StartAnimation("Scale", scale);
+        visual.StartAnimation("Opacity", opacity);
+        visual.StartAnimation("Translation", slide);
+    }
 
-            var fadeOut = compositor.CreateScalarKeyFrameAnimation();
-            fadeOut.Target = "Opacity";
-            fadeOut.InsertKeyFrame(1.0f, 0f);
-            fadeOut.Duration = TimeSpan.FromMilliseconds(250);
-            fadeOut.DelayTime = TimeSpan.FromMilliseconds(700);
+    /// <summary>カットイン演出1回分の長さ（ミリ秒）。</summary>
+    public const double CutInDurationMs = 1200;
 
-            visual.StartAnimation("Translation", slideOut);
-            visual.StartAnimation("Opacity", fadeOut);
-            outBatch.End();
-        };
+    /// <summary>再生中のカットインを即座に止めて非表示にし、次回のために状態を初期値へ戻す。</summary>
+    public static void ResetCutIn(UIElement bannerElement)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(bannerElement);
+        StopCutInAnimations(bannerElement, visual);
+        bannerElement.Visibility = Visibility.Collapsed;
+        visual.Opacity = 1f;
+        visual.Scale = Vector3.One;
+        visual.Properties.InsertVector3("Translation", Vector3.Zero);
+    }
 
-        visual.StartAnimation("Scale", scaleSpring);
-        visual.StartAnimation("Opacity", opacityAnim);
-        inBatch.End();
+    private static void StopCutInAnimations(UIElement element, Visual visual)
+    {
+        // Translation は有効化するまでプロパティとして存在せず、止めようとすると E_INVALIDARG で落ちる
+        ElementCompositionPreview.SetIsTranslationEnabled(element, true);
+        visual.StopAnimation("Scale");
+        visual.StopAnimation("Opacity");
+        visual.StopAnimation("Translation");
     }
 }
 

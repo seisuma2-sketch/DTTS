@@ -18,8 +18,19 @@ using Windows.UI.Core;
 
 namespace DTTS.Views;
 
-public sealed partial class GameTablePage : Page, IBackRequestHandler
+public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyHandler
 {
+    /// <inheritdoc />
+    public void HandlePageKey(KeyRoutedEventArgs e)
+    {
+        OnPageKeyDown(this, e);
+        if (e.Handled && !_isDetached && !_isLeaveDialogOpen)
+        {
+            // 外れていたフォーカスをページへ戻し、以降のキーは直接ページで受ける
+            Focus(FocusState.Programmatic);
+        }
+    }
+
     public GameTableViewModel ViewModel { get; }
 
     public bool TrueValue => true;
@@ -42,10 +53,57 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler
         ViewModel.FieldFlushedTriggered += OnFieldFlushedTriggered;
         ViewModel.HandDealtTriggered += OnHandDealtTriggered;
         ViewModel.FieldCards.CollectionChanged += OnFieldCardsCollectionChanged;
+        ViewModel.HumanHand.CollectionChanged += OnHumanHandCollectionChanged;
+        ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+    }
+
+    // ------------------------------------------------------------------
+    // カットイン演出（ラウンド結果の表示時には即座に消す）
+    // ------------------------------------------------------------------
+
+    /// <summary>カットインの表示時間。アニメーション（約1.2秒）が終わったあとで確実に非表示へ戻す。</summary>
+    private static readonly TimeSpan CutInLifetime = TimeSpan.FromMilliseconds(1400);
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _cutInTimer;
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(GameTableViewModel.IsRoundResultOpen) && ViewModel.IsRoundResultOpen)
+        {
+            HideCutIn();
+        }
+
+        // オーバーレイ（ラウンド結果・判断ダイアログ）が閉じると、その中のボタンにあったフォーカスが
+        // ページの外へ外れることがある。キー操作を続けられるようページへ戻す
+        if ((e.PropertyName == nameof(GameTableViewModel.IsRoundResultOpen) && !ViewModel.IsRoundResultOpen)
+            || (e.PropertyName == nameof(GameTableViewModel.IsDecisionDialogOpen) && !ViewModel.IsDecisionDialogOpen))
+        {
+            if (!_isDetached && !_isLeaveDialogOpen)
+            {
+                Focus(FocusState.Programmatic);
+            }
+        }
+    }
+
+    private void HideCutIn()
+    {
+        _cutInTimer?.Stop();
+        try
+        {
+            CompositionAnimationHelper.ResetCutIn(CutInOverlay);
+        }
+        catch (Exception ex)
+        {
+            // 演出の失敗で対戦を止めない（記録だけ残して非表示にする）
+            App.WriteCrashLog("HideCutIn", ex);
+            CutInOverlay.Visibility = Visibility.Collapsed;
+        }
     }
 
     private void OnCutInTriggered(object? sender, CutInEventArgs e)
     {
+        // ラウンド結果を表示している間は演出を出さない（結果の裏に残らないように）
+        if (ViewModel.IsRoundResultOpen) return;
+
         CutInTitleText.Text = e.Title;
         CutInSubText.Text = e.SubTitle;
         CutInDetailText.Text = e.Detail;
@@ -55,7 +113,87 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler
         CutInTitleText.Foreground = brush;
         CutInBorder.BorderBrush = brush;
 
-        CompositionAnimationHelper.AnimateCutIn(CutInOverlay);
+        try
+        {
+            CompositionAnimationHelper.AnimateCutIn(CutInOverlay);
+        }
+        catch (Exception ex)
+        {
+            // 演出の失敗で対戦を止めない
+            App.WriteCrashLog("AnimateCutIn", ex);
+            CutInOverlay.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        // 1回だけ発火するタイマーで、アニメーションの完了通知に頼らず必ず非表示へ戻す
+        if (_cutInTimer is null)
+        {
+            _cutInTimer = DispatcherQueue.CreateTimer();
+            _cutInTimer.IsRepeating = false;
+            _cutInTimer.Tick += (_, _) => HideCutIn();
+        }
+        _cutInTimer.Stop();
+        _cutInTimer.Interval = CutInLifetime;
+        _cutInTimer.Start();
+    }
+
+    // ------------------------------------------------------------------
+    // 手札の並べ方（重なり幅を表示幅と枚数に合わせて調整）とキーボードカーソル
+    // ------------------------------------------------------------------
+
+    private const double HandCardWidth = 70;
+    private const double HandPaddingX = 20;
+    private const double HandMaxSpacing = -16; // 余裕があるときの重なり
+    private const double HandMinSpacing = -50; // これ以上重ねると数字が読めなくなる（はみ出す分はスクロール）
+    private bool _keyboardCursorVisible;
+
+    private void OnHandAreaSizeChanged(object sender, SizeChangedEventArgs e) => UpdateHandSpacing();
+
+    private void OnHumanHandCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        UpdateHandSpacing();
+        UpdateKeyboardCursor();
+    }
+
+    private void UpdateHandSpacing()
+    {
+        if (HumanHandItemsControl.ItemsPanelRoot is not StackPanel panel) return;
+        int count = ViewModel.HumanHand.Count;
+        double available = HandScrollViewer.ActualWidth - HandPaddingX * 2;
+        double spacing = HandMaxSpacing;
+        if (count > 1 && available > 0)
+        {
+            double fit = (available - count * HandCardWidth) / (count - 1);
+            spacing = Math.Clamp(fit, HandMinSpacing, HandMaxSpacing);
+        }
+        if (Math.Abs(panel.Spacing - spacing) > 0.5)
+        {
+            panel.Spacing = spacing;
+        }
+    }
+
+    private void UpdateKeyboardCursor()
+    {
+        var hand = ViewModel.HumanHand;
+        if (hand.Count > 0)
+        {
+            _focusedCardIndex = Math.Clamp(_focusedCardIndex, 0, hand.Count - 1);
+        }
+        for (int i = 0; i < hand.Count; i++)
+        {
+            hand[i].IsKeyboardCursor = _keyboardCursorVisible && i == _focusedCardIndex;
+        }
+    }
+
+    private void MoveKeyboardCursor(int delta)
+    {
+        _keyboardCursorVisible = true;
+        _focusedCardIndex += delta;
+        UpdateKeyboardCursor();
+        if (HumanHandItemsControl.ContainerFromIndex(_focusedCardIndex) is FrameworkElement fe)
+        {
+            fe.StartBringIntoView();
+        }
     }
 
     private void OnFieldFlushedTriggered(object? sender, EventArgs e)
@@ -131,6 +269,9 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler
         ViewModel.FieldFlushedTriggered -= OnFieldFlushedTriggered;
         ViewModel.HandDealtTriggered -= OnHandDealtTriggered;
         ViewModel.FieldCards.CollectionChanged -= OnFieldCardsCollectionChanged;
+        ViewModel.HumanHand.CollectionChanged -= OnHumanHandCollectionChanged;
+        ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        _cutInTimer?.Stop();
     }
 
     // ------------------------------------------------------------------
@@ -182,6 +323,7 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler
     {
         await ViewModel.InitializeAsync(_navParams);
         UpdateAllPanels();
+        UpdateHandSpacing();
         Focus(FocusState.Programmatic);
     }
 
@@ -212,6 +354,12 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler
     {
         if (sender is CardControl ctrl && ctrl.DataContext is CardViewModel vm)
         {
+            // マウス操作に切り替わったらキーボードカーソルは隠し、位置だけクリックしたカードに合わせる
+            int index = ViewModel.HumanHand.IndexOf(vm);
+            if (index >= 0) _focusedCardIndex = index;
+            _keyboardCursorVisible = false;
+            UpdateKeyboardCursor();
+
             // 選択の切り替えは ViewModel のコマンドに集約（選択音・出せるかの再計算もここで行う）
             ViewModel.ToggleCardSelectionCommand.Execute(vm);
         }
@@ -320,11 +468,9 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler
             case VirtualKey.Space:
                 if (ViewModel.HumanHand.Count > 0)
                 {
-                    if (_focusedCardIndex >= 0 && _focusedCardIndex < ViewModel.HumanHand.Count)
-                    {
-                        var vm = ViewModel.HumanHand[_focusedCardIndex];
-                        ViewModel.ToggleCardSelectionCommand.Execute(vm);
-                    }
+                    MoveKeyboardCursor(0); // カーソルを表示し、範囲内に収める
+                    var vm = ViewModel.HumanHand[_focusedCardIndex];
+                    ViewModel.ToggleCardSelectionCommand.Execute(vm);
                     e.Handled = true;
                 }
                 break;
@@ -332,7 +478,7 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler
             case VirtualKey.Left or VirtualKey.A:
                 if (ViewModel.HumanHand.Count > 0)
                 {
-                    _focusedCardIndex = Math.Max(0, _focusedCardIndex - 1);
+                    MoveKeyboardCursor(-1);
                     e.Handled = true;
                 }
                 break;
@@ -340,7 +486,7 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler
             case VirtualKey.Right or VirtualKey.D:
                 if (ViewModel.HumanHand.Count > 0)
                 {
-                    _focusedCardIndex = Math.Min(ViewModel.HumanHand.Count - 1, _focusedCardIndex + 1);
+                    MoveKeyboardCursor(+1);
                     e.Handled = true;
                 }
                 break;

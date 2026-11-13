@@ -13,6 +13,10 @@ public sealed partial class CardViewModel : ObservableObject
     [ObservableProperty]
     public partial bool CanPlay { get; set; } = true;
 
+    /// <summary>キーボード操作のカーソルがこのカードにあるか（表示専用）。</summary>
+    [ObservableProperty]
+    public partial bool IsKeyboardCursor { get; set; }
+
     public CardViewModel(Card card)
     {
         Card = card;

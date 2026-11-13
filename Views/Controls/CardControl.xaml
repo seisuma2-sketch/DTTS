@@ -114,6 +114,14 @@
                     CornerRadius="8"
                     Background="#80000000"
                     Visibility="Collapsed" />
+
+                <!-- 6. キーボード操作中のカーソル枠（←/→ で移動、Space で選択） -->
+                <Border
+                    x:Name="KeyboardCursorOverlay"
+                    CornerRadius="8"
+                    BorderThickness="3"
+                    BorderBrush="#FFF2C94C"
+                    Visibility="Collapsed" />
             </Grid>
         </Border>
     </Grid>
