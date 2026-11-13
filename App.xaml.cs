@@ -168,6 +168,11 @@ public partial class App : Application
 
         // 効果音：設定を反映し、読み込みはバックグラウンドで行う（起動を待たせない）
         audio.ApplySettings(appearance);
+        if (AudioLaunchOptions.IsMuteRequestedForCurrentProcess())
+        {
+            // 自動テスト用：--mute / DTTS_MUTE=1 のときはこの回だけ無音にする（保存済みの設定は変えない）
+            audio.SetSoundEnabled(false);
+        }
         _ = audio.InitializeAsync();
 
         // 6. ウィンドウ表示

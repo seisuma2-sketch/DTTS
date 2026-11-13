@@ -362,6 +362,10 @@ internal static class EngineTests
             error ??= msg;
         }
 
+        // 不変条件：パスした人には、場が流れるかカードが出されるまで手番が回ってこない
+        // （「パスしたのに自分の手番のまま」にならないこと）
+        int? lastPasser = null;
+
         engine.EventOccurred += (_, e) =>
         {
             if (++events > 500_000)
@@ -370,7 +374,19 @@ internal static class EngineTests
             }
             switch (e)
             {
+                case PlayerPassedEvent pp when !pp.IsFourStopDecline:
+                    lastPasser = pp.PlayerId;
+                    Cover("pass");
+                    break;
+                case FieldFlushedEvent:
+                case CardsPlayedEvent when lastPasser is not null:
+                    lastPasser = null;
+                    break;
+            }
+            switch (e)
+            {
                 case RoundStartedEvent rs:
+                    lastPasser = null;
                     outCards.Clear();
                     if (rs.IsExtraRound) Cover("extra-round");
                     break;
@@ -405,6 +421,10 @@ internal static class EngineTests
                     Fail("rejected " + cr.Result);
                     break;
                 case DecisionRequestedEvent dr:
+                    if (dr.Decision.Kind == DecisionKind.PlayOrPass && dr.Decision.PlayerId == lastPasser)
+                    {
+                        Fail($"turn returned to passer {lastPasser} without flush field={engine.Field}");
+                    }
                     var result = Respond(engine, dr.Decision, rnd);
                     if (result.IsDeferred) Cover("deferred");
                     else Fail("expected deferred " + result);

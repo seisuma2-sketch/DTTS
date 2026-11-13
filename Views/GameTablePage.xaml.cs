@@ -112,6 +112,8 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         var brush = new SolidColorBrush(color);
         CutInTitleText.Foreground = brush;
         CutInBorder.BorderBrush = brush;
+        CutInIcon.Glyph = e.Glyph;
+        CutInIcon.Foreground = brush;
 
         try
         {

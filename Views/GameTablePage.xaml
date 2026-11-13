@@ -27,8 +27,8 @@
                         <Setter Target="Player2Panel.Visibility" Value="Visible" />
                         <Setter Target="Player3Panel.Visibility" Value="Visible" />
                         <Setter Target="Player1Panel.Visibility" Value="Visible" />
-                        <Setter Target="LeftColumn.Width" Value="180" />
-                        <Setter Target="RightColumn.Width" Value="180" />
+                        <Setter Target="LeftColumn.Width" Value="230" />
+                        <Setter Target="RightColumn.Width" Value="230" />
                     </VisualState.Setters>
                 </VisualState>
 
@@ -66,9 +66,9 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="LeftColumn" Width="180" />
+                <ColumnDefinition x:Name="LeftColumn" Width="230" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition x:Name="RightColumn" Width="180" />
+                <ColumnDefinition x:Name="RightColumn" Width="230" />
             </Grid.ColumnDefinitions>
 
             <!-- ヘッダー情報バー (ラウンド表示 & 戻るボタン) -->
@@ -87,6 +87,8 @@
                     FontWeight="Bold"
                     FontSize="14"
                     VerticalAlignment="Center" />
+                <!-- サウンド ON/OFF（ワンクリックで切り替え・設定に保存） -->
+                <ctrl:SoundToggleButton IsTabStop="False" VerticalAlignment="Center" />
             </StackPanel>
 
             <!-- コンパクトモード用：上部3人並びパネル (幅800px未満で表示) -->
@@ -136,7 +138,10 @@
                             Padding="8,3"
                             Background="#D03040"
                             Visibility="{x:Bind ViewModel.IsRevolution, Mode=OneWay}">
-                            <TextBlock Text="🔥 革命中" FontWeight="Bold" FontSize="12" Foreground="#FFFFFF" />
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <FontIcon Glyph="&#xE8AB;" FontSize="12" Foreground="#FFFFFF" />
+                                <TextBlock Text="革命中" FontWeight="Bold" FontSize="12" Foreground="#FFFFFF" />
+                            </StackPanel>
                         </Border>
                         <Border
                             x:Name="ElevenBackBadge"
@@ -144,7 +149,10 @@
                             Padding="8,3"
                             Background="#9040D0"
                             Visibility="{x:Bind ViewModel.IsElevenBack, Mode=OneWay}">
-                            <TextBlock Text="⚡ 11バック" FontWeight="Bold" FontSize="12" Foreground="#FFFFFF" />
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <FontIcon Glyph="&#xE8EE;" FontSize="12" Foreground="#FFFFFF" />
+                                <TextBlock Text="11バック" FontWeight="Bold" FontSize="12" Foreground="#FFFFFF" />
+                            </StackPanel>
                         </Border>
                         <Border
                             x:Name="LockBadge"
@@ -362,6 +370,12 @@
                 BorderBrush="#FFD700"
                 Background="#F010131B">
                 <StackPanel Orientation="Vertical" HorizontalAlignment="Center" Spacing="6">
+                    <FontIcon
+                        x:Name="CutInIcon"
+                        FontSize="30"
+                        HorizontalAlignment="Center"
+                        Foreground="#FFD700"
+                        Glyph="&#xE945;" />
                     <TextBlock
                         x:Name="CutInSubText"
                         FontSize="13"
@@ -375,7 +389,7 @@
                         FontWeight="Black"
                         Foreground="#FFD700"
                         HorizontalAlignment="Center"
-                        Text="🔥 革命 REVOLUTION" />
+                        Text="革命" />
                     <TextBlock
                         x:Name="CutInDetailText"
                         FontSize="14"

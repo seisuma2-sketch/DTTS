@@ -196,21 +196,21 @@ public sealed partial class CardControl : UserControl
         VectorSurface.Visibility = Visibility.Visible;
 
         string rankStr = GetRankString(card);
-        string suitStr = GetSuitString(card.Suit);
         var suitBrush = GetSuitBrush(card.Suit);
+        double rankFontSize = rankStr.Length >= 2 ? 10 : 12; // 「10」「JK」は2文字なので少し小さく
 
         TopRankText.Text = rankStr;
+        TopRankText.FontSize = rankFontSize;
         TopRankText.Foreground = suitBrush;
-        TopSuitText.Text = suitStr;
-        TopSuitText.Foreground = suitBrush;
-
-        CenterSuitText.Text = card.IsJoker ? "★" : suitStr;
-        CenterSuitText.Foreground = suitBrush;
+        TopSuitBox.Child = CardFaceRenderer.CreateIndexSuit(card, suitBrush);
 
         BottomRankText.Text = rankStr;
+        BottomRankText.FontSize = rankFontSize;
         BottomRankText.Foreground = suitBrush;
-        BottomSuitText.Text = suitStr;
-        BottomSuitText.Foreground = suitBrush;
+        BottomSuitBox.Child = CardFaceRenderer.CreateIndexSuit(card, suitBrush);
+
+        // 中央：数字と同じ数のピップ・エース・絵札・ジョーカー
+        CardFaceRenderer.Render(FaceCanvas, card, suitBrush);
     }
 
     private void OnSkinImageFailed(object sender, ExceptionRoutedEventArgs e)
@@ -248,16 +248,6 @@ public sealed partial class CardControl : UserControl
             _ => ((int)card.Rank).ToString()
         };
     }
-
-    private static string GetSuitString(Suit suit) => suit switch
-    {
-        Suit.Spade => "♠",
-        Suit.Heart => "♥",
-        Suit.Diamond => "♦",
-        Suit.Club => "♣",
-        Suit.Joker => "★",
-        _ => "?"
-    };
 
     private static Brush GetSuitBrush(Suit suit) => suit switch
     {

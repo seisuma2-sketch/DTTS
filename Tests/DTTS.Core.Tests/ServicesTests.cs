@@ -114,6 +114,15 @@ internal static class ServicesTests
         Check(DTTS.Services.Audio.SoundEffectCatalog.ToGain(0.5) == 0.25 && DTTS.Services.Audio.SoundEffectCatalog.ToGain(double.NaN) == 0.0
             && DTTS.Services.Audio.SoundEffectCatalog.ToGain(2.0) == 1.0, "gain curve");
 
+        // 起動時の無音指定（--mute / DTTS_MUTE）
+        Check(DTTS.Services.Audio.AudioLaunchOptions.IsMuteRequested(new[] { "DTTS.exe", "--mute" }, null), "mute: --mute argument");
+        Check(DTTS.Services.Audio.AudioLaunchOptions.IsMuteRequested(new[] { "DTTS.exe", "--MUTE" }, null), "mute: argument is case-insensitive");
+        Check(DTTS.Services.Audio.AudioLaunchOptions.IsMuteRequested(Array.Empty<string>(), "1") && DTTS.Services.Audio.AudioLaunchOptions.IsMuteRequested(null, "true")
+            && DTTS.Services.Audio.AudioLaunchOptions.IsMuteRequested(null, " Yes "), "mute: environment variable values");
+        Check(!DTTS.Services.Audio.AudioLaunchOptions.IsMuteRequested(new[] { "DTTS.exe" }, null) && !DTTS.Services.Audio.AudioLaunchOptions.IsMuteRequested(null, "0")
+            && !DTTS.Services.Audio.AudioLaunchOptions.IsMuteRequested(new[] { "--muted" }, "false"), "mute: not requested");
+        Check(DTTS.Services.Audio.AudioLaunchOptions.IsMuteRequestedForCurrentProcess(), "mute: test runner itself runs muted");
+
         // 全効果音のファイルが実在し、44.1kHz/16bit の PCM であること
         var audioDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Assets", "Audio"));
         foreach (var effect in Enum.GetValues<DTTS.Services.Audio.SoundEffect>())

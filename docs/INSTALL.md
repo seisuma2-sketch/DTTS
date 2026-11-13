@@ -98,3 +98,14 @@ powershell -ExecutionPolicy Bypass -File tools\packaging\Build-SignedMsix.ps1
   公開用に発行元を変える場合は、マニフェストの `Publisher` と証明書を揃えて作り直してください。
 - バージョンは `Package.appxmanifest` の `Identity/@Version` で管理します（タイトル画面の表示もここから読みます）。
 - 秘密鍵（`.pfx`）や `artifacts\` はリポジトリに含めません（`.gitignore` 済み）。
+
+## 開発者向け：テストを無音で実行する
+
+- `dotnet run --project Tests/DTTS.Core.Tests/DTTS.Core.Tests.csproj` は常に無音です（再生処理をテストに含めておらず、起動時にそのことを確認します）。
+- アプリを自動操作で動かすときは、起動引数 `--mute` を付けます。保存済みの設定は変えずに、その回だけ音を止めます。
+
+```powershell
+Start-Process "shell:AppsFolder\12f303fd-92ec-4cdb-bfb0-e30f02f5c93f_<発行元ハッシュ>!App" -ArgumentList "--mute"
+```
+
+- パッケージ化せずに起動する場合は、環境変数 `DTTS_MUTE=1` でも同じ効果があります。

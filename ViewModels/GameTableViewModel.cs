@@ -901,18 +901,20 @@ public sealed partial class GameTableViewModel : ViewModelBase
         {
             var pName = GetPlayerVm(result.MiyakoOchiPlayerId.Value).Name;
             CutInTriggered?.Invoke(this, new CutInEventArgs(
-                "👑 都落ち！",
+                "都落ち",
                 "CAPITAL FALL",
-                $"{pName} が都落ちにより大貧民へ転落しました！",
-                "#9400D3"));
+                $"{pName} が都落ちにより大貧民へ転落しました",
+                "#9400D3",
+                IconGlyphs.ChevronDown));
         }
         else if (result.IsGekokujo)
         {
             CutInTriggered?.Invoke(this, new CutInEventArgs(
-                "⚔️ 下剋上達成！",
+                "下剋上",
                 "GEKOKUJO",
-                "大貧民が大富豪へと這い上がりました！",
-                "#FF4500"));
+                "大貧民が大富豪へと這い上がりました",
+                "#FF4500",
+                IconGlyphs.ChevronUp));
         }
     }
 
@@ -928,115 +930,128 @@ public sealed partial class GameTableViewModel : ViewModelBase
             case SpecialEffectType.Nanasan:
                 string revTitle = effectType switch
                 {
-                    SpecialEffectType.Coup => "🔥 クーデター (9×3)",
-                    SpecialEffectType.Omen => "🔥 オーメン (6×3)",
-                    SpecialEffectType.Nanasan => "🔥 ナナサン革命 (7×3)",
-                    SpecialEffectType.SequenceRevolution => "🔥 階段革命",
-                    _ => "🔥 革命発動！"
+                    SpecialEffectType.Coup => "クーデター（9×3）",
+                    SpecialEffectType.Omen => "オーメン（6×3）",
+                    SpecialEffectType.Nanasan => "ナナサン革命（7×3）",
+                    SpecialEffectType.SequenceRevolution => "階段革命",
+                    _ => "革命"
                 };
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
                     revTitle,
                     "REVOLUTION",
                     $"{playerName} により革命が成立！ 強弱が反転しました",
-                    "#FF4500"));
+                    "#FF4500",
+                    IconGlyphs.Switch));
                 break;
 
             case SpecialEffectType.EightCut:
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
-                    "⚡ 8切り！",
+                    "8切り",
                     "EIGHT FLUSH",
                     $"{playerName} の8切りにより場が流れました",
-                    "#FFD700"));
+                    "#FFD700",
+                    IconGlyphs.LightningBolt));
                 break;
 
             case SpecialEffectType.ElevenBack:
             case SpecialEffectType.StrongElevenBack:
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
-                    "⚡ 11バック",
+                    "11バック",
                     "ELEVEN BACK",
                     $"{playerName} により一時的に強弱が反転しました",
-                    "#00E5FF"));
+                    "#00E5FF",
+                    IconGlyphs.RepeatAll));
                 break;
 
             case SpecialEffectType.SpadeThreeReturn:
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
-                    "♠️3 スペ3返し！",
+                    "スペ3返し",
                     "SPADE 3 COUNTER",
                     $"{playerName} が単体ジョーカーを撃破しました！",
-                    "#BA55D3"));
+                    "#BA55D3",
+                    IconGlyphs.Undo));
                 break;
 
             case SpecialEffectType.Emperor:
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
-                    "👑 エンペラー！",
+                    "エンペラー",
                     "EMPEROR",
-                    $"{playerName} が4スート連番の究極役を成立！",
-                    "#FFD700"));
+                    $"{playerName} が4スート連番の最強役を成立させました",
+                    "#FFD700",
+                    IconGlyphs.Star));
                 break;
 
             case SpecialEffectType.Sandstorm:
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
-                    "🌪️ 砂嵐 (3×3)",
+                    "砂嵐（3×3）",
                     "SANDSTORM",
                     $"{playerName} の砂嵐により場が流れました",
-                    "#DAA520"));
+                    "#DAA520",
+                    IconGlyphs.Cloud));
                 break;
 
             case SpecialEffectType.Ambulance:
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
-                    "🚑 99車 (9×2)",
+                    "99車（9×2）",
                     "AMBULANCE",
                     $"{playerName} の99車により場が流れました",
-                    "#FF6347"));
+                    "#FF6347",
+                    IconGlyphs.Car));
                 break;
 
             case SpecialEffectType.Rokurokubi:
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
-                    "🐍 ろくろ首 (6×2)",
+                    "ろくろ首（6×2）",
                     "ROKUROKUBI",
                     $"{playerName} のろくろ首により場が流れました",
-                    "#9370DB"));
+                    "#9370DB",
+                    IconGlyphs.LightningBolt));
                 break;
 
             case SpecialEffectType.TwelveBomber:
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
-                    "💣 12ボンバー",
+                    "12ボンバー",
                     "TWELVE BOMBER",
                     $"{playerName} が宣言したカードが一斉破棄されます",
-                    "#FF1493"));
+                    "#FF1493",
+                    IconGlyphs.Warning));
                 break;
 
             case SpecialEffectType.SevenPass:
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
-                    "🎁 7渡し",
+                    "7渡し",
                     "SEVEN PASS",
                     $"{playerName} が次のプレイヤーへカードを渡します",
-                    "#20B2AA"));
+                    "#20B2AA",
+                    IconGlyphs.Send));
                 break;
 
             case SpecialEffectType.TenDiscard:
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
-                    "🗑️ 10捨て",
+                    "10捨て",
                     "TEN DISCARD",
                     $"{playerName} が手札を捨てます",
-                    "#778899"));
+                    "#778899",
+                    IconGlyphs.Delete));
                 break;
 
             case SpecialEffectType.SuitLock:
             case SpecialEffectType.NumberLock:
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
-                    "⛓️ 縛り発生！",
+                    "縛り",
                     "FIELD LOCKED",
                     $"{playerName} により出し札の制限が発生しました",
-                    "#FF8C00"));
+                    "#FF8C00",
+                    IconGlyphs.Lock));
                 break;
 
             case SpecialEffectType.FourStop:
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
-                    "🛑 4止め！",
+                    "4止め",
                     "FOUR STOP",
                     $"{playerName} が8切りを阻止しました！",
-                    "#32CD32"));
+                    "#32CD32",
+                    IconGlyphs.Stop));
                 break;
         }
     }

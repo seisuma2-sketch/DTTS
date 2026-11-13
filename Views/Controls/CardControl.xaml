@@ -29,50 +29,40 @@
                     ImageFailed="OnSkinImageFailed"
                     Visibility="Collapsed" />
 
-                <!-- 2. ベクター描画表面レイヤー（スキン画像がない場合に表示） -->
-                <Grid x:Name="VectorSurface" Padding="5">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
+                <!--
+                    2. ベクター描画表面レイヤー（スキン画像がない場合に表示）。
+                    スート・絵札・ジョーカーはすべて Path（線画）で描く。中身は CardFaceRenderer がカードごとに組み立てる。
+                    手札では左端しか見えないため、左上の数字とスート（インデックス）は重なっても読める位置に置く。
+                -->
+                <Grid x:Name="VectorSurface">
+                    <!-- 中央：ピップ（数字と同じ数のスート）・エース・絵札・ジョーカー -->
+                    <Canvas x:Name="FaceCanvas" Width="70" Height="102" HorizontalAlignment="Left" VerticalAlignment="Top" />
 
                     <!-- 左上：数字とスート -->
-                    <StackPanel Grid.Row="0" HorizontalAlignment="Left" Orientation="Vertical">
+                    <StackPanel Margin="4,3,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Spacing="1">
                         <TextBlock
                             x:Name="TopRankText"
+                            Width="14"
                             FontSize="12"
                             FontWeight="Bold"
+                            TextAlignment="Center"
                             Text="A" />
-                        <TextBlock
-                            x:Name="TopSuitText"
-                            FontSize="10"
-                            Text="♠" />
+                        <Viewbox x:Name="TopSuitBox" Width="9" Height="9" HorizontalAlignment="Center" />
                     </StackPanel>
 
-                    <!-- 中央：大スート記号 -->
-                    <TextBlock
-                        x:Name="CenterSuitText"
-                        Grid.Row="1"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        FontSize="24"
-                        Text="♠" />
-
-                    <!-- 右下：回転数字とスート -->
-                    <StackPanel Grid.Row="2" HorizontalAlignment="Right" Orientation="Vertical" RenderTransformOrigin="0.5,0.5">
+                    <!-- 右下：回転した数字とスート -->
+                    <StackPanel Margin="0,0,4,3" HorizontalAlignment="Right" VerticalAlignment="Bottom" Spacing="1" RenderTransformOrigin="0.5,0.5">
                         <StackPanel.RenderTransform>
                             <RotateTransform Angle="180" />
                         </StackPanel.RenderTransform>
                         <TextBlock
                             x:Name="BottomRankText"
+                            Width="14"
                             FontSize="12"
                             FontWeight="Bold"
+                            TextAlignment="Center"
                             Text="A" />
-                        <TextBlock
-                            x:Name="BottomSuitText"
-                            FontSize="10"
-                            Text="♠" />
+                        <Viewbox x:Name="BottomSuitBox" Width="9" Height="9" HorizontalAlignment="Center" />
                     </StackPanel>
                 </Grid>
 

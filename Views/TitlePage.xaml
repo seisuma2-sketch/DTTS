@@ -5,6 +5,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="using:DTTS.ViewModels"
+    xmlns:ctrl="using:DTTS.Views.Controls"
     mc:Ignorable="d"
     Background="{StaticResource AppBackgroundDeepBrush}">
 
@@ -42,7 +43,7 @@
                         Background="{StaticResource AppAccentBrush}"
                         Foreground="{StaticResource AppOnAccentBrush}">
                         <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
-                            <TextBlock Text="♠" FontSize="18" VerticalAlignment="Center" />
+                            <FontIcon Glyph="&#xE7FC;" FontSize="17" VerticalAlignment="Center" />
                             <TextBlock Text="ひとりで対戦（NPC 3人）" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
@@ -57,7 +58,7 @@
                         BorderBrush="{StaticResource AppBorderSubtleBrush}"
                         BorderThickness="1">
                         <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
-                            <TextBlock Text="📶" FontSize="18" VerticalAlignment="Center" />
+                            <FontIcon Glyph="&#xE968;" FontSize="17" VerticalAlignment="Center" />
                             <TextBlock Text="通信対戦（ローカル LAN 対戦）" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
@@ -72,7 +73,7 @@
                         BorderBrush="{StaticResource AppBorderSubtleBrush}"
                         BorderThickness="1">
                         <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
-                            <TextBlock Text="⚙" FontSize="16" VerticalAlignment="Center" />
+                            <FontIcon Glyph="&#xE713;" FontSize="15" VerticalAlignment="Center" />
                             <TextBlock Text="ルール ＆ 外見設定" FontSize="14" FontWeight="Medium" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
@@ -87,7 +88,7 @@
                         BorderBrush="{StaticResource AppBorderSubtleBrush}"
                         BorderThickness="1">
                         <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
-                            <TextBlock Text="📊" FontSize="16" VerticalAlignment="Center" />
+                            <FontIcon Glyph="&#xE9D2;" FontSize="15" VerticalAlignment="Center" />
                             <TextBlock Text="通算戦績 ＆ 履歴" FontSize="14" FontWeight="Medium" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
@@ -102,7 +103,7 @@
                         BorderBrush="{StaticResource AppBorderSubtleBrush}"
                         BorderThickness="1">
                         <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
-                            <TextBlock Text="❓" FontSize="16" VerticalAlignment="Center" />
+                            <FontIcon Glyph="&#xE897;" FontSize="15" VerticalAlignment="Center" />
                             <TextBlock Text="遊び方 ＆ ルール解説" FontSize="14" FontWeight="Medium" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
@@ -117,7 +118,7 @@
                         BorderBrush="{StaticResource AppBorderSubtleBrush}"
                         BorderThickness="1">
                         <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
-                            <TextBlock Text="💬" FontSize="16" VerticalAlignment="Center" />
+                            <FontIcon Glyph="&#xE8BD;" FontSize="15" VerticalAlignment="Center" />
                             <TextBlock Text="フィードバック ＆ 要望" FontSize="14" FontWeight="Medium" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
@@ -132,5 +133,8 @@
 
             </StackPanel>
         </ScrollViewer>
+
+        <!-- 右上：サウンド ON/OFF（ワンクリックで切り替え・設定に保存） -->
+        <ctrl:SoundToggleButton HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12" />
     </Grid>
 </Page>

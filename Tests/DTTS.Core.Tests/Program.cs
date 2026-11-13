@@ -9,6 +9,17 @@ internal static class Program
         Console.WriteLine("DTTS.Core.Tests - Test Runner Starting");
         Console.WriteLine("========================================");
 
+        // テストは無音で実行する。
+        // - 再生実装（AudioGraphService）はテストプロジェクトに含めていないので、ここから音が出ることはない
+        // - 念のため無音指定（DTTS_MUTE=1）も立てておく（このプロセスから起動するものにも引き継がれる）
+        Environment.SetEnvironmentVariable(DTTS.Services.Audio.AudioLaunchOptions.MuteEnvironmentVariable, "1");
+        bool hasPlayback = Array.Exists(typeof(Program).Assembly.GetTypes(), t => t.Name == "AudioGraphService");
+        Console.WriteLine(hasPlayback ? "WARNING: audio playback is compiled into the tests" : "Audio: muted (no playback in test build)");
+        if (hasPlayback)
+        {
+            return 1;
+        }
+
         int totalFail = 0;
 
         Console.WriteLine("--- 1. JudgeTests ---");

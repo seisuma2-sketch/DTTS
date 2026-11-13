@@ -65,7 +65,7 @@
                 <!-- 1. 外見設定（テーマカラー 8色 & スキン） -->
                 <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
                     <StackPanel Spacing="16">
-                        <TextBlock Text="🎨 テーマカラー（8色プリセット）" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                        <TextBlock Text="テーマカラー（8色プリセット）" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
                         
                         <!-- 8色のカラーピッカーボタン -->
                         <ItemsControl ItemsSource="{x:Bind ViewModel.AvailableThemes}">
@@ -96,7 +96,7 @@
                         </ItemsControl>
 
                         <!-- スキン着せ替え -->
-                        <TextBlock Text="🃏 カードスキン設定" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" Margin="0,8,0,0" />
+                        <TextBlock Text="カードスキン設定" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" Margin="0,8,0,0" />
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <Button Click="OnSelectDefaultSkinClicked" Background="#262A36" CornerRadius="6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1">
                                 <TextBlock Text="標準ベクター描画を使用" FontSize="13" Foreground="{StaticResource AppTextPrimaryBrush}" />
@@ -107,7 +107,7 @@
                         </StackPanel>
 
                         <!-- サウンド（変更は即座に反映・保存） -->
-                        <TextBlock Text="🔊 サウンド" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" Margin="0,8,0,0" />
+                        <TextBlock Text="サウンド" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" Margin="0,8,0,0" />
                         <ToggleSwitch Header="効果音" IsOn="{x:Bind ViewModel.SoundEnabled, Mode=TwoWay}" />
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <Slider
@@ -145,7 +145,7 @@
                 <!-- 2. NPC（対戦相手）設定 -->
                 <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
                     <StackPanel Spacing="16">
-                        <TextBlock Text="🤖 NPC（CPU）設定" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                        <TextBlock Text="NPC（CPU）設定" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
                         
                         <Grid ColumnSpacing="16">
                             <Grid.ColumnDefinitions>
@@ -178,7 +178,7 @@
                 <!-- 3. 全12カテゴリのローカルルール設定 -->
                 <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
                     <StackPanel Spacing="20">
-                        <TextBlock Text="⚖️ ローカルルール設定（全12カテゴリ）" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                        <TextBlock Text="ローカルルール設定（全12カテゴリ）" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
 
                         <!-- 1. 革命系 -->
                         <StackPanel Spacing="8">

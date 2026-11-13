@@ -91,7 +91,7 @@
                 <!-- 2. 階級獲得分布 -->
                 <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
                     <StackPanel Spacing="16">
-                        <TextBlock Text="🏆 ラウンド最終階級の獲得回数" FontSize="15" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                        <TextBlock Text="ラウンド最終階級の獲得回数" FontSize="15" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
                         
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
@@ -135,7 +135,7 @@
                 <!-- 3. 最近の対戦履歴一覧 -->
                 <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
                     <StackPanel Spacing="16">
-                        <TextBlock Text="📜 最近の対戦履歴（直近15戦）" FontSize="15" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                        <TextBlock Text="最近の対戦履歴（直近15戦）" FontSize="15" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
 
                         <TextBlock
                             Text="対戦履歴はまだありません"

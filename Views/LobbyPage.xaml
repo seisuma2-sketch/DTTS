@@ -48,7 +48,7 @@
                     <!-- 左側: 部屋を作る (ホスト) -->
                     <Border Grid.Column="0" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
                         <StackPanel Spacing="16">
-                            <TextBlock Text="🏠 部屋を作ってホストする" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                            <TextBlock Text="部屋を作ってホストする" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
                             <TextBlock Text="部屋を立ち上げて同一ネットワーク内の他のプレイヤーやNPCと対戦します。" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" TextWrapping="Wrap" />
 
                             <TextBox Header="部屋の名前" Text="{x:Bind ViewModel.HostRoomName, Mode=TwoWay}" />
@@ -69,9 +69,9 @@
                     <Border Grid.Column="1" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
                         <StackPanel Spacing="16">
                             <Grid>
-                                <TextBlock Text="🔍 部屋を探す" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="部屋を探す" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" VerticalAlignment="Center" />
                                 <Button Command="{x:Bind ViewModel.SearchRoomsCommand}" HorizontalAlignment="Right" Padding="8,4" Background="Transparent" BorderThickness="0">
-                                    <TextBlock Text="🔄 再検索" FontSize="12" Foreground="{StaticResource AppAccentBrush}" />
+                                    <TextBlock Text="再検索" FontSize="12" Foreground="{StaticResource AppAccentBrush}" />
                                 </Button>
                             </Grid>
 
