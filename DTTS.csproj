@@ -64,7 +64,10 @@
   <PropertyGroup>
     <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
     <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
-    <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
-    <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">True</PublishTrimmed>
+    <!--
+      トリミングは無効にする。有効にすると CsWinRT が実行時に使う型情報（ObservableCollection<CardViewModel> を
+      ItemsSource に渡すときの COM vtable など）まで削られ、Release のパッケージで対戦画面を開いた瞬間に落ちる。
+    -->
+    <PublishTrimmed>False</PublishTrimmed>
   </PropertyGroup>
 </Project>

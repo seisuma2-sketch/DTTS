@@ -144,7 +144,7 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
     private const double HandCardWidth = 70;
     private const double HandPaddingX = 20;
     private const double HandMaxSpacing = -16; // 余裕があるときの重なり
-    private const double HandMinSpacing = -50; // これ以上重ねると数字が読めなくなる（はみ出す分はスクロール）
+    private const double HandMinSpacing = -56; // 1枚あたり 14px 見える。これ以上重ねると左上の数字が読めなくなる（はみ出す分はスクロール）
     private bool _keyboardCursorVisible;
 
     private void OnHandAreaSizeChanged(object sender, SizeChangedEventArgs e) => UpdateHandSpacing();

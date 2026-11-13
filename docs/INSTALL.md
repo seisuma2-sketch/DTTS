@@ -17,7 +17,7 @@ DTTS は MSIX パッケージで配布します。テスト用の自己署名証
 | ファイル | 内容 |
 |---|---|
 | `DTTS_<バージョン>_x64.msix` | アプリ本体 |
-| `DTTS_TestCert.cer`（`DTTS_<バージョン>_x64.cer` も同じもの） | 署名に使った証明書（公開鍵のみ） |
+| `DTTS_<バージョン>_x64.cer` | 署名に使った証明書（公開鍵のみ） |
 | `Dependencies\x64\*.msix` | Windows App Runtime（無い PC 向け） |
 | `Install.ps1`・`Add-AppDevPackage.*` | 証明書の信頼からインストールまでをまとめて行うスクリプト |
 
@@ -31,7 +31,7 @@ DTTS は MSIX パッケージで配布します。テスト用の自己署名証
 
 **エクスプローラーで行う場合**
 
-1. `DTTS_TestCert.cer` をダブルクリックし、［証明書のインストール］を押します。
+1. `DTTS_<バージョン>_x64.cer` をダブルクリックし、［証明書のインストール］を押します。
 2. 保存場所で **［ローカル コンピューター］** を選びます（管理者の確認が出ます）。
 3. ［証明書をすべて次のストアに配置する］→［参照］→ **［信頼されたユーザー］（Trusted People）** を選びます。
 4. ［完了］を押します。
@@ -39,7 +39,7 @@ DTTS は MSIX パッケージで配布します。テスト用の自己署名証
 **PowerShell（管理者として実行）で行う場合**
 
 ```powershell
-Import-Certificate -FilePath .\DTTS_TestCert.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+Import-Certificate -FilePath .\DTTS_1.0.1.0_x64.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
 ```
 
 > 「信頼されたルート証明機関」には入れないでください。MSIX のサイドロードには「信頼されたユーザー」で足ります。

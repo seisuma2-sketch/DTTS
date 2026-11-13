@@ -6,7 +6,7 @@
   1. 署名用証明書を探す（-Thumbprint 省略時は New-TestCertificate.ps1 が作った "DTTS Test Signing"）。
   2. dotnet build でパッケージを生成し、その証明書で署名する。
   ※ シンボルパッケージ（.msixsym）は配布に不要なので作らない（MsPdbCmfExeFullpath を存在しないパスにして生成ターゲットを止める）。
-  3. 出力先（既定: artifacts\msix）に .msix・依存パッケージ・公開証明書（.cer）をまとめる。
+  3. 出力先（既定: artifacts\msix）に .msix・依存パッケージ・公開証明書（.cer）・インストール用スクリプトが出力される。
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File tools\packaging\New-TestCertificate.ps1
@@ -61,9 +61,10 @@ $sig = Get-AuthenticodeSignature $msix.FullName
 if (-not $sig.SignerCertificate -or $sig.SignerCertificate.Thumbprint -ne $cert.Thumbprint) {
     throw "MSIX が想定した証明書で署名されていません。"
 }
-Export-Certificate -Cert $cert -FilePath (Join-Path $msix.DirectoryName "DTTS_TestCert.cer") -Force | Out-Null
+# 公開証明書（DTTS_<バージョン>_<Platform>.cer）は SDK が同じフォルダーに出力する。
+# 同梱の Add-AppDevPackage.ps1 は .cer が複数あると中断するため、ここで追加しない
 
 Write-Host ""
 Write-Host "完成: $($msix.FullName)"
 Write-Host "署名: $($sig.SignerCertificate.Subject)（$($cert.Thumbprint)）"
-Write-Host "同じフォルダーの DTTS_TestCert.cer と Dependencies\ を一緒に配布してください。手順は docs\INSTALL.md を参照。"
+Write-Host "フォルダーごと（.cer・Dependencies\・Install.ps1 を含む）配布してください。手順は docs\INSTALL.md を参照。"
