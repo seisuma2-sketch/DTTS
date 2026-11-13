@@ -6,10 +6,11 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:ctrl="using:DTTS.Views.Controls"
     xmlns:vm="using:DTTS.ViewModels"
+    xmlns:views="using:DTTS.Views"
     mc:Ignorable="d"
     Background="{StaticResource AppBackgroundDeepBrush}"
     Loaded="OnPageLoaded"
-    KeyDown="OnPageKeyDown"
+    PreviewKeyDown="OnPageKeyDown"
     IsTabStop="True"
     UseSystemFocusVisuals="False">
 
@@ -205,6 +206,17 @@
                         FontSize="14"
                         FontWeight="Medium"
                         Foreground="{StaticResource AppTextSecondaryBrush}" />
+
+                    <!-- 直近の出来事（捨て札・12ボンバーの結果など。次の出来事まで残す） -->
+                    <TextBlock
+                        Text="{x:Bind ViewModel.NoticeMessage, Mode=OneWay}"
+                        HorizontalAlignment="Center"
+                        MaxWidth="460"
+                        TextWrapping="Wrap"
+                        TextAlignment="Center"
+                        FontSize="13"
+                        FontWeight="SemiBold"
+                        Foreground="{StaticResource AppAccentBrush}" />
                 </StackPanel>
             </Grid>
 
@@ -286,12 +298,33 @@
             </Grid>
         </Grid>
 
-        <!-- 判断要求ダイアログ (革命選択 / カード選択) -->
+        <!-- 全画面演出レイヤー（場流れ：四辺の光 / 12ボンバー・革命：斜めの光の帯）。操作は一切遮らない -->
+        <Grid x:Name="SweepLayer" IsHitTestVisible="False">
+            <Rectangle x:Name="PrismTop" Height="5" VerticalAlignment="Top" Opacity="0" Fill="{x:Bind PrismBrushHorizontal}" />
+            <Rectangle x:Name="PrismBottom" Height="5" VerticalAlignment="Bottom" Opacity="0" Fill="{x:Bind PrismBrushHorizontal}" />
+            <Rectangle x:Name="PrismLeft" Width="5" HorizontalAlignment="Left" Opacity="0" Fill="{x:Bind PrismBrushVertical}" />
+            <Rectangle x:Name="PrismRight" Width="5" HorizontalAlignment="Right" Opacity="0" Fill="{x:Bind PrismBrushVertical}" />
+            <Rectangle
+                x:Name="AuroraBand"
+                Width="520"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Stretch"
+                Margin="0,-240"
+                Opacity="0"
+                Fill="{x:Bind AuroraBrush}"
+                RenderTransformOrigin="0.5,0.5">
+                <Rectangle.RenderTransform>
+                    <RotateTransform Angle="18" />
+                </Rectangle.RenderTransform>
+            </Rectangle>
+        </Grid>
+
+        <!-- 判断要求ダイアログ（革命の選択・12ボンバーの数字宣言）：画面全体を暗くして答えを待つ -->
         <Border
             Background="#A0000000"
-            Visibility="{x:Bind ViewModel.IsDecisionDialogOpen, Mode=OneWay}">
+            Visibility="{x:Bind ViewModel.IsModalDecisionOpen, Mode=OneWay}">
             <Border
-                Width="380"
+                Width="400"
                 CornerRadius="16"
                 Padding="24"
                 Background="{StaticResource AppBackgroundElevatedBrush}"
@@ -305,21 +338,101 @@
 
                     <!-- 革命選択ボタン -->
                     <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" Visibility="{x:Bind ViewModel.IsRevolutionChoice, Mode=OneWay}">
-                        <Button Content="起こさない" Command="{x:Bind ViewModel.SubmitRevolutionDecisionCommand}" CommandParameter="{x:Bind FalseValue}" Width="100" />
-                        <Button Content="起こす" Command="{x:Bind ViewModel.SubmitRevolutionDecisionCommand}" CommandParameter="{x:Bind TrueValue}" Width="100" Background="{StaticResource AppAccentBrush}" Foreground="{StaticResource AppOnAccentBrush}" />
+                        <Button Content="起こさない [Esc]" Command="{x:Bind ViewModel.SubmitRevolutionDecisionCommand}" CommandParameter="{x:Bind FalseValue}" MinWidth="110" />
+                        <Button Content="起こす [Enter]" Command="{x:Bind ViewModel.SubmitRevolutionDecisionCommand}" CommandParameter="{x:Bind TrueValue}" MinWidth="110" Background="{StaticResource AppAccentBrush}" Foreground="{StaticResource AppOnAccentBrush}" />
                     </StackPanel>
 
-                    <!-- カード選択確定ボタン -->
-                    <Button
-                        Content="選択したカードを決定"
-                        Command="{x:Bind ViewModel.SubmitCardSelectionDecisionCommand}"
-                        HorizontalAlignment="Stretch"
-                        Height="40"
-                        Background="{StaticResource AppAccentBrush}"
-                        Foreground="{StaticResource AppOnAccentBrush}"
-                        Visibility="{x:Bind ViewModel.IsRevolutionChoice, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}" />
+                    <!-- 12ボンバーの数字宣言：3〜2 の13個の数字ボタン（←/→ で移動、Space で選択、Enter で決定） -->
+                    <StackPanel Spacing="12" Visibility="{x:Bind ViewModel.IsRankDeclaration, Mode=OneWay}">
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.RankOptions, Mode=OneWay}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <VariableSizedWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="7" ItemWidth="48" ItemHeight="44" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:RankOptionViewModel">
+                                    <Button
+                                        Width="42"
+                                        Height="38"
+                                        Padding="0"
+                                        IsTabStop="False"
+                                        Click="OnRankOptionClicked"
+                                        Background="{x:Bind views:GameTablePage.RankBackground(IsSelected), Mode=OneWay}"
+                                        Foreground="{x:Bind views:GameTablePage.RankForeground(IsSelected), Mode=OneWay}"
+                                        BorderThickness="{x:Bind views:GameTablePage.CursorThickness(IsKeyboardCursor), Mode=OneWay}"
+                                        BorderBrush="#FFF2C94C"
+                                        AutomationProperties.Name="{x:Bind Label}">
+                                        <TextBlock Text="{x:Bind Label}" FontSize="15" FontWeight="Bold" />
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Grid>
+                            <TextBlock
+                                Text="{x:Bind ViewModel.SelectionCountText, Mode=OneWay}"
+                                VerticalAlignment="Center"
+                                FontSize="14"
+                                FontWeight="SemiBold"
+                                Foreground="{StaticResource AppTextSecondaryBrush}" />
+                            <Button
+                                Content="宣言する [Enter]"
+                                HorizontalAlignment="Right"
+                                MinWidth="130"
+                                Height="38"
+                                Command="{x:Bind ViewModel.SubmitRankDeclarationDecisionCommand}"
+                                IsEnabled="{x:Bind ViewModel.CanConfirmDecision, Mode=OneWay}"
+                                Background="{StaticResource AppAccentBrush}"
+                                Foreground="{StaticResource AppOnAccentBrush}" />
+                        </Grid>
+                    </StackPanel>
                 </StackPanel>
             </Border>
+        </Border>
+
+        <!--
+            カード選択（交換・7渡し・10捨て）の操作バー：画面を覆わず、手札の上に浮かせる。
+            手札はマウスのクリック・ホバーでも、キーボード（←/→・Space）でも選べる
+        -->
+        <Border
+            x:Name="CardSelectionBar"
+            Visibility="{x:Bind ViewModel.IsCardSelectionMode, Mode=OneWay}"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            Margin="16,0,16,178"
+            Padding="18,12"
+            CornerRadius="14"
+            Background="{StaticResource AppBackgroundElevatedBrush}"
+            BorderBrush="{StaticResource AppAccentBrush}"
+            BorderThickness="1.5">
+            <Grid ColumnSpacing="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="2" VerticalAlignment="Center" MaxWidth="320">
+                    <TextBlock Text="{x:Bind ViewModel.DecisionTitle, Mode=OneWay}" FontSize="15" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                    <TextBlock Text="{x:Bind ViewModel.DecisionMessage, Mode=OneWay}" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                </StackPanel>
+                <TextBlock
+                    Grid.Column="1"
+                    Text="{x:Bind ViewModel.SelectionCountText, Mode=OneWay}"
+                    VerticalAlignment="Center"
+                    FontSize="18"
+                    FontWeight="Bold"
+                    Foreground="{StaticResource AppAccentBrush}" />
+                <Button
+                    Grid.Column="2"
+                    Content="決定 [Enter]"
+                    MinWidth="110"
+                    Height="40"
+                    IsTabStop="False"
+                    Command="{x:Bind ViewModel.SubmitCardSelectionDecisionCommand}"
+                    IsEnabled="{x:Bind ViewModel.CanConfirmDecision, Mode=OneWay}"
+                    Background="{StaticResource AppAccentBrush}"
+                    Foreground="{StaticResource AppOnAccentBrush}" />
+            </Grid>
         </Border>
 
         <!-- ラウンド終了ダイアログ -->

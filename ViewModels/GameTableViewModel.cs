@@ -105,6 +105,45 @@ public sealed partial class GameTableViewModel : ViewModelBase
     [ObservableProperty]
     public partial bool IsRevolutionChoice { get; set; }
 
+    /// <summary>12ボンバーの数字宣言中か（数字ボタンを出す）。</summary>
+    [ObservableProperty]
+    public partial bool IsRankDeclaration { get; set; }
+
+    /// <summary>
+    /// カード選択（交換・7渡し・10捨て）中か。画面を覆わない操作バーとして出し、手札はマウスでもキーボードでも選べる。
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsCardSelectionMode { get; set; }
+
+    /// <summary>画面全体を暗くして操作を止めるダイアログ（革命の選択・数字の宣言）を出しているか。</summary>
+    [ObservableProperty]
+    public partial bool IsModalDecisionOpen { get; set; }
+
+    /// <summary>選択数の表示（例：「1 / 2 枚」）。</summary>
+    [ObservableProperty]
+    public partial string SelectionCountText { get; set; } = "";
+
+    /// <summary>規定の数を選んでいて決定できるか（カード選択・数字の宣言）。</summary>
+    [ObservableProperty]
+    public partial bool CanConfirmDecision { get; set; }
+
+    /// <summary>12ボンバーで宣言できる数字（3〜2）。</summary>
+    public ObservableCollection<RankOptionViewModel> RankOptions { get; } = new();
+
+    partial void OnIsDecisionDialogOpenChanged(bool value)
+    {
+        if (!value)
+        {
+            // どの経路で閉じても種類ごとの表示をまとめて片付ける
+            IsRevolutionChoice = false;
+            IsRankDeclaration = false;
+            IsCardSelectionMode = false;
+            IsModalDecisionOpen = false;
+            CanConfirmDecision = false;
+            SelectionCountText = "";
+        }
+    }
+
     [ObservableProperty]
     public partial bool IsRoundResultOpen { get; set; }
 
@@ -186,7 +225,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
             // 席の名前（ゲスト・補充NPC）はロビーで決まったものをエンジンから受け取る
             for (int i = 0; i < 4; i++)
             {
-                GetPlayerVm(i).Name = _engine.GetPlayer(i).Name;
+                GetPlayerVm(i).Name = DisplayName(i, _engine.GetPlayer(i).Name);
             }
 
             _engineHandler = (sender, ev) => OnEngineEvent(ev);
@@ -266,6 +305,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
         {
             case HandsDealtEvent:
                 ApplyFieldBadges(_engine.Field); // 新しいラウンドの場の状態に戻す
+                NoticeMessage = "";
                 HandDealtTriggered?.Invoke(this, EventArgs.Empty);
                 _audio.Play(SoundEffect.CardDeal);
                 break;
@@ -308,7 +348,17 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 StatusMessage = ff.Cause.HasValue ? $"場が流れました（{ff.Cause.Value}）" : "場が流れました";
                 for (int i = 0; i < 4; i++) GetPlayerVm(i).IsPassed = false;
                 FieldFlushedTriggered?.Invoke(this, EventArgs.Empty);
+                SweepTriggered?.Invoke(this, SweepKind.PrismFlash);
                 _audio.Play(SoundEffect.FieldFlush);
+                break;
+
+            case RanksDeclaredEvent rd:
+                OnRanksDeclared(rd.PlayerId, rd.Ranks);
+                break;
+
+            case CardsDiscardedEvent cd:
+                OnCardsDiscarded(cd.PlayerId, cd.Cards.Count, cd.Reason);
+                UpdateAllPlayersInfo(); // 残り手札の枚数をすぐ反映する
                 break;
 
             case PlayerFinishedEvent pf:
@@ -329,6 +379,90 @@ public sealed partial class GameTableViewModel : ViewModelBase
         }
 
         UpdateHumanHandVisuals();
+    }
+
+    // ------------------------------------------------------------------
+    // 捨て札の通知（10捨て・12ボンバー・都落ち・反則）。1人用・ホスト・ゲストで共通
+    // ------------------------------------------------------------------
+
+    /// <summary>場面が切り替わったことを示す全画面演出の種類。</summary>
+    public enum SweepKind
+    {
+        /// <summary>場が流れた：画面の四辺を光が走る（手札を隠さない）。</summary>
+        PrismFlash,
+        /// <summary>12ボンバー・革命など大きな出来事：斜めの光の帯が画面を横切る。</summary>
+        AuroraSweep,
+    }
+
+    /// <summary>全画面演出の要求（表示側が Composition で描く）。</summary>
+    public event EventHandler<SweepKind>? SweepTriggered;
+
+    /// <summary>直近の出来事（捨て札・12ボンバーの結果など）。手番の表示で上書きされないよう、状況表示とは別に出す。</summary>
+    [ObservableProperty]
+    public partial string NoticeMessage { get; set; } = "";
+
+    private int? _bomberDeclarer;
+    private List<Rank> _bomberRanks = new();
+    private readonly Dictionary<int, int> _bomberDiscards = new();
+
+    private static string RankList(IEnumerable<Rank> ranks) => string.Join("・", ranks.Select(RankOptionViewModel.LabelOf));
+
+    private void OnRanksDeclared(int playerId, IReadOnlyList<Rank> ranks)
+    {
+        _bomberDeclarer = playerId;
+        _bomberRanks = ranks.ToList();
+        _bomberDiscards.Clear();
+        NoticeMessage = $"{GetPlayerVm(playerId).Name} が12ボンバーで【{RankList(ranks)}】を宣言しました";
+    }
+
+    private void OnCardsDiscarded(int playerId, int count, CardDiscardReason? reason)
+    {
+        string name = GetPlayerVm(playerId).Name;
+        switch (reason)
+        {
+            case CardDiscardReason.TwelveBomber:
+                _bomberDiscards[playerId] = (_bomberDiscards.TryGetValue(playerId, out int n) ? n : 0) + count;
+                break;
+            case CardDiscardReason.TenDiscard:
+                NoticeMessage = $"{name} が10捨てで {count}枚 捨てました";
+                break;
+            case CardDiscardReason.MiyakoOchi:
+                NoticeMessage = $"{name} の残り手札 {count}枚 が都落ちで没収されました";
+                break;
+            case CardDiscardReason.ForcedFoul:
+                NoticeMessage = $"{name} は出せるカードがなく、残り手札 {count}枚 が没収されました";
+                break;
+        }
+    }
+
+    /// <summary>12ボンバーの結果（誰が何を宣言し、誰が何枚捨てたか）。</summary>
+    private string BuildBomberSummary(int declarerId)
+    {
+        string ranks = _bomberRanks.Count > 0 ? $"【{RankList(_bomberRanks)}】" : "宣言した数字";
+        int total = _bomberDiscards.Values.Sum();
+        string name = GetPlayerVm(declarerId).Name;
+        if (total == 0)
+        {
+            return $"{name} の12ボンバー：{ranks}を持っている人はいませんでした";
+        }
+        var detail = _bomberDiscards
+            .Where(kv => kv.Value > 0)
+            .Select(kv => $"{GetPlayerVm(kv.Key).Name} {kv.Value}枚");
+        return $"{name} の12ボンバーで{ranks}が合計 {total}枚 捨てられました（{string.Join("・", detail)}）";
+    }
+
+    /// <summary>
+    /// 通信対戦での表示名。参加者が既定の名前「あなた」のままだと誰の話か分からなくなるため、
+    /// 自分以外の「あなた」は「プレイヤーN」（N は席番号＋1）と表示する。
+    /// </summary>
+    private string DisplayName(int playerId, string name)
+    {
+        const string DefaultSelfName = "あなた";
+        if (playerId != _myPlayerId && (string.IsNullOrWhiteSpace(name) || name == DefaultSelfName))
+        {
+            return $"プレイヤー{playerId + 1}";
+        }
+        return name;
     }
 
     /// <summary>ラウンド表示。規定ラウンドを超えた同点決着の延長戦は「延長戦」と表示する。</summary>
@@ -419,13 +553,16 @@ public sealed partial class GameTableViewModel : ViewModelBase
         var legalPlays = _engine.GetLegalPlays(0);
         var selected = HumanHand.Where(vm => vm.IsSelected).Select(vm => vm.Card).ToList();
 
-        CanPlay = legalPlays.Any(lp => lp.Play != null && lp.Play.Cards.Count == selected.Count && lp.Play.Cards.All(selected.Contains));
+        // カード選択中は「出す」の判定をせず、どのカードも選べる表示にする
+        CanPlay = !IsCardSelectionMode
+            && legalPlays.Any(lp => lp.Play != null && lp.Play.Cards.Count == selected.Count && lp.Play.Cards.All(selected.Contains));
 
         bool isMyTurn = (_engine.CurrentPlayerId == 0);
         foreach (var cardVm in HumanHand)
         {
-            cardVm.CanPlay = !isMyTurn || legalPlays.Any(lp => lp.Play != null && lp.Play.Cards.Contains(cardVm.Card));
+            cardVm.CanPlay = IsCardSelectionMode || !isMyTurn || legalPlays.Any(lp => lp.Play != null && lp.Play.Cards.Contains(cardVm.Card));
         }
+        UpdateSelectionCount();
     }
 
     [RelayCommand]
@@ -441,13 +578,14 @@ public sealed partial class GameTableViewModel : ViewModelBase
         {
             UpdateHumanHandVisuals();
         }
+        UpdateSelectionCount();
     }
 
     /// <summary>ゲスト：最後に届いた合法手と現在の選択から「出す」可否を決める。</summary>
     private void UpdateGuestCanPlay()
     {
         var selected = HumanHand.Where(vm => vm.IsSelected).Select(vm => vm.Card).ToList();
-        CanPlay = selected.Count > 0
+        CanPlay = !IsCardSelectionMode && selected.Count > 0
             && _guestLegalPlays.Any(lp => lp.Count == selected.Count && lp.All(selected.Contains));
     }
 
@@ -556,16 +694,30 @@ public sealed partial class GameTableViewModel : ViewModelBase
                     UpdateRoundResultActions();
                     break;
                 case "RoundStarted":
+                    NoticeMessage = "";
                     _audio.Play(SoundEffect.CardDeal);
                     break;
                 case "CardsPlayed":
                     _audio.Play(SoundEffect.CardPlay);
                     break;
                 case "FieldFlushed":
+                    FieldFlushedTriggered?.Invoke(this, EventArgs.Empty);
+                    SweepTriggered?.Invoke(this, SweepKind.PrismFlash);
                     _audio.Play(SoundEffect.FieldFlush);
                     break;
                 case "EffectApplied" when notice.Applied && notice.Effect is { } effect:
+                    // ゲストにもホストと同じカットインを出す（12ボンバーは誰が何枚捨てたかも表示）
+                    if (notice.PlayerId is { } effectPlayer)
+                    {
+                        TriggerCutInForEffect(effect, effectPlayer);
+                    }
                     PlayEffectSound(effect);
+                    break;
+                case "RanksDeclared" when notice.PlayerId is { } declarer && notice.Ranks is { } ranks:
+                    OnRanksDeclared(declarer, ranks);
+                    break;
+                case "CardsDiscarded" when notice.PlayerId is { } discarder:
+                    OnCardsDiscarded(discarder, notice.Count, notice.DiscardReason);
                     break;
                 case "PlayerFinished" when notice.PlayerId is { } pid && notice.FinishKind is { } kind:
                     PlayFinishSound(pid, kind);
@@ -708,7 +860,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
         foreach (var p in view.Players)
         {
             var vm = GetPlayerVm(p.Id);
-            vm.Name = p.Name;
+            vm.Name = DisplayName(p.Id, p.Name);
             vm.HandCount = p.HandCount;
             vm.Rank = p.Rank;
             vm.TotalScore = p.TotalScore;
@@ -740,14 +892,14 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         foreach (var cardVm in HumanHand)
         {
-            cardVm.CanPlay = !isMyDecision || legalSet.Any(lp => lp.Contains(cardVm.Card));
+            cardVm.CanPlay = IsCardSelectionMode || !isMyDecision || legalSet.Any(lp => lp.Contains(cardVm.Card));
         }
 
         StatusMessage = isMyDecision ? "あなたのターンです" : "相手のターンです...";
 
         // 判断ダイアログ（革命選択・カード選択）。ホストの判断要求が自分宛てなら開き、解決されたら閉じる
         var dec = view.Decision;
-        if (isMyDecision && dec is not null && dec.Kind is DecisionKind.RevolutionChoice or DecisionKind.SelectCards)
+        if (isMyDecision && dec is not null && dec.Kind is DecisionKind.RevolutionChoice or DecisionKind.SelectCards or DecisionKind.DeclareRanks)
         {
             // 送信済みでホストの処理待ちの判断は開き直さない（同じ判断を二重に送らないため）
             bool sameAsCurrent = _currentDecision is not null && _currentDecision.Kind == dec.Kind && _currentDecision.Purpose == dec.Purpose;
@@ -789,24 +941,157 @@ public sealed partial class GameTableViewModel : ViewModelBase
             case DecisionKind.RevolutionChoice:
                 DecisionTitle = "革命の選択";
                 DecisionMessage = "革命を起こしますか？";
-                IsRevolutionChoice = true;
                 IsDecisionDialogOpen = true;
+                IsRankDeclaration = false;
+                IsCardSelectionMode = false;
+                IsRevolutionChoice = true;
+                IsModalDecisionOpen = true;
+                CanConfirmDecision = true;
                 break;
 
             case DecisionKind.SelectCards:
-                DecisionTitle = "カード選択";
+                DecisionTitle = dec.Purpose switch
+                {
+                    CardSelectionPurpose.ExchangeGive => "カード交換",
+                    CardSelectionPurpose.SevenPass => "7渡し",
+                    CardSelectionPurpose.TenDiscard => "10捨て",
+                    _ => "カード選択",
+                };
                 string reason = dec.Purpose switch
                 {
-                    CardSelectionPurpose.ExchangeGive => "カード交換に出すカードを選んでください",
-                    CardSelectionPurpose.SevenPass => "次のプレイヤーに渡すカードを選んでください",
-                    CardSelectionPurpose.TenDiscard => "捨てるカードを選んでください",
-                    _ => "カードを選んでください"
+                    CardSelectionPurpose.ExchangeGive => "相手に渡すカードを手札から選んでください",
+                    CardSelectionPurpose.SevenPass => "次のプレイヤーに渡すカードを手札から選んでください",
+                    CardSelectionPurpose.TenDiscard => "捨てるカードを手札から選んでください",
+                    _ => "カードを手札から選んでください",
                 };
-                DecisionMessage = $"{reason}（{dec.MinCount}〜{dec.MaxCount}枚）";
-                IsRevolutionChoice = false;
+                DecisionMessage = reason;
+                // 出す操作で選んでいたカードが残っていると数え間違えるため、選択を空にして始める
+                foreach (var cardVm in HumanHand)
+                {
+                    cardVm.IsSelected = false;
+                    cardVm.CanPlay = true; // どのカードでも選べる
+                }
+                CanPlay = false;
                 IsDecisionDialogOpen = true;
+                IsRevolutionChoice = false;
+                IsRankDeclaration = false;
+                IsModalDecisionOpen = false;
+                IsCardSelectionMode = true;
+                UpdateSelectionCount();
+                break;
+
+            case DecisionKind.DeclareRanks:
+                DecisionTitle = "12ボンバー：数字の宣言";
+                DecisionMessage = dec.MinCount == dec.MaxCount
+                    ? $"全員の手札から捨てさせる数字を {dec.MaxCount} つ選んでください"
+                    : $"全員の手札から捨てさせる数字を {dec.MinCount}〜{dec.MaxCount} つ選んでください";
+                RankOptions.Clear();
+                foreach (var rank in RankOptionViewModel.DeclarationOrder)
+                {
+                    RankOptions.Add(new RankOptionViewModel(rank));
+                }
+                _rankCursor = 0;
+                IsDecisionDialogOpen = true;
+                IsRevolutionChoice = false;
+                IsCardSelectionMode = false;
+                IsRankDeclaration = true;
+                IsModalDecisionOpen = true;
+                UpdateRankCount();
                 break;
         }
+    }
+
+    // ------------------------------------------------------------------
+    // カード選択・数字宣言の数え方
+    // ------------------------------------------------------------------
+
+    private int _rankCursor;
+
+    /// <summary>カード選択中の選択数表示と、決定できるかを更新する。</summary>
+    private void UpdateSelectionCount()
+    {
+        if (!IsCardSelectionMode || _currentDecision is null) return;
+        int count = HumanHand.Count(vm => vm.IsSelected);
+        SelectionCountText = FormatCount(count, _currentDecision.MinCount, _currentDecision.MaxCount, "枚");
+        CanConfirmDecision = count >= _currentDecision.MinCount && count <= _currentDecision.MaxCount;
+    }
+
+    private void UpdateRankCount()
+    {
+        if (!IsRankDeclaration || _currentDecision is null) return;
+        int count = RankOptions.Count(o => o.IsSelected);
+        SelectionCountText = FormatCount(count, _currentDecision.MinCount, _currentDecision.MaxCount, "つ");
+        CanConfirmDecision = count >= _currentDecision.MinCount && count <= _currentDecision.MaxCount;
+        for (int i = 0; i < RankOptions.Count; i++)
+        {
+            RankOptions[i].IsKeyboardCursor = _rankKeyboardUsed && i == _rankCursor;
+        }
+    }
+
+    private static string FormatCount(int count, int min, int max, string unit)
+        => min == max ? $"{count} / {max} {unit}" : $"{count} {unit}（{min}〜{max} {unit}）";
+
+    private bool _rankKeyboardUsed;
+
+    /// <summary>数字宣言の選択を切り替える。上限に達しているときは、1つだけ選ぶ宣言なら入れ替え、それ以外は選ばない。</summary>
+    [RelayCommand]
+    private void ToggleRank(RankOptionViewModel? option)
+    {
+        if (option is null || !IsRankDeclaration || _currentDecision is null) return;
+        int max = _currentDecision.MaxCount;
+        if (!option.IsSelected && RankOptions.Count(o => o.IsSelected) >= max)
+        {
+            if (max != 1) return;
+            foreach (var o in RankOptions) o.IsSelected = false;
+        }
+        option.IsSelected = !option.IsSelected;
+        _rankCursor = RankOptions.IndexOf(option);
+        _audio.Play(SoundEffect.CardSelect);
+        UpdateRankCount();
+    }
+
+    /// <summary>キーボード：数字宣言のカーソルを動かす。</summary>
+    public void MoveRankCursor(int delta)
+    {
+        if (!IsRankDeclaration || RankOptions.Count == 0) return;
+        _rankKeyboardUsed = true;
+        _rankCursor = Math.Clamp(_rankCursor + delta, 0, RankOptions.Count - 1);
+        UpdateRankCount();
+    }
+
+    /// <summary>キーボード：カーソル位置の数字を選ぶ・外す。</summary>
+    public void ToggleRankAtCursor()
+    {
+        if (!IsRankDeclaration || RankOptions.Count == 0) return;
+        _rankKeyboardUsed = true;
+        ToggleRank(RankOptions[Math.Clamp(_rankCursor, 0, RankOptions.Count - 1)]);
+    }
+
+    [RelayCommand]
+    private void SubmitRankDeclarationDecision()
+    {
+        if (!IsRankDeclaration || _currentDecision is null) return;
+        var ranks = RankOptions.Where(o => o.IsSelected).Select(o => o.Rank).ToList();
+        if (ranks.Count < _currentDecision.MinCount || ranks.Count > _currentDecision.MaxCount)
+        {
+            UpdateRankCount();
+            return;
+        }
+
+        if (_client != null)
+        {
+            IsDecisionDialogOpen = false;
+            _ = SendGuestDecisionAsync(_client.DeclareRanksAsync(ranks));
+            return;
+        }
+        if (_engine == null) return;
+        var result = _engine.SubmitRankDeclaration(_myPlayerId, ranks);
+        if (!result.IsAccepted && !result.IsDeferred)
+        {
+            DecisionMessage = $"その宣言はできません（{result.Error}）";
+            return;
+        }
+        IsDecisionDialogOpen = false;
     }
 
     [RelayCommand]
@@ -865,9 +1150,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
         // 枚数が合わないまま閉じるとエンジンに拒否されて進めなくなるため、送信前に確認する
         if (selected.Count < _currentDecision.MinCount || selected.Count > _currentDecision.MaxCount)
         {
-            DecisionMessage = _currentDecision.MinCount == _currentDecision.MaxCount
-                ? $"{_currentDecision.MinCount}枚選んでください（現在 {selected.Count}枚）"
-                : $"{_currentDecision.MinCount}〜{_currentDecision.MaxCount}枚選んでください（現在 {selected.Count}枚）";
+            UpdateSelectionCount(); // 決定ボタンは押せないまま、枚数表示で不足を示す
             return;
         }
 
@@ -936,6 +1219,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                     SpecialEffectType.SequenceRevolution => "階段革命",
                     _ => "革命"
                 };
+                SweepTriggered?.Invoke(this, SweepKind.AuroraSweep);
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
                     revTitle,
                     "REVOLUTION",
@@ -1009,10 +1293,13 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 break;
 
             case SpecialEffectType.TwelveBomber:
+                string bomberSummary = BuildBomberSummary(playerId);
+                NoticeMessage = bomberSummary;
+                SweepTriggered?.Invoke(this, SweepKind.AuroraSweep);
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
                     "12ボンバー",
                     "TWELVE BOMBER",
-                    $"{playerName} が宣言したカードが一斉破棄されます",
+                    bomberSummary,
                     "#FF1493",
                     IconGlyphs.Warning));
                 break;
@@ -1220,6 +1507,10 @@ public sealed partial class GameTableViewModel : ViewModelBase
         if (IsRevolutionChoice)
         {
             SubmitRevolutionDecision(true);
+        }
+        else if (IsRankDeclaration)
+        {
+            SubmitRankDeclarationDecision();
         }
         else
         {

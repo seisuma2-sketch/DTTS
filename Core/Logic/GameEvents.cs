@@ -112,6 +112,9 @@ public sealed record PlayersSkippedEvent(int ByPlayerId, IReadOnlyList<int> Skip
 /// <summary>カードがプレイヤー間で移動した。</summary>
 public sealed record CardsTransferredEvent(int FromPlayerId, int ToPlayerId, IReadOnlyList<Card> Cards, CardTransferReason Reason) : GameEvent;
 
+/// <summary>12ボンバーで数字が宣言された（この後、宣言された数字のカードが全員の手札から捨てられる）。</summary>
+public sealed record RanksDeclaredEvent(int PlayerId, IReadOnlyList<Rank> Ranks) : GameEvent;
+
 /// <summary>カードが捨てられた。</summary>
 public sealed record CardsDiscardedEvent(int PlayerId, IReadOnlyList<Card> Cards, CardDiscardReason Reason) : GameEvent;
 

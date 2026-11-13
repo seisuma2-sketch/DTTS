@@ -196,6 +196,91 @@ public static class CompositionAnimationHelper
         visual.StartAnimation("Translation", slide);
     }
 
+    /// <summary>
+    /// Prism Flash：画面の四辺（上→右→下→左の順）に光の線が伸びて消える。場が流れたときの演出。
+    /// 画面の端だけを使うので、手札や場の見やすさを邪魔しない。
+    /// </summary>
+    public static void AnimatePrismFlash(FrameworkElement top, FrameworkElement right, FrameworkElement bottom, FrameworkElement left)
+    {
+        // 伸び始める位置（時計回りに走るよう、各辺の始点を中心にして拡大する）
+        AnimateEdge(top, horizontal: true, fromEnd: false, delayMs: 0);
+        AnimateEdge(right, horizontal: false, fromEnd: false, delayMs: 90);
+        AnimateEdge(bottom, horizontal: true, fromEnd: true, delayMs: 180);
+        AnimateEdge(left, horizontal: false, fromEnd: true, delayMs: 270);
+    }
+
+    private static void AnimateEdge(FrameworkElement edge, bool horizontal, bool fromEnd, int delayMs)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(edge);
+        var compositor = visual.Compositor;
+        edge.Opacity = 1; // XAML 側は初期状態で 0（未再生時に見えないように）。以降は Visual の不透明度で制御する
+
+        float w = (float)edge.ActualWidth, h = (float)edge.ActualHeight;
+        visual.CenterPoint = horizontal
+            ? new Vector3(fromEnd ? w : 0f, h / 2f, 0f)
+            : new Vector3(w / 2f, fromEnd ? h : 0f, 0f);
+        visual.StopAnimation("Scale");
+        visual.StopAnimation("Opacity");
+
+        var duration = TimeSpan.FromMilliseconds(700);
+        var delay = TimeSpan.FromMilliseconds(delayMs);
+
+        var scale = compositor.CreateVector3KeyFrameAnimation();
+        scale.Duration = duration;
+        scale.DelayTime = delay;
+        scale.DelayBehavior = AnimationDelayBehavior.SetInitialValueBeforeDelay;
+        var start = horizontal ? new Vector3(0f, 1f, 1f) : new Vector3(1f, 0f, 1f);
+        scale.InsertKeyFrame(0f, start);
+        scale.InsertKeyFrame(0.45f, Vector3.One);
+        scale.InsertKeyFrame(1f, Vector3.One);
+
+        var opacity = compositor.CreateScalarKeyFrameAnimation();
+        opacity.Duration = duration;
+        opacity.DelayTime = delay;
+        opacity.DelayBehavior = AnimationDelayBehavior.SetInitialValueBeforeDelay;
+        opacity.InsertKeyFrame(0f, 0f);
+        opacity.InsertKeyFrame(0.15f, 1f);
+        opacity.InsertKeyFrame(0.55f, 1f);
+        opacity.InsertKeyFrame(1f, 0f);
+
+        visual.StartAnimation("Scale", scale);
+        visual.StartAnimation("Opacity", opacity);
+    }
+
+    /// <summary>
+    /// Aurora Sweep：テーマカラー・シアン・バイオレットの柔らかな光の帯が、画面を斜めに横切る。
+    /// 12ボンバー・革命など、場の状況が大きく変わったときの演出。
+    /// </summary>
+    public static void AnimateAuroraSweep(FrameworkElement band, double hostWidth)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(band);
+        var compositor = visual.Compositor;
+        ElementCompositionPreview.SetIsTranslationEnabled(band, true);
+        band.Opacity = 1;
+        visual.StopAnimation("Translation");
+        visual.StopAnimation("Opacity");
+
+        float bandWidth = (float)band.ActualWidth;
+        float from = -bandWidth - 120f;
+        float to = (float)Math.Max(hostWidth, 600) + 120f;
+        var duration = TimeSpan.FromMilliseconds(1100);
+
+        var slide = compositor.CreateVector3KeyFrameAnimation();
+        slide.Duration = duration;
+        slide.InsertKeyFrame(0f, new Vector3(from, 0f, 0f));
+        slide.InsertKeyFrame(1f, new Vector3(to, 0f, 0f), compositor.CreateCubicBezierEasingFunction(new Vector2(0.4f, 0f), new Vector2(0.2f, 1f)));
+
+        var opacity = compositor.CreateScalarKeyFrameAnimation();
+        opacity.Duration = duration;
+        opacity.InsertKeyFrame(0f, 0f);
+        opacity.InsertKeyFrame(0.2f, 1f);
+        opacity.InsertKeyFrame(0.75f, 1f);
+        opacity.InsertKeyFrame(1f, 0f);
+
+        visual.StartAnimation("Translation", slide);
+        visual.StartAnimation("Opacity", opacity);
+    }
+
     /// <summary>カットイン演出1回分の長さ（ミリ秒）。</summary>
     public const double CutInDurationMs = 1200;
 

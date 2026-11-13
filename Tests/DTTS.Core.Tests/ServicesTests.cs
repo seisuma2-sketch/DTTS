@@ -423,6 +423,16 @@ internal static class ServicesTests
         var transfer = new CardsTransferredEvent(0, 3, new[] { Card.Parse("S2") }, CardTransferReason.Exchange);
         Check(ClientViewBuilder.ToNotice(transfer, 0)!.CardIds is not null && ClientViewBuilder.ToNotice(transfer, 3)!.CardIds is not null, "transfer visible to parties");
         Check(ClientViewBuilder.ToNotice(transfer, 1)!.CardIds is null && ClientViewBuilder.ToNotice(transfer, 1)!.Count == 1, "transfer hidden from others");
+
+        // 12ボンバー：宣言した数字と、誰が何枚捨てたか（理由つき）が全員に届く
+        var declared = ClientViewBuilder.ToNotice(new RanksDeclaredEvent(2, new[] { Rank.Seven, Rank.King }), 1)!;
+        Check(declared.Kind == "RanksDeclared" && declared.PlayerId == 2 && declared.Ranks!.SequenceEqual(new[] { Rank.Seven, Rank.King }), "ranks declared notice");
+        var bombed = ClientViewBuilder.ToNotice(new CardsDiscardedEvent(3, new[] { Card.Parse("H7"), Card.Parse("C7") }, CardDiscardReason.TwelveBomber), 0)!;
+        Check(bombed.Kind == "CardsDiscarded" && bombed.PlayerId == 3 && bombed.Count == 2 && bombed.DiscardReason == CardDiscardReason.TwelveBomber,
+            "bomber discard notice carries reason");
+        var declaredJson = JsonSerializer.Serialize<NetMessage>(new GameNotice(declared), NetJsonContext.Default.NetMessage);
+        var declaredBack = JsonSerializer.Deserialize(declaredJson, NetJsonContext.Default.NetMessage) as GameNotice;
+        Check(declaredBack?.Notice.Ranks?.SequenceEqual(new[] { Rank.Seven, Rank.King }) == true, "ranks survive JSON");
     }
 
     // ==================================================================

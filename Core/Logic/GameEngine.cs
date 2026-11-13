@@ -1011,6 +1011,7 @@ public sealed class GameEngine
         int n = Math.Min(effect.Magnitude, Card.RanksPerSuit);
         _rankDeclarationHandler = ranks =>
         {
+            Emit(new RanksDeclaredEvent(playerId, ranks.ToArray()));
             var declared = new HashSet<Rank>(ranks);
             // 宣言者から進行方向順に処理（あがりの順位もこの順で確定）
             var order = new List<int> { playerId };

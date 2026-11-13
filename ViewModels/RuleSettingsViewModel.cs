@@ -29,6 +29,77 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
     [ObservableProperty]
     public partial RuleSettings Rules { get; set; } = RuleSettings.CreateDefault();
 
+    /// <summary>ローカルルールのカテゴリ（折りたたみカード）。<see cref="Rules"/> を差し替えると作り直す。</summary>
+    public ObservableCollection<RuleCategoryViewModel> RuleCategories { get; } = new();
+
+    /// <summary>有効なローカルルールの合計（例：「有効 18 / 60」）。</summary>
+    [ObservableProperty]
+    public partial string RuleSummaryText { get; set; } = "";
+
+    partial void OnRulesChanged(RuleSettings value)
+    {
+        RuleCategories.Clear();
+        foreach (var category in RuleCatalog.Build(value, OnRuleToggled))
+        {
+            RuleCategories.Add(category);
+        }
+        OnPropertyChanged(nameof(RoundCount));
+        UpdateRuleSummary();
+    }
+
+    private void OnRuleToggled()
+    {
+        UpdateRuleSummary();
+        StatusMessage = "ルールを変更しました（「設定を保存」またはタイトルへ戻ると保存されます）";
+    }
+
+    private void UpdateRuleSummary()
+    {
+        int on = RuleCategories.Sum(c => c.Items.Count(i => i.IsOn));
+        int all = RuleCategories.Sum(c => c.Items.Count);
+        RuleSummaryText = $"有効 {on} / {all}";
+    }
+
+    /// <summary>1ゲームのラウンド数（1〜20）。</summary>
+    public double RoundCount
+    {
+        get => Rules.Progress.RoundCount;
+        set
+        {
+            int v = (int)Math.Round(Math.Clamp(double.IsFinite(value) ? value : 1, 1, 20));
+            if (Rules.Progress.RoundCount == v) return;
+            Rules.Progress.RoundCount = v;
+            OnPropertyChanged();
+            OnRuleToggled();
+        }
+    }
+
+    /// <summary>プリセット（標準・シンプル・全部盛り）を適用する。ラウンド数はそのまま引き継ぐ。</summary>
+    [RelayCommand]
+    private void ApplyPreset(string? name)
+    {
+        if (!Enum.TryParse<RulePreset>(name, out var preset)) return;
+        Rules = RulePresets.Create(preset, Rules);
+        string label = preset switch
+        {
+            RulePreset.Simple => "シンプル",
+            RulePreset.Chaos => "全部盛り",
+            _ => "標準",
+        };
+        StatusMessage = $"プリセット「{label}」を適用しました（「設定を保存」またはタイトルへ戻ると保存されます）";
+    }
+
+    /// <summary>すべてのカテゴリを開く・閉じる。</summary>
+    [RelayCommand]
+    private void SetAllCategoriesExpanded(string? expand)
+    {
+        bool open = string.Equals(expand, "true", StringComparison.OrdinalIgnoreCase);
+        foreach (var c in RuleCategories)
+        {
+            c.IsExpanded = open;
+        }
+    }
+
     [ObservableProperty]
     public partial AppearanceSettings Appearance { get; set; } = new();
 

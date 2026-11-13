@@ -146,6 +146,8 @@ public sealed record ClientView(
 /// <param name="FinishKind">あがり方。</param>
 /// <param name="Applied">効果が適用されたか。</param>
 /// <param name="Standings">ラウンド/ゲームの順位（プレイヤーID順位、点）。</param>
+/// <param name="Ranks">宣言された数字（12ボンバー）。</param>
+/// <param name="DiscardReason">カードが捨てられた理由（CardsDiscarded）。</param>
 public sealed record NoticeDto(
     string Kind,
     int? PlayerId = null,
@@ -155,7 +157,9 @@ public sealed record NoticeDto(
     SpecialEffectType? Effect = null,
     FinishKind? FinishKind = null,
     bool Applied = true,
-    StandingDto[]? Standings = null);
+    StandingDto[]? Standings = null,
+    Rank[]? Ranks = null,
+    CardDiscardReason? DiscardReason = null);
 
 /// <summary>順位情報。</summary>
 public sealed record StandingDto(int PlayerId, int Position, PlayerRank Rank, int Points, int TotalScore);
@@ -266,7 +270,8 @@ public static class ClientViewBuilder
                 ct.ToPlayerId,
                 viewerId == ct.FromPlayerId || viewerId == ct.ToPlayerId ? Ids(ct.Cards) : null,
                 ct.Cards.Count),
-            CardsDiscardedEvent cd => new NoticeDto("CardsDiscarded", cd.PlayerId, CardIds: Ids(cd.Cards), Count: cd.Cards.Count),
+            CardsDiscardedEvent cd => new NoticeDto("CardsDiscarded", cd.PlayerId, CardIds: Ids(cd.Cards), Count: cd.Cards.Count, DiscardReason: cd.Reason),
+            RanksDeclaredEvent rd => new NoticeDto("RanksDeclared", rd.PlayerId, Count: rd.Ranks.Count, Ranks: rd.Ranks.ToArray()),
             FieldFlushedEvent ff => new NoticeDto("FieldFlushed", ff.NextLeaderId, Effect: ff.Cause),
             PlayerFinishedEvent pf => new NoticeDto("PlayerFinished", pf.PlayerId, FinishKind: pf.Kind),
             RoundEndedEvent re => new NoticeDto("RoundEnded", Count: re.Result.RoundNumber, Applied: re.IsGameOver,

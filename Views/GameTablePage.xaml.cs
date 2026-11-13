@@ -38,10 +38,100 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
 
     private int _focusedCardIndex = 0;
 
+    // ------------------------------------------------------------------
+    // 全画面演出（場流れ：Prism Flash / 12ボンバー・革命：Aurora Sweep）の色
+    // ------------------------------------------------------------------
+
+    private static readonly Windows.UI.Color AuroraCyan = Windows.UI.Color.FromArgb(255, 0x22, 0xD3, 0xEE);
+    private static readonly Windows.UI.Color AuroraViolet = Windows.UI.Color.FromArgb(255, 0x8B, 0x5C, 0xF6);
+
+    /// <summary>四辺を走る光（横辺用）：テーマカラー → シアン → バイオレット。</summary>
+    public Brush PrismBrushHorizontal { get; } = CreateGradient(new Windows.Foundation.Point(0, 0.5), new Windows.Foundation.Point(1, 0.5), 255);
+
+    /// <summary>四辺を走る光（縦辺用）。</summary>
+    public Brush PrismBrushVertical { get; } = CreateGradient(new Windows.Foundation.Point(0.5, 0), new Windows.Foundation.Point(0.5, 1), 255);
+
+    /// <summary>斜めに横切る光の帯（両端は透明）。</summary>
+    public Brush AuroraBrush { get; } = CreateAuroraBrush();
+
+    private static Windows.UI.Color AccentColor()
+        => Application.Current.Resources.TryGetValue("AppAccentBrush", out var b) && b is SolidColorBrush scb
+            ? scb.Color
+            : Windows.UI.Color.FromArgb(255, 0x3B, 0x82, 0xF6);
+
+    private static Windows.UI.Color WithAlpha(Windows.UI.Color c, byte a) => Windows.UI.Color.FromArgb(a, c.R, c.G, c.B);
+
+    private static LinearGradientBrush CreateGradient(Windows.Foundation.Point start, Windows.Foundation.Point end, byte alpha)
+    {
+        var brush = new LinearGradientBrush { StartPoint = start, EndPoint = end };
+        brush.GradientStops.Add(new GradientStop { Color = WithAlpha(AccentColor(), alpha), Offset = 0.0 });
+        brush.GradientStops.Add(new GradientStop { Color = WithAlpha(AuroraCyan, alpha), Offset = 0.5 });
+        brush.GradientStops.Add(new GradientStop { Color = WithAlpha(AuroraViolet, alpha), Offset = 1.0 });
+        return brush;
+    }
+
+    private static LinearGradientBrush CreateAuroraBrush()
+    {
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0.5),
+            EndPoint = new Windows.Foundation.Point(1, 0.5),
+        };
+        brush.GradientStops.Add(new GradientStop { Color = WithAlpha(AuroraViolet, 0), Offset = 0.0 });
+        brush.GradientStops.Add(new GradientStop { Color = WithAlpha(AuroraViolet, 70), Offset = 0.25 });
+        brush.GradientStops.Add(new GradientStop { Color = WithAlpha(AuroraCyan, 95), Offset = 0.5 });
+        brush.GradientStops.Add(new GradientStop { Color = WithAlpha(AccentColor(), 70), Offset = 0.75 });
+        brush.GradientStops.Add(new GradientStop { Color = WithAlpha(AccentColor(), 0), Offset = 1.0 });
+        return brush;
+    }
+
+    private void OnSweepTriggered(object? sender, GameTableViewModel.SweepKind kind)
+    {
+        // ラウンド結果の表示中は出さない（結果を読む邪魔をしない）
+        if (ViewModel.IsRoundResultOpen) return;
+        try
+        {
+            if (kind == GameTableViewModel.SweepKind.AuroraSweep)
+            {
+                CompositionAnimationHelper.AnimateAuroraSweep(AuroraBand, SweepLayer.ActualWidth);
+            }
+            else
+            {
+                CompositionAnimationHelper.AnimatePrismFlash(PrismTop, PrismRight, PrismBottom, PrismLeft);
+            }
+        }
+        catch (Exception ex)
+        {
+            // 演出の失敗で対戦を止めない
+            App.WriteCrashLog("Sweep", ex);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 12ボンバーの数字ボタン（x:Bind 関数）
+    // ------------------------------------------------------------------
+
+    public static Brush RankBackground(bool selected)
+        => (Brush)Application.Current.Resources[selected ? "AppAccentBrush" : "AppBackgroundDeepBrush"];
+
+    public static Brush RankForeground(bool selected)
+        => (Brush)Application.Current.Resources[selected ? "AppOnAccentBrush" : "AppTextPrimaryBrush"];
+
+    public static Thickness CursorThickness(bool isCursor) => new(isCursor ? 2.5 : 0);
+
+    private void OnRankOptionClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: RankOptionViewModel option })
+        {
+            ViewModel.ToggleRankCommand.Execute(option);
+        }
+    }
+
     public GameTablePage()
     {
         ViewModel = App.Services.GetRequiredService<GameTableViewModel>();
         InitializeComponent();
+        ViewModel.SweepTriggered += OnSweepTriggered;
 
         ViewModel.Player0.PropertyChanged += OnPlayerPropertyChanged;
         ViewModel.Player1.PropertyChanged += OnPlayerPropertyChanged;
@@ -273,6 +363,7 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         ViewModel.FieldCards.CollectionChanged -= OnFieldCardsCollectionChanged;
         ViewModel.HumanHand.CollectionChanged -= OnHumanHandCollectionChanged;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        ViewModel.SweepTriggered -= OnSweepTriggered;
         _cutInTimer?.Stop();
     }
 
@@ -435,6 +526,34 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
                 case VirtualKey.Back:
                     e.Handled = true; // ダイアログ中のパスは無効
                     return;
+            }
+            if (ViewModel.IsRankDeclaration)
+            {
+                // 12ボンバーの数字宣言：数字ボタンを ←/→（↑/↓ は1行＝7個分）で選び、Space で選ぶ・外す
+                switch (e.Key)
+                {
+                    case VirtualKey.Left or VirtualKey.A:
+                        ViewModel.MoveRankCursor(-1);
+                        e.Handled = true;
+                        break;
+                    case VirtualKey.Right or VirtualKey.D:
+                        ViewModel.MoveRankCursor(+1);
+                        e.Handled = true;
+                        break;
+                    case VirtualKey.Up or VirtualKey.W:
+                        ViewModel.MoveRankCursor(-7);
+                        e.Handled = true;
+                        break;
+                    case VirtualKey.Down or VirtualKey.S:
+                        ViewModel.MoveRankCursor(+7);
+                        e.Handled = true;
+                        break;
+                    case VirtualKey.Space:
+                        ViewModel.ToggleRankAtCursor();
+                        e.Handled = true;
+                        break;
+                }
+                return; // 宣言中は手札を操作しない
             }
             if (ViewModel.IsRevolutionChoice)
             {

@@ -16,6 +16,14 @@ public sealed partial class RuleSettingsPage : Page, IBackRequestHandler
 
     public RuleSettingsViewModel ViewModel { get; }
 
+    /// <summary>カテゴリの有効数バッジの背景（1つでも有効ならテーマカラー）。</summary>
+    public static Microsoft.UI.Xaml.Media.Brush BadgeBackground(bool hasEnabled)
+        => (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[hasEnabled ? "AppAccentSubtleBrush" : "AppBackgroundDeepBrush"];
+
+    /// <summary>カテゴリの有効数バッジの文字色。</summary>
+    public static Microsoft.UI.Xaml.Media.Brush BadgeForeground(bool hasEnabled)
+        => (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[hasEnabled ? "AppAccentBrush" : "AppTextMutedBrush"];
+
     public RuleSettingsPage()
     {
         ViewModel = App.Services.GetRequiredService<RuleSettingsViewModel>();

@@ -300,8 +300,27 @@ internal static class EngineTests
             Check(ok == 60, $"simulation {name}: {ok}/60");
         }
 
+        // 設定画面のプリセット（標準・シンプル・全部盛り）でも最後まで正しく進む
+        foreach (var preset in Enum.GetValues<RulePreset>())
+        {
+            int ok = 0;
+            for (int seed = 0; seed < 30; seed++)
+            {
+                if (Simulate(RulePresets.Create(preset), 4, 1000 + seed, "preset-" + preset))
+                {
+                    ok++;
+                }
+            }
+            Check(ok == 30, $"simulation preset {preset}: {ok}/30");
+        }
+        var keep = RuleSettings.CreateDefault();
+        keep.Progress.RoundCount = 7;
+        Check(RulePresets.Create(RulePreset.Chaos, keep).Progress.RoundCount == 7, "preset keeps round count");
+        Check(RulePresets.Create(RulePreset.Chaos).Special.TwelveBomberEnabled && !RulePresets.Create(RulePreset.Simple).Lock.SuitLockEnabled,
+            "preset contents");
+
         Console.WriteLine("coverage: " + string.Join(", ", Coverage.OrderBy(k => k.Key).Select(k => $"{k.Key}={k.Value}")));
-        foreach (var must in new[] { "Revolution", "EightCut", "FourStop", "SevenPass", "TenDiscard", "TwelveBomber",
+        foreach (var must in new[] { "Revolution", "EightCut", "FourStop", "SevenPass", "TenDiscard", "TwelveBomber", "ranks-declared",
                      "FiveSkip", "NineReverse", "SpadeThreeReturn", "SuitLock", "finish:Foul", "finish:MiyakoOchi",
                      "finish:Gekokujo", "transfer:TenpenChii", "transfer:Exchange", "skipped", "extra-round", "deferred" })
         {
@@ -365,6 +384,7 @@ internal static class EngineTests
         // 不変条件：パスした人には、場が流れるかカードが出されるまで手番が回ってこない
         // （「パスしたのに自分の手番のまま」にならないこと）
         int? lastPasser = null;
+        HashSet<Rank>? declaredRanks = null;
 
         engine.EventOccurred += (_, e) =>
         {
@@ -399,10 +419,20 @@ internal static class EngineTests
                         if (!outCards.Add(c.Id)) Fail("card played twice " + c);
                     }
                     break;
+                case RanksDeclaredEvent rd:
+                    declaredRanks = new HashSet<Rank>(rd.Ranks);
+                    Cover("ranks-declared");
+                    break;
                 case CardsDiscardedEvent cd:
                     foreach (var c in cd.Cards)
                     {
                         if (!outCards.Add(c.Id)) Fail("card discarded twice " + c);
+                    }
+                    // 12ボンバーの捨て札は、直前に宣言された数字だけ（全員の画面に「何を宣言したか」を出すため、宣言が先に届く）
+                    if (cd.Reason == CardDiscardReason.TwelveBomber
+                        && (declaredRanks is null || cd.Cards.Any(c => c.IsJoker || !declaredRanks.Contains(c.Rank))))
+                    {
+                        Fail("bomber discard without matching declaration " + string.Join(" ", cd.Cards));
                     }
                     break;
                 case CardsTransferredEvent ct:
