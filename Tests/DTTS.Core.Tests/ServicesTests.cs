@@ -533,7 +533,28 @@ internal static class ServicesTests
             var legacy = NetProtocol.Deserialize(Encoding.UTF8.GetBytes(
                 Encoding.UTF8.GetString(NetProtocol.Serialize(new ViewUpdate(sv)))
                     .Replace(",\"isElevenBackPersistent\":true", "").Replace(",\"isSandstormStopPending\":true", "")));
-            Check(legacy is ViewUpdate { View.Field: { IsElevenBackPersistent: false, IsSandstormStopPending: false } }, "missing field flags default to false");
+            Check(legacy is ViewUpdate { View.Field: { IsElevenBackPersistent: false, IsSandstormStopPending: false, IsElevenBackOneTurn: false } },
+                "missing field flags default to false");
+
+            // 「次の手番だけ」の11バックもゲストの画面へ届く（バッジの表示を切り替えるため）
+            var or = RuleSettings.CreateDefault();
+            or.ElevenBack.Duration = ElevenBackDuration.NextTurnOnly;
+            or.Lock.SuitLockEnabled = false;
+            or.Exchange.Enabled = false;
+            var oe = new GameEngine(or, Enumerable.Range(0, 4).Select(i => new PlayerSetup("P" + i, PlayerKind.Remote)).ToList(), new SystemRandomSource(3));
+            oe.StartGame();
+            int ol = oe.PendingDecision!.PlayerId, oa = (ol + 1) % 4, ob = (ol + 2) % 4, oc = (ol + 3) % 4;
+            oe.GetPlayer(ol).SetHand(Card.ParseMany("D3 S5"));
+            oe.GetPlayer(oa).SetHand(Card.ParseMany("SJ C9"));
+            oe.GetPlayer(ob).SetHand(Card.ParseMany("H7 D9"));
+            oe.GetPlayer(oc).SetHand(Card.ParseMany("D4 CK"));
+            oe.SubmitPlay(ol, Card.ParseMany("D3"));
+            oe.SubmitPlay(oa, Card.ParseMany("SJ"));
+            var ov = ((ViewUpdate)NetProtocol.Deserialize(NetProtocol.Serialize(new ViewUpdate(ClientViewBuilder.Build(oe, ob, 8))))!).View;
+            Check(ov.Field.IsElevenBack && ov.Field.IsElevenBackOneTurn && !ov.Field.IsElevenBackPersistent, "view carries the one-turn 11back flag");
+            oe.SubmitPass(ob);
+            var ov2 = ClientViewBuilder.Build(oe, oc, 9);
+            Check(!ov2.Field.IsElevenBack && !ov2.Field.IsElevenBackOneTurn && ov2.Decision!.PlayerId == oc, "one-turn 11back is gone in the next view");
             // あがりの通知には順位が載る
             var finished = ClientViewBuilder.ToNotice(new PlayerFinishedEvent(2, FinishKind.Normal, 3), 0)!;
             Check(finished.Kind == "PlayerFinished" && finished.PlayerId == 2 && finished.Count == 3 && finished.FinishKind == FinishKind.Normal, "finish notice carries the place");

@@ -59,6 +59,9 @@ public sealed class GameEngine
     private int? _miyakoOchiPlayerId;
     private bool _gekokujo;
 
+    /// <summary>「次の1手番だけ」の11バックが掛かっている手番のプレイヤー（Jの後、最初に手番が来た人。まだ来ていなければ null）。</summary>
+    private int? _elevenBackTurnPlayerId;
+
     // --- ラウンド間状態 ---
     private readonly List<RoundResult> _roundResults = new();
     private Dictionary<int, PlayerRank> _previousRanks = new();
@@ -280,6 +283,10 @@ public sealed class GameEngine
         Field = Field.WithPass(playerId);
         _passesSinceLastPlay.Add(playerId);
         Emit(new PlayerPassedEvent(playerId, false));
+        if (ExpireOneTurnElevenBack(playerId))
+        {
+            Emit(new ElevenBackExpiredEvent(playerId, Field));
+        }
 
         if (AllOthersPassed())
         {
@@ -515,6 +522,7 @@ public sealed class GameEngine
         ClearInterrupt();
         _miyakoOchiPlayerId = null;
         _gekokujo = false;
+        _elevenBackTurnPlayerId = null;
         CurrentPlayerId = null;
         foreach (var p in _players)
         {
@@ -723,6 +731,11 @@ public sealed class GameEngine
     private void StartTurn(int playerId)
     {
         CurrentPlayerId = playerId;
+        if (Field.IsElevenBackOneTurn && _elevenBackTurnPlayerId is null)
+        {
+            // Jの後、最初に手番が来た人：この人が出す・パスするまで11バックが続く
+            _elevenBackTurnPlayerId = playerId;
+        }
         var player = GetPlayer(playerId);
 
         // 親番なのに出せる手が1つもない（禁止あがり「その手ではあがれない」設定で、残り札が禁止カードのみ等）
@@ -820,6 +833,21 @@ public sealed class GameEngine
         return null;
     }
 
+    /// <summary>
+    /// 「次の1手番だけ」の11バックで、その手番の人が行動（出す・パス）を終えたら解除する。
+    /// </summary>
+    /// <returns>解除したら true。</returns>
+    private bool ExpireOneTurnElevenBack(int playerId)
+    {
+        if (!Field.IsElevenBackOneTurn || _elevenBackTurnPlayerId != playerId)
+        {
+            return false;
+        }
+        Field = Field.WithElevenBackCleared();
+        _elevenBackTurnPlayerId = null;
+        return true;
+    }
+
     /// <summary>場を流し、最後に出したプレイヤー（あがっていれば次のプレイヤー）を親にする。</summary>
     private void FlushAndLead(SpecialEffectType? cause, int? lastPlayerOverride = null)
     {
@@ -860,8 +888,15 @@ public sealed class GameEngine
             // 割り込みが成立：止められた効果（8切り・ろくろ首・99車）は発動しない
             ClearInterrupt();
         }
+        // 「次の1手番だけ」の11バック：この人が出し終えたので解除する（出した札は反転中の強さで判定済み）。
+        // この出し札にJが含まれていれば、下の効果処理で改めて「次の人だけ」の11バックが掛かる
+        bool elevenBackExpired = ExpireOneTurnElevenBack(playerId);
         CurrentPlayerId = playerId;
         Emit(new CardsPlayedEvent(playerId, judgement, Field));
+        if (elevenBackExpired)
+        {
+            Emit(new ElevenBackExpiredEvent(playerId, Field));
+        }
 
         // --- あがり判定（効果適用より先に順位を確定させる） ---
         if (player.HandCount == 0)
@@ -893,7 +928,10 @@ public sealed class GameEngine
                 case SpecialEffectType.StrongElevenBack:
                     steps.Add(() =>
                     {
-                        Field = Field.WithElevenBackToggled(e.Type == SpecialEffectType.StrongElevenBack);
+                        Field = Field.WithElevenBackToggled(
+                            e.Type == SpecialEffectType.StrongElevenBack,
+                            oneTurn: _rules.ElevenBack.Duration == ElevenBackDuration.NextTurnOnly);
+                        _elevenBackTurnPlayerId = null;
                         Emit(new EffectAppliedEvent(playerId, e, true, Field));
                     });
                     break;

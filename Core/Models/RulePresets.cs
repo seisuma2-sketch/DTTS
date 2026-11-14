@@ -66,7 +66,7 @@ public static class RulePresets
         r.Flow.SandstormEnabled = true;
         r.Flow.AmbulanceEnabled = true;
         r.Flow.RokurokubiEnabled = true;
-        r.ElevenBack.StrongElevenBackEnabled = true;
+        r.ElevenBack.Duration = Enums.ElevenBackDuration.Persistent;
         r.SkipReverse.FiveSkipEnabled = true;
         r.SkipReverse.ThirteenSkipEnabled = true;
         r.SkipReverse.NineReverseEnabled = true;

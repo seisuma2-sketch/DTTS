@@ -28,6 +28,17 @@ public enum PlayerKind : byte
     Remote,
 }
 
+/// <summary>11バック（強さの一時反転）がいつまで続くか。</summary>
+public enum ElevenBackDuration : byte
+{
+    /// <summary>場が流れるまで（標準）。</summary>
+    UntilFlush = 0,
+    /// <summary>Jを出した人の次の1人の手番だけ。その人が出す・パスするのいずれかを終えた時点で戻る（場が流れても戻る）。</summary>
+    NextTurnOnly,
+    /// <summary>場が流れても続き、次にJが出るまで解除されない（強化11バック）。</summary>
+    Persistent,
+}
+
 /// <summary>2ラウンド目以降の親の決め方。</summary>
 public enum RoundLeaderRule : byte
 {

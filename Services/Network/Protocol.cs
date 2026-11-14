@@ -99,7 +99,8 @@ public sealed record FieldViewDto(
     PlayDirection Direction,
     bool IsEightCutPending,
     bool IsElevenBackPersistent = false,
-    bool IsSandstormStopPending = false);
+    bool IsSandstormStopPending = false,
+    bool IsElevenBackOneTurn = false);
 
 /// <summary>判断要求（誰が何を判断中か。自分宛てなら詳細込み）。</summary>
 public sealed record DecisionViewDto(
@@ -241,7 +242,8 @@ public static class ClientViewBuilder
                 field.Direction,
                 field.IsEightCutPending,
                 field.IsElevenBackPersistent,
-                field.IsSandstormStopPending),
+                field.IsSandstormStopPending,
+                field.IsElevenBackOneTurn),
             d is null ? null : new DecisionViewDto(
                 d.Kind,
                 d.PlayerId,

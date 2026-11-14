@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
+using DTTS.Core.Enums;
 using DTTS.Core.Models;
 
 namespace DTTS.ViewModels;
@@ -205,17 +206,42 @@ public static class RuleCatalog
 
     private sealed record Category(string Title, string Summary, Item[] Items, Choice[]? Choices = null);
 
+    /// <summary>得点配分の組み合わせ（大富豪・富豪・平民・貧民・大貧民）。</summary>
+    private sealed record PointPreset(string Label, int Daifugo, int Fugo, int Heimin, int Hinmin, int Daihinmin)
+    {
+        public bool Matches(ProgressRules p)
+            => p.PointsDaifugo == Daifugo && p.PointsFugo == Fugo && p.PointsHeimin == Heimin
+                && p.PointsHinmin == Hinmin && p.PointsDaihinmin == Daihinmin;
+
+        public void Apply(ProgressRules p)
+        {
+            p.PointsDaifugo = Daifugo;
+            p.PointsFugo = Fugo;
+            p.PointsHeimin = Heimin;
+            p.PointsHinmin = Hinmin;
+            p.PointsDaihinmin = Daihinmin;
+        }
+    }
+
+    // Categories より前に置く（静的フィールドは書いた順に初期化されるため）
+    private static readonly PointPreset[] PointPresets =
+    {
+        new("3・2・1・0（標準）", 3, 2, 1, 1, 0),
+        new("差を広げる 5・3・1・0", 5, 3, 2, 1, 0),
+        new("上位だけ 2・1・0・0", 2, 1, 0, 0, 0),
+    };
+
     private static readonly Category[] Categories =
     {
         new("革命系", "強さが逆転する役", new Item[]
         {
-            new("革命", "同じ数字を4枚以上出すと強さが逆転", r => r.Revolution.Enabled, (r, v) => r.Revolution.Enabled = v,
-                "同じ数字を4枚以上まとめて出すと、カードの強さが逆転します（3が最強、2が最弱。ジョーカーは最強のまま）。次の革命が起きるまで、ラウンドの終わりまで続きます。",
-                "同じ数字を4枚以上出す。ジョーカーを枚数に数えるかは「ジョーカーを含む革命」で決まります。",
+            new("革命", "同じ数字をまとめて出すと強さが逆転", r => r.Revolution.Enabled, (r, v) => r.Revolution.Enabled = v,
+                "同じ数字を決まった枚数（標準は4枚）以上まとめて出すと、カードの強さが逆転します（3が最強、2が最弱。ジョーカーは最強のまま）。次の革命が起きるまで、ラウンドの終わりまで続きます。",
+                "同じ数字を「革命に必要な枚数」以上出す。ジョーカーを枚数に数えるかは「ジョーカーを含む革命」で決まります。",
                 "弱いカードばかりの手札なら狙い目です。3や4を温存しておくと、革命後に一気に有利になります。"),
             new("階段革命", "長い階段でも革命が起きる", r => r.Revolution.SequenceRevolutionEnabled, (r, v) => r.Revolution.SequenceRevolutionEnabled = v,
-                "5枚以上の階段を出したときにも革命が起きます。",
-                "同じスートの連番を5枚以上出す。",
+                "決まった枚数（標準は5枚）以上の階段を出したときにも革命が起きます。必要な枚数は下の「階段革命の必要枚数」で選べます。",
+                "同じスートの連番を「階段革命の必要枚数」以上出す。",
                 "長い階段は返されにくいので、革命と同時に親も取りやすい強力な一手です。"),
             new("革命返し", "革命中の革命で元に戻る", r => r.Revolution.CounterRevolutionEnabled, (r, v) => r.Revolution.CounterRevolutionEnabled = v,
                 "革命中にもう一度革命を起こすと、強さが元に戻ります。オフにすると、革命中は革命の条件を満たしても逆転は起きません（出すこと自体はできます）。",
@@ -241,6 +267,20 @@ public static class RuleCatalog
                 "7をちょうど3枚出すと革命が起きます。",
                 "7を3枚（ちょうど）出す。",
                 "7渡しも有効なら、革命と同時に3枚を次の人へ押し付けられます。"),
+        }, new Choice[]
+        {
+            new("革命に必要な枚数", "同じ数字を何枚出すと革命か",
+                new[] { ("4枚以上（標準）", 4), ("5枚以上", 5), ("3枚以上", 3) },
+                r => r.Revolution.MinCards, (r, v) => r.Revolution.MinCards = v,
+                "革命が起きるのに必要な、同じ数字の枚数です。5枚以上はジョーカーを含めないと出せないため、革命はめったに起きなくなります。3枚以上にすると、3枚組を出すたびに革命が起きます。",
+                "「革命」がオンのとき、同じ数字をこの枚数以上まとめて出す。ジョーカーを数えるかは「ジョーカーを含む革命」に従います。",
+                "3枚以上は荒れた展開に、5枚以上は革命の少ない落ち着いた勝負になります。クーデターなど「ちょうど3枚」の役とは別に判定されます。"),
+            new("階段革命の必要枚数", "何枚の階段で革命か",
+                new[] { ("5枚以上（標準）", 5), ("4枚以上", 4), ("6枚以上", 6) },
+                r => r.Revolution.SequenceRevolutionMinLength, (r, v) => r.Revolution.SequenceRevolutionMinLength = v,
+                "階段革命が起きるのに必要な、階段の枚数です。",
+                "「階段革命」がオンのとき、同じスートの連番をこの枚数以上出す。",
+                "4枚以上にすると階段革命がぐっと起きやすくなります。ジョーカーで欠けた数字を補えば、さらに狙いやすくなります。"),
         }),
         new("階段系", "同じスートの連番", new Item[]
         {
@@ -329,14 +369,23 @@ public static class RuleCatalog
         }),
         new("11バック系", "一時的な強さの逆転", new Item[]
         {
-            new("11バック", "Jを出すと場が流れるまで逆転", r => r.ElevenBack.Enabled, (r, v) => r.ElevenBack.Enabled = v,
-                "J（11）を含むカードを出すと、場が流れるまでカードの強さが逆転します。場が流れた時点で必ず元に戻ります。革命中に出すと打ち消し合って、通常の強さになります。",
-                "Jを出す。同じ場でもう一度Jが出ると、その時点で解除されます。",
+            new("11バック", "Jを出すと強さが逆転", r => r.ElevenBack.Enabled, (r, v) => r.ElevenBack.Enabled = v,
+                "J（11）を含むカードを出すと、カードの強さが逆転します。逆転がいつまで続くかは、下の「11バックの持続」で選べます（標準は場が流れるまで）。革命中に出すと打ち消し合って、通常の強さになります。",
+                "Jを出す。逆転中にもう一度Jが出ると、その時点で解除されます（「次の手番だけ」の設定では、改めて次の人だけが逆転します）。",
                 "Jの直後は弱いカードが強くなります。3や4を処理する好機です。対戦画面の「11バック」バッジで確認できます。"),
-            new("強化11バック", "場が流れても逆転が続く", r => r.ElevenBack.StrongElevenBackEnabled, (r, v) => r.ElevenBack.StrongElevenBackEnabled = v,
-                "11バックの逆転が、場が流れても続くようになります。次に誰かがJを出すまで解除されません（新しいラウンドが始まると必ずリセットされます）。",
-                "このルールがオンの状態でJを出す。対戦画面のバッジは「強化11バック（永続）」になります。",
-                "「Jの効果がずっと続く」と感じたら、このルールがオンになっています（「全部盛り」プリセットに含まれます）。Jを1枚残しておくと、好きなタイミングで元に戻せます。"),
+        }, new Choice[]
+        {
+            new("11バックの持続", "逆転がいつまで続くか",
+                new[]
+                {
+                    ("場が流れるまで（標準）", (int)ElevenBackDuration.UntilFlush),
+                    ("次の手番だけ", (int)ElevenBackDuration.NextTurnOnly),
+                    ("永続（強化11バック）", (int)ElevenBackDuration.Persistent),
+                },
+                r => (int)r.ElevenBack.Duration, (r, v) => r.ElevenBack.Duration = (ElevenBackDuration)v,
+                "場が流れるまで：場が流れた時点で必ず元に戻ります。\n次の手番だけ：Jを出した人の次の1人だけが逆転した強さで出し、その人が出すかパスした時点で元に戻ります（場が流れた場合も戻ります）。\n永続（強化11バック）：場が流れても続き、次に誰かがJを出すまで解除されません。",
+                "「11バック」がオンのときにJを出す。対戦画面のバッジは「11バック」「11バック（次の手番まで）」「強化11バック（永続）」と表示が変わります。どの設定でも、新しいラウンドでは必ず元に戻ります。",
+                "「次の手番だけ」は、Jを出した人ではなく次の人だけが得をする設定です。次の人に弱いカードを出させたくないときは、Jの使いどころに注意しましょう。「永続」は「全部盛り」プリセットに含まれます。"),
         }),
         new("スキップ・リバース系", "手番の順番を変える", new Item[]
         {
@@ -386,6 +435,14 @@ public static class RuleCatalog
                 "ジョーカーを数字の代わりに使ったとき、その数字の効果も発動します。砂嵐・99車などの「特定の数字×枚数」の役にも使えます。",
                 "例：8＋ジョーカーのペア → 8が2枚ぶんの8切り。3が2枚＋ジョーカー → 砂嵐。",
                 "ジョーカーの使い道が大きく広がります。足りない1枚を補って役を完成させられます。"),
+        }, new Choice[]
+        {
+            new("ジョーカーの枚数", "山札に入れるジョーカーの枚数",
+                new[] { ("1枚（標準）", 1), ("2枚", 2), ("なし", 0) },
+                r => r.Joker.JokerCount, (r, v) => r.Joker.JokerCount = v,
+                "山札に入れるジョーカーの枚数です。1枚のときは1枚目のジョーカーだけ、2枚のときは絵柄の違う2枚のジョーカーが登場します。なしにすると、ジョーカーを使うルールは実質的に起きなくなります。",
+                "ラウンドの開始時（カードを配るとき）に反映されます。",
+                "2枚にすると、ジョーカーを持つ人が増えて逆転が起きやすくなります。スペ3返しや12ボンバーの「JK」宣言の価値も上がります。"),
         }),
         new("階級変動", "ラウンドをまたぐ逆転", new Item[]
         {
@@ -401,7 +458,7 @@ public static class RuleCatalog
         new("禁止あがり", "最後の1手の制限", new Item[]
         {
             new("禁止あがり", "以下の出し方ではあがれない", r => r.ForbiddenFinish.Enabled, (r, v) => r.ForbiddenFinish.Enabled = v,
-                "下の項目で指定した出し方で最後の1手を出すと、反則負けになります（そのラウンドは最下位の扱い）。オフにすると、どんな出し方でもあがれます。",
+                "下の項目で指定した出し方で最後の1手を出すと反則になり、「禁止あがりをしたとき」で選んだ扱いになります（標準は最下位）。オフにすると、どんな出し方でもあがれます。",
                 "最後の手札を、禁止されている出し方で出し切る。",
                 "強いカードは最後まで残さず、途中で使い切る計画が必要になります。大富豪らしい駆け引きの核になるルールです。"),
             new("2あがり禁止", "最強の数字であがれない", r => r.ForbiddenFinish.ForbidStrongestNumber, (r, v) => r.ForbiddenFinish.ForbidStrongestNumber = v,
@@ -440,11 +497,23 @@ public static class RuleCatalog
                 "革命を起こす出し方ではあがれません。",
                 "最後の1手で革命が起きる。",
                 "4枚組を最後に残すと、あがれなくなることがあります。"),
+        }, new Choice[]
+        {
+            new("禁止あがりをしたとき", "反則のあがりの扱い",
+                new[]
+                {
+                    ("最下位になる（標準）", (int)ForbiddenFinishPenalty.LastPlace),
+                    ("その手では出せない", (int)ForbiddenFinishPenalty.RejectPlay),
+                },
+                r => (int)r.ForbiddenFinish.Penalty, (r, v) => r.ForbiddenFinish.Penalty = (ForbiddenFinishPenalty)v,
+                "最下位になる：禁止された出し方でも出せますが、手札がなくなった時点で反則あがりとなり、そのラウンドは最下位（大貧民）の扱いになります。\nその手では出せない：最後の1手として禁止された出し方は、そもそも出せません。別の手を出すかパスします。",
+                "「禁止あがり」がオンで、最後の手札を禁止された出し方で出そうとしたとき。",
+                "「その手では出せない」はうっかり反則負けを防げる、初心者に優しい設定です。親番で出せる手が禁止の手しか残っていないときは、反則として手札を没収されます。"),
         }),
         new("カード交換", "ラウンド開始時の交換", new Item[]
         {
             new("カード交換", "階級に応じてカードを交換", r => r.Exchange.Enabled, (r, v) => r.Exchange.Enabled = v,
-                "2ラウンド目以降、配られた直後に階級に応じてカードを交換します。大貧民は大富豪へ2枚、貧民は富豪へ1枚渡し、同じ枚数を受け取ります。",
+                "2ラウンド目以降、配られた直後に階級に応じてカードを交換します。標準では大貧民は大富豪へ2枚、貧民は富豪へ1枚渡し、同じ枚数を受け取ります（枚数は下で変えられます）。",
                 "2ラウンド目以降の開始時に自動で行われます。",
                 "上の階級ほど有利になり、連勝しやすくなります。オフにすると、毎ラウンド平等な勝負になります。"),
             new("交換を都落ちと連動", "都落ち後の階級で交換相手を決める", r => r.Exchange.LinkedToMiyakoOchi, (r, v) => r.Exchange.LinkedToMiyakoOchi = v,
@@ -460,9 +529,29 @@ public static class RuleCatalog
                 "カード交換のとき、貧民・大貧民の手札にジョーカーがある。",
                 "下の階級にも切り札が残り、逆転の可能性が高まります。"),
             new("天変地異", "大貧民の手札が弱すぎると大富豪と全交換", r => r.Exchange.TenpenChiiEnabled, (r, v) => r.Exchange.TenpenChiiEnabled = v,
-                "配られた直後、大貧民の手札がすべて10以下（ジョーカーなし）だった場合、大富豪と手札をすべて交換します。このとき通常のカード交換は行いません。",
-                "大貧民の手札が、すべて10以下でジョーカーもない。",
+                "配られた直後、大貧民の手札がすべて基準の数字（標準は10）以下でジョーカーもない場合、大富豪と手札をすべて交換します。このとき通常のカード交換は行いません。",
+                "大貧民の手札が、すべて「天変地異の基準」以下の強さで、ジョーカーもない。",
                 "めったに起きませんが、起きれば立場が完全に入れ替わる救済ルールです。"),
+        }, new Choice[]
+        {
+            new("大富豪と大貧民の交換枚数", "大貧民が渡し、大富豪が返す枚数",
+                new[] { ("2枚（標準）", 2), ("1枚", 1), ("3枚", 3) },
+                r => r.Exchange.DaifugoExchangeCount, (r, v) => r.Exchange.DaifugoExchangeCount = v,
+                "大貧民が大富豪へ渡す枚数と、大富豪が大貧民へ返す枚数です。",
+                "「カード交換」がオンで、2ラウンド目以降の開始時。",
+                "枚数を増やすほど上の階級が有利になり、階級が固定されやすくなります。"),
+            new("富豪と貧民の交換枚数", "貧民が渡し、富豪が返す枚数",
+                new[] { ("1枚（標準）", 1), ("2枚", 2), ("交換しない", 0) },
+                r => r.Exchange.FugoExchangeCount, (r, v) => r.Exchange.FugoExchangeCount = v,
+                "貧民が富豪へ渡す枚数と、富豪が貧民へ返す枚数です。「交換しない」にすると、交換は大富豪と大貧民の間だけになります。",
+                "「カード交換」がオンで、2ラウンド目以降の開始時。",
+                "大富豪・大貧民の交換枚数より多くすると不自然になるので、同じか少なめがおすすめです。"),
+            new("天変地異の基準", "大貧民の手札がこの数字以下なら発動",
+                new[] { ("10以下（標準）", (int)Rank.Ten), ("9以下", (int)Rank.Nine), ("J以下", (int)Rank.Jack) },
+                r => (int)r.Exchange.TenpenChiiMaxRank, (r, v) => r.Exchange.TenpenChiiMaxRank = (Rank)v,
+                "天変地異が起きる条件となる、大貧民の手札の強さの上限です（3が最弱、2が最強の通常の強さで比べます）。",
+                "「天変地異」がオンで、大貧民の手札がすべてこの数字以下の強さで、ジョーカーもない。",
+                "J以下にすると少しだけ起きやすくなります。それでも珍しい現象なので、起きたら大逆転のチャンスです。"),
         }),
         new("進行", "対戦の進め方", new Item[]
         {
@@ -483,9 +572,42 @@ public static class RuleCatalog
                 "パスをする。",
                 "様子見のパスができなくなり、出すかどうかの判断が重くなります。"),
             new("同点なら延長戦", "最終ラウンドで1位が同点なら延長", r => r.Progress.ExtraRoundOnTie, (r, v) => r.Progress.ExtraRoundOnTie = v,
-                "最終ラウンドが終わったとき、合計点の1位が同点なら延長戦を行います（最大3ラウンド）。オフにすると、同点の人は全員が1位です。",
+                "最終ラウンドが終わったとき、合計点の1位が同点なら延長戦を行います（最大ラウンド数は下の「延長戦の上限」で選べます）。オフにすると、同点の人は全員が1位です。",
                 "規定のラウンドを終えて、1位が同点になる。",
                 "はっきり1人の勝者を決めたいときにオンにします。"),
+        }, new Choice[]
+        {
+            new("2ラウンド目以降の親", "ラウンドの最初に出す人",
+                new[]
+                {
+                    ("前回の大貧民（標準）", (int)RoundLeaderRule.Daihinmin),
+                    ("前回の大富豪", (int)RoundLeaderRule.Daifugo),
+                    ("♦3を持つ人", (int)RoundLeaderRule.DiamondThreeHolder),
+                    ("ランダム", (int)RoundLeaderRule.Random),
+                },
+                r => (int)r.Progress.LaterRoundLeader, (r, v) => r.Progress.LaterRoundLeader = (RoundLeaderRule)v,
+                "2ラウンド目以降（延長戦を含む）で、最初に出す親を誰にするかを決めます。第1ラウンドは「ダイヤ3スタート」に従います。",
+                "2ラウンド目以降の開始時（カード交換の後）。「♦3を持つ人」でも、最初の1手に♦3を含める必要はありません。",
+                "「前回の大貧民」は下の階級の救済になり、「前回の大富豪」は勝っている人がさらに有利になります。"),
+            new("パスの回数制限", "1ラウンドでパスできる回数",
+                new[] { ("無制限（標準）", 0), ("3回まで", 3), ("5回まで", 5) },
+                r => r.Progress.PassLimitPerRound, (r, v) => r.Progress.PassLimitPerRound = v,
+                "1ラウンドの中でパスできる回数の上限です。上限に達すると、出せるカードがある限り必ず出さなければなりません。",
+                "その人がこのラウンドでパスした回数が上限に達している。出せる手が1つもないときは、上限を超えてもパスできます。",
+                "様子見ができなくなり、強いカードを温存しにくくなります。テンポの速い勝負にしたいときに。"),
+            new("延長戦の上限", "1位が同点のときの最大ラウンド数",
+                new[] { ("3ラウンド（標準）", 3), ("1ラウンド", 1), ("5ラウンド", 5) },
+                r => r.Progress.MaxExtraRounds, (r, v) => r.Progress.MaxExtraRounds = v,
+                "「同点なら延長戦」がオンのとき、延長戦を最大で何ラウンドまで行うかを決めます。上限まで行っても同点なら、同点の人は全員が1位です。",
+                "規定のラウンドを終えて、1位が同点になる。",
+                "短く終わらせたいなら1ラウンド、決着にこだわるなら5ラウンドに。"),
+            new("得点の配分", "階級ごとにもらえる点数（大富豪・富豪・貧民・大貧民）",
+                PointPresets.Select((p, i) => (p.Label, i)).ToArray(),
+                r => Array.FindIndex(PointPresets, p => p.Matches(r.Progress)),
+                (r, v) => PointPresets[v].Apply(r.Progress),
+                "ラウンドが終わるたびに、階級に応じてもらえる点数です。対戦の総合順位は、この点数の合計で決まります。",
+                "各ラウンドの終了時。",
+                "「差を広げる」にすると1位の価値が上がり、1回の大富豪で大きく抜け出せます。「上位だけ」は貧民以下が0点になる厳しい設定です。"),
         }),
     };
 

@@ -29,6 +29,8 @@
     <Content Include="Assets\WindowIcon.ico" />
     <!-- 効果音（tools/audio/gen_audio.py で生成） -->
     <Content Include="Assets\Audio\*.wav" />
+    <!-- ジョーカーの絵柄（標準カードで使う。joker1＝1枚目、joker2＝2枚目のジョーカー） -->
+    <Content Include="Assets\Jokers\*.jpg" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

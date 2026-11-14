@@ -114,6 +114,9 @@ public sealed record FieldState
     /// <summary>11バックが場流れ後も持続するか（強化11バック）。</summary>
     public bool IsElevenBackPersistent { get; init; }
 
+    /// <summary>11バックが「Jを出した人の次の1手番だけ」有効か（その人が出す・パスすると戻る）。</summary>
+    public bool IsElevenBackOneTurn { get; init; }
+
     /// <summary>強さが反転しているか（革命 XOR 11バック）。</summary>
     public bool IsStrengthReversed => IsRevolution ^ IsElevenBack;
 
@@ -196,11 +199,21 @@ public sealed record FieldState
     /// 11バックを反転した状態を返す（11バック中にさらに11バックが出た場合は解除）。
     /// </summary>
     /// <param name="persistent">強化11バック（場流れ後も持続）として扱うか。</param>
-    public FieldState WithElevenBackToggled(bool persistent)
+    /// <param name="oneTurn">次の1手番だけ有効な11バックとして扱うか（<paramref name="persistent"/> より優先度は低い）。</param>
+    public FieldState WithElevenBackToggled(bool persistent, bool oneTurn = false)
     {
         bool next = !IsElevenBack;
-        return this with { IsElevenBack = next, IsElevenBackPersistent = next && persistent };
+        return this with
+        {
+            IsElevenBack = next,
+            IsElevenBackPersistent = next && persistent,
+            IsElevenBackOneTurn = next && !persistent && oneTurn,
+        };
     }
+
+    /// <summary>11バックを解除した状態を返す（「次の手番だけ」の11バックが期限を迎えたとき）。</summary>
+    public FieldState WithElevenBackCleared()
+        => this with { IsElevenBack = false, IsElevenBackPersistent = false, IsElevenBackOneTurn = false };
 
     /// <summary>進行方向を反転した状態を返す。</summary>
     public FieldState WithDirectionReversed()
@@ -229,6 +242,7 @@ public sealed record FieldState
             Lock = LockState.None,
             IsElevenBack = IsElevenBack && IsElevenBackPersistent,
             IsElevenBackPersistent = IsElevenBack && IsElevenBackPersistent,
+            IsElevenBackOneTurn = false,
             IsEightCutPending = false,
             IsSandstormStopPending = false,
             TrickNumber = TrickNumber + 1,
@@ -238,7 +252,10 @@ public sealed record FieldState
     {
         string play = CurrentPlay?.ToString() ?? "(空)";
         string rev = IsRevolution ? " 革命中" : string.Empty;
-        string eb = IsElevenBack ? (IsElevenBackPersistent ? " 強化11バック中" : " 11バック中") : string.Empty;
+        string eb = !IsElevenBack ? string.Empty
+            : IsElevenBackPersistent ? " 強化11バック中"
+            : IsElevenBackOneTurn ? " 11バック中（次の手番まで）"
+            : " 11バック中";
         return $"場:{play}{rev}{eb} {Lock} 方向:{Direction}";
     }
 }

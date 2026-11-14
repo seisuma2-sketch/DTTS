@@ -118,6 +118,13 @@ public sealed record RanksDeclaredEvent(int PlayerId, IReadOnlyList<Rank> Ranks)
 /// <summary>カードが捨てられた。</summary>
 public sealed record CardsDiscardedEvent(int PlayerId, IReadOnlyList<Card> Cards, CardDiscardReason Reason) : GameEvent;
 
+/// <summary>
+/// 「次の1手番だけ」の11バックが期限を迎えて解除された（対象の人が出す・パスするのいずれかを終えた）。
+/// </summary>
+/// <param name="PlayerId">11バックの手番を終えたプレイヤー。</param>
+/// <param name="Field">解除後の場の状態。</param>
+public sealed record ElevenBackExpiredEvent(int PlayerId, FieldState Field) : GameEvent;
+
 /// <summary>場が流れた。</summary>
 public sealed record FieldFlushedEvent(int? NextLeaderId, SpecialEffectType? Cause, FieldState Field) : GameEvent;
 

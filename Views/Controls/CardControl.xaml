@@ -85,6 +85,39 @@
                         </StackPanel>
                     </Grid>
 
+                    <!--
+                        2b. 標準のジョーカーの絵柄（Assets\Jokers）。アイボリーの縁を少し残して内側に敷き、角を丸めて切り抜く。
+                        手札で重なっても分かるよう、左上に「JK」の目印を重ねる。
+                    -->
+                    <Grid x:Name="JokerArtLayer" Visibility="Collapsed">
+                        <Border Margin="2.5" CornerRadius="5" Background="#FF0E0F14" BorderBrush="#FF6D3FC8" BorderThickness="0.8">
+                            <Border CornerRadius="4.5">
+                                <Border.Background>
+                                    <ImageBrush x:Name="JokerArtBrush" Stretch="UniformToFill" AlignmentY="Top" />
+                                </Border.Background>
+                            </Border>
+                        </Border>
+                        <Border
+                            Margin="4,4,0,0"
+                            Padding="3,0,3,1"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            CornerRadius="3"
+                            Background="#E66D3FC8"
+                            BorderBrush="#FFF2E9FF"
+                            BorderThickness="0.6">
+                            <TextBlock Text="JK" FontSize="9" FontWeight="Black" Foreground="#FFFFFFFF" />
+                        </Border>
+                    </Grid>
+
+                    <!-- 2c. 画像の表面（スキン・標準ジョーカー）で出せないとき：地色のグレーと同じ色を薄く重ねる（カードの外は透けない） -->
+                    <Border
+                        x:Name="ImageDimOverlay"
+                        CornerRadius="6"
+                        Background="#8CC4CCD8"
+                        IsHitTestVisible="False"
+                        Visibility="Collapsed" />
+
                     <!-- 3. 裏面レイヤー（IsFacedDown=true時） -->
                     <Border
                         x:Name="BackSurface"

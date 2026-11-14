@@ -128,6 +128,10 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
     private const string NormalElevenBackLabel = "11バック";
     private const string StrongElevenBackLabel = "強化11バック（永続）";
+    private const string OneTurnElevenBackLabel = "11バック（次の手番まで）";
+
+    private static string ElevenBackLabel(bool persistent, bool oneTurn)
+        => persistent ? StrongElevenBackLabel : oneTurn ? OneTurnElevenBackLabel : NormalElevenBackLabel;
 
     [ObservableProperty]
     public partial string LockDescription { get; set; } = "";
@@ -503,6 +507,11 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 }
                 break;
 
+            case ElevenBackExpiredEvent eb:
+                ApplyFieldBadges(eb.Field);
+                StatusMessage = $"{GetPlayerVm(eb.PlayerId).Name} の手番が終わり、11バックが解除されました";
+                break;
+
             case FieldFlushedEvent ff:
                 FieldCards.Clear();
                 ApplyFieldBadges(ff.Field); // 11バック・縛りは場が流れると解除される
@@ -730,7 +739,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private void ApplyFieldBadges(FieldState field)
     {
         IsRevolution = field.IsRevolution;
-        ElevenBackBadgeText = field.IsElevenBackPersistent ? StrongElevenBackLabel : NormalElevenBackLabel;
+        ElevenBackBadgeText = ElevenBackLabel(field.IsElevenBackPersistent, field.IsElevenBackOneTurn);
         IsElevenBack = field.IsElevenBack;
         IsStrengthReversed = field.IsStrengthReversed;
         IsCounterClockwise = field.Direction == PlayDirection.CounterClockwise;
@@ -1065,7 +1074,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         // 状態バッジ
         IsRevolution = view.Field.IsRevolution;
-        ElevenBackBadgeText = view.Field.IsElevenBackPersistent ? StrongElevenBackLabel : NormalElevenBackLabel;
+        ElevenBackBadgeText = ElevenBackLabel(view.Field.IsElevenBackPersistent, view.Field.IsElevenBackOneTurn);
         IsElevenBack = view.Field.IsElevenBack;
         IsStrengthReversed = view.Field.IsStrengthReversed;
         IsCounterClockwise = view.Field.Direction == PlayDirection.CounterClockwise;
@@ -1534,10 +1543,12 @@ public sealed partial class GameTableViewModel : ViewModelBase
             case SpecialEffectType.ElevenBack:
             case SpecialEffectType.StrongElevenBack:
                 bool strong = effectType == SpecialEffectType.StrongElevenBack;
+                bool oneTurn = !strong && _rules.ElevenBack.Duration == ElevenBackDuration.NextTurnOnly;
                 string backDetail = elevenBackOn switch
                 {
                     false => $"{playerName} のJで反転が解除され、元の強弱に戻りました",
                     _ when strong => $"{playerName} により強弱が反転（場が流れても、次のJが出るまで続きます）",
+                    _ when oneTurn => $"{playerName} により、次の人の手番だけ強弱が反転します",
                     _ => $"{playerName} により、場が流れるまで強弱が反転します",
                 };
                 CutInTriggered?.Invoke(this, new CutInEventArgs(

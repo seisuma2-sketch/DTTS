@@ -371,6 +371,80 @@ internal static class EngineTests
                 "strong 11back reset at the next round");
         }
 
+        // ---- 11バック「次の手番だけ」：Jの次の人がパスしたら、その次の人からは通常の強さ ----
+        {
+            var r = RuleSettings.CreateDefault();
+            r.Lock.SuitLockEnabled = false;
+            r.ElevenBack.Duration = ElevenBackDuration.NextTurnOnly;
+            var (e, l, a, b, c) = Start(r);
+            var expired = new List<int>();
+            e.EventOccurred += (_, ev) => { if (ev is ElevenBackExpiredEvent x) expired.Add(x.PlayerId); };
+            e.GetPlayer(l).SetHand(C("D3 S5 S9"));
+            e.GetPlayer(a).SetHand(C("HJ C6 C9"));
+            e.GetPlayer(b).SetHand(C("H7 C7 DK"));
+            e.GetPlayer(c).SetHand(C("D4 CK HK"));
+            Play(e, l, "D3", "1turn-pass");
+            Play(e, a, "HJ", "1turn-pass");
+            Check(e.Field.IsElevenBack && e.Field.IsElevenBackOneTurn && !e.Field.IsElevenBackPersistent && e.Field.IsStrengthReversed,
+                "one-turn 11back on");
+            Check(e.SubmitPlay(b, C("DK")).Error == CommandError.IllegalPlay, "one-turn 11back: b plays under the reversal (K rejected)");
+            Pass(e, b, "1turn-pass");
+            Check(!e.Field.IsElevenBack && !e.Field.IsElevenBackOneTurn && !e.Field.IsStrengthReversed && !e.Field.IsEmpty,
+                "one-turn 11back ends when b passes (the J stays on the field)");
+            Check(expired.SequenceEqual(new[] { b }), "one-turn 11back: expiry event for b");
+            Check(e.PendingDecision!.PlayerId == c, "one-turn 11back: c's turn");
+            Check(e.SubmitPlay(c, C("D4")).Error == CommandError.IllegalPlay, "one-turn 11back: c is back to normal strength (4 rejected)");
+            Play(e, c, "CK", "1turn-pass");
+        }
+        // ---- 11バック「次の手番だけ」：Jの次の人が出したら解除（場はそのまま続く）----
+        {
+            var r = RuleSettings.CreateDefault();
+            r.Lock.SuitLockEnabled = false;
+            r.ElevenBack.Duration = ElevenBackDuration.NextTurnOnly;
+            var (e, l, a, b, c) = Start(r);
+            e.GetPlayer(l).SetHand(C("D3 S5 S9"));
+            e.GetPlayer(a).SetHand(C("HJ C6 C9"));
+            e.GetPlayer(b).SetHand(C("H7 C7 DK"));
+            e.GetPlayer(c).SetHand(C("D4 CK HK"));
+            Play(e, l, "D3", "1turn-play");
+            Play(e, a, "HJ", "1turn-play");
+            Play(e, b, "H7", "1turn-play"); // 反転中なので 7 は J より強い
+            Check(!e.Field.IsElevenBack && !e.Field.IsStrengthReversed && e.Field.CurrentPlay!.Cards[0].Rank == Rank.Seven,
+                "one-turn 11back ends right after b plays");
+            Check(e.SubmitPlay(c, C("D4")).Error == CommandError.IllegalPlay, "one-turn 11back: 4 rejected against 7 for c");
+            Play(e, c, "CK", "1turn-play");
+            Check(!e.Field.IsElevenBack, "one-turn 11back stays off");
+        }
+        // ---- 11バック「次の手番だけ」：誰も続かず場が流れたら解除。新しい親は通常の強さ ----
+        {
+            var r = RuleSettings.CreateDefault();
+            r.Lock.SuitLockEnabled = false;
+            r.ElevenBack.Duration = ElevenBackDuration.NextTurnOnly;
+            var (e, l, a, b, c) = Start(r);
+            e.GetPlayer(l).SetHand(C("D3 S5"));
+            e.GetPlayer(a).SetHand(C("SJ C9"));
+            e.GetPlayer(b).SetHand(C("H7 D9"));
+            e.GetPlayer(c).SetHand(C("D4 CK"));
+            Play(e, l, "D3", "1turn-flush");
+            Play(e, a, "SJ", "1turn-flush");
+            Pass(e, b, "1turn-flush");
+            Pass(e, c, "1turn-flush"); Pass(e, l, "1turn-flush");
+            Check(e.Field.IsEmpty && !e.Field.IsElevenBack && !e.Field.IsElevenBackOneTurn && e.PendingDecision!.PlayerId == a,
+                "one-turn 11back: flush leaves a clean field");
+        }
+
+        // ---- ジョーカーの枚数：1枚なら1枚目（JK0）だけ、2枚なら JK0・JK1 の両方、0枚ならなし ----
+        foreach (int count in new[] { 0, 1, 2 })
+        {
+            var r = RuleSettings.CreateDefault();
+            r.Joker.JokerCount = count;
+            var e = new GameEngine(r, Players(4), new SystemRandomSource(5));
+            e.StartGame();
+            var jokers = e.Players.SelectMany(p => p.Hand).Where(x => x.IsJoker).Select(x => x.JokerIndex).OrderBy(i => i).ToArray();
+            Check(jokers.SequenceEqual(Enumerable.Range(0, count)), $"joker count {count}: dealt {string.Join(",", jokers)}");
+            Check(e.Players.Sum(p => p.HandCount) == 52 + count, $"joker count {count}: deck size");
+        }
+
         // ---- 12ボンバー：ジョーカーも宣言して消せる ----
         {
             var r = RuleSettings.CreateDefault();
@@ -688,6 +762,31 @@ internal static class EngineTests
             var off = new RuleSettings { Progress = { KeepFieldOnPlayerFinish = false } };
             Check(!RuleSettings.FromJson(off.ToJson()).Progress.KeepFieldOnPlayerFinish, "flush-on-finish survives a JSON round-trip");
         }
+        {
+            // 11バックの持続方式：旧設定の strongElevenBackEnabled との互換
+            Check(RuleSettings.CreateDefault().ElevenBack.Duration == ElevenBackDuration.UntilFlush, "11back duration default");
+            Check(RuleSettings.FromJson("{\"elevenBack\":{\"strongElevenBackEnabled\":true}}").ElevenBack.Duration == ElevenBackDuration.Persistent,
+                "old strong flag loads as persistent");
+            Check(RuleSettings.FromJson("{\"elevenBack\":{\"strongElevenBackEnabled\":false}}").ElevenBack.Duration == ElevenBackDuration.UntilFlush,
+                "old normal flag loads as until-flush");
+            var oneTurn = new RuleSettings { ElevenBack = { Duration = ElevenBackDuration.NextTurnOnly } };
+            Check(oneTurn.Clone().ElevenBack.Duration == ElevenBackDuration.NextTurnOnly && !oneTurn.ElevenBack.StrongElevenBackEnabled,
+                "next-turn-only survives Clone");
+            // 項目の順序が逆でも、false の強化フラグは「次の手番だけ」を上書きしない
+            Check(RuleSettings.FromJson("{\"elevenBack\":{\"duration\":\"NextTurnOnly\",\"strongElevenBackEnabled\":false}}").ElevenBack.Duration
+                == ElevenBackDuration.NextTurnOnly, "duration first, strong=false keeps next-turn-only");
+            Check(RuleSettings.FromJson("{\"elevenBack\":{\"strongElevenBackEnabled\":false,\"duration\":\"Persistent\"}}").ElevenBack.StrongElevenBackEnabled,
+                "duration wins over a stale strong flag");
+            var strong = new RuleSettings { ElevenBack = { StrongElevenBackEnabled = true } };
+            Check(strong.Clone().ElevenBack.Duration == ElevenBackDuration.Persistent, "strong flag round-trips as persistent");
+            var json = oneTurn.ToJson();
+            Check(json.IndexOf("strongElevenBackEnabled", StringComparison.Ordinal) < json.IndexOf("\"duration\"", StringComparison.Ordinal),
+                "duration is written after the legacy flag");
+            var bad = RuleSettings.CreateDefault();
+            bad.ElevenBack.Duration = (ElevenBackDuration)42;
+            bad.Normalize();
+            Check(bad.ElevenBack.Duration == ElevenBackDuration.UntilFlush, "invalid duration normalized");
+        }
 
         // ---- あがりの順位がイベントに載る ----
         {
@@ -752,6 +851,33 @@ internal static class EngineTests
             ("seq2-lock3-specials", r => { AllSpecials(r); r.Sequence.MinLength = 2; r.Lock.TriggerCount = 2; }, 4),
             // 通常の11バックのみ（強化なし）で全部盛り：場が流れたら必ず解除されること
             ("specials-normal-11back", r => { AllSpecials(r); r.ElevenBack.StrongElevenBackEnabled = false; }, 4),
+            // 11バックは次の1手番だけ
+            ("one-turn-11back", r => r.ElevenBack.Duration = ElevenBackDuration.NextTurnOnly, 4),
+            ("one-turn-11back-specials", r => { AllSpecials(r); r.ElevenBack.Duration = ElevenBackDuration.NextTurnOnly; }, 4),
+            ("one-turn-11back-3p-passlock", r =>
+            {
+                AllSpecials(r); r.ElevenBack.Duration = ElevenBackDuration.NextTurnOnly; r.Progress.PassLocksUntilFlush = true;
+            }, 3),
+            // 設定画面から選べるようになった値
+            ("jokers-2", r => r.Joker.JokerCount = 2, 4),
+            ("jokers-0-specials", r => { AllSpecials(r); r.Joker.JokerCount = 0; }, 4),
+            ("pass-limit-3", r => r.Progress.PassLimitPerRound = 3, 4),
+            ("pass-limit-3-reject", r =>
+            {
+                AllSpecials(r); r.Progress.PassLimitPerRound = 3; r.ForbiddenFinish.Penalty = ForbiddenFinishPenalty.RejectPlay;
+            }, 4),
+            ("leader-daifugo", r => r.Progress.LaterRoundLeader = RoundLeaderRule.Daifugo, 4),
+            ("leader-diamond3", r => r.Progress.LaterRoundLeader = RoundLeaderRule.DiamondThreeHolder, 4),
+            ("leader-random", r => { AllSpecials(r); r.Progress.LaterRoundLeader = RoundLeaderRule.Random; }, 4),
+            ("revolution-3-seq4", r =>
+            {
+                r.Revolution.MinCards = 3; r.Revolution.SequenceRevolutionEnabled = true; r.Revolution.SequenceRevolutionMinLength = 4;
+            }, 4),
+            ("exchange-3-0-extra1", r =>
+            {
+                r.Exchange.DaifugoExchangeCount = 3; r.Exchange.FugoExchangeCount = 0; r.Progress.MaxExtraRounds = 1;
+                r.Exchange.TenpenChiiEnabled = true; r.Exchange.TenpenChiiMaxRank = Rank.Jack;
+            }, 4),
             // あがり流し（あがった瞬間に場が流れる）
             ("flush-on-finish", r => r.Progress.KeepFieldOnPlayerFinish = false, 4),
             ("flush-on-finish-specials", r => { AllSpecials(r); r.Progress.KeepFieldOnPlayerFinish = false; }, 4),
@@ -803,7 +929,7 @@ internal static class EngineTests
         foreach (var must in new[] { "Revolution", "EightCut", "FourStop", "SevenPass", "TenDiscard", "TwelveBomber", "ranks-declared",
                      "FiveSkip", "NineReverse", "SpadeThreeReturn", "SuitLock", "finish:Foul", "finish:MiyakoOchi",
                      "finish:Gekokujo", "transfer:TenpenChii", "transfer:Exchange", "skipped", "extra-round", "deferred",
-                     "bomber-joker", "sandstorm-chance", "flush-on-finish", "sandstorm-stop", "eleven-back", "eleven-back-persistent" })
+                     "bomber-joker", "sandstorm-chance", "flush-on-finish", "sandstorm-stop", "eleven-back", "eleven-back-persistent", "eleven-back-one-turn" })
         {
             Check(Coverage.ContainsKey(must), "coverage " + must);
         }
@@ -867,6 +993,7 @@ internal static class EngineTests
         int? lastPasser = null;
         int? finishedAwaitingFlush = null;
         HashSet<Rank>? declaredRanks = null;
+        int? oneTurnHolder = null;
 
         engine.EventOccurred += (_, e) =>
         {
@@ -906,7 +1033,36 @@ internal static class EngineTests
             {
                 Fail("persistent eleven back without the strong rule");
             }
-            if (engine.Field.IsElevenBack) Cover(engine.Field.IsElevenBackPersistent ? "eleven-back-persistent" : "eleven-back");
+            if (engine.Field.IsElevenBack)
+            {
+                Cover(engine.Field.IsElevenBackPersistent ? "eleven-back-persistent"
+                    : engine.Field.IsElevenBackOneTurn ? "eleven-back-one-turn" : "eleven-back");
+            }
+            // 不変条件：「次の手番だけ」の11バックは、その設定のときだけ立ち、Jの後の1人の手番が終わったら解除される
+            if (engine.Field.IsElevenBackOneTurn && engine.Rules.ElevenBack.Duration != ElevenBackDuration.NextTurnOnly)
+            {
+                Fail("one-turn eleven back without the next-turn-only rule");
+            }
+            if (engine.Field.IsElevenBackOneTurn && engine.Field.IsElevenBackPersistent)
+            {
+                Fail("eleven back is both one-turn and persistent");
+            }
+            switch (e)
+            {
+                case EffectAppliedEvent { Effect.Type: SpecialEffectType.ElevenBack or SpecialEffectType.StrongElevenBack }:
+                    oneTurnHolder = null; // Jが出るたびに「次の1人」を数え直す
+                    break;
+                case DecisionRequestedEvent { Decision.Kind: DecisionKind.PlayOrPass } dr when engine.Field.IsElevenBackOneTurn:
+                    if (oneTurnHolder is null)
+                    {
+                        oneTurnHolder = dr.Decision.PlayerId;
+                    }
+                    else if (oneTurnHolder != dr.Decision.PlayerId)
+                    {
+                        Fail($"one-turn eleven back still on for the next player ({oneTurnHolder} -> {dr.Decision.PlayerId})");
+                    }
+                    break;
+            }
             switch (e)
             {
                 case RoundStartedEvent rs:

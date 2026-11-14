@@ -83,6 +83,32 @@ public sealed partial class CardControl : UserControl
         InitializeComponent();
         UpdateVisuals();
         ApplyPlayableTone(CanPlay);
+
+        // 画像の読み込みに失敗したらベクター描画へ切り替える（表示中のカードだけが購読する）
+        Loaded += (_, _) =>
+        {
+            if (_skinManager is not null)
+            {
+                _skinManager.ImageLoadFailed -= OnSkinImageLoadFailed;
+                _skinManager.ImageLoadFailed += OnSkinImageLoadFailed;
+            }
+        };
+        Unloaded += (_, _) =>
+        {
+            if (_skinManager is not null)
+            {
+                _skinManager.ImageLoadFailed -= OnSkinImageLoadFailed;
+            }
+        };
+    }
+
+    private void OnSkinImageLoadFailed(object? sender, Card failed)
+    {
+        // 失敗した画像はスキン管理側で記録済みなので、描き直すと次の候補（標準ジョーカー→ベクター）になる
+        if (Card is { } card && card.Id == failed.Id)
+        {
+            UpdateVisuals();
+        }
     }
 
     /// <summary>
@@ -157,6 +183,15 @@ public sealed partial class CardControl : UserControl
     {
         FaceStopTop.Color = canPlay ? FaceTop : DimFaceTop;
         FaceStopBottom.Color = canPlay ? FaceBottom : DimFaceBottom;
+        UpdateImageDim();
+    }
+
+    /// <summary>画像の表面（スキン・標準ジョーカー）は地色が見えないので、出せないときは薄いグレーを重ねて示す。</summary>
+    private void UpdateImageDim()
+    {
+        bool imageFace = !IsFacedDown
+            && (SkinImage.Visibility == Visibility.Visible || JokerArtLayer.Visibility == Visibility.Visible);
+        ImageDimOverlay.Visibility = imageFace && !CanPlay ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private static void OnIsFacedDownChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -166,6 +201,13 @@ public sealed partial class CardControl : UserControl
 
     public void UpdateVisuals()
     {
+        UpdateFace();
+        UpdateImageDim();
+    }
+
+    private void UpdateFace()
+    {
+        JokerArtLayer.Visibility = Visibility.Collapsed;
         if (IsFacedDown)
         {
             BackSurface.Visibility = Visibility.Visible;
@@ -206,8 +248,18 @@ public sealed partial class CardControl : UserControl
             return;
         }
 
-        // 2. ベクター描画フォールバック
         SkinImage.Visibility = Visibility.Collapsed;
+
+        // 2. 標準のジョーカーの絵柄（スキンパックにジョーカーの画像がないとき）
+        if (card.IsJoker && _skinManager?.GetBuiltInJokerImage(card) is { } jokerArt)
+        {
+            JokerArtBrush.ImageSource = jokerArt;
+            JokerArtLayer.Visibility = Visibility.Visible;
+            VectorSurface.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        // 3. ベクター描画フォールバック
         VectorSurface.Visibility = Visibility.Visible;
 
         string rankStr = GetRankString(card);
@@ -233,6 +285,7 @@ public sealed partial class CardControl : UserControl
         // 読み込み失敗時はベクター描画にフォールバック
         SkinImage.Visibility = Visibility.Collapsed;
         VectorSurface.Visibility = Visibility.Visible;
+        UpdateImageDim();
     }
 
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)

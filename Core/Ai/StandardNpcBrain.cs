@@ -184,7 +184,9 @@ public sealed class StandardNpcBrain : INpcStrategy
         }
 
         // --- 11バック（場が流れるまで反転）---
-        if (judgement.HasEffect(SpecialEffectType.ElevenBack) || judgement.HasEffect(SpecialEffectType.StrongElevenBack))
+        // 「次の1手番だけ」の設定では反転の中で出すのは次の人だけなので、自分の手札にとっての損得はない
+        if ((judgement.HasEffect(SpecialEffectType.ElevenBack) || judgement.HasEffect(SpecialEffectType.StrongElevenBack))
+            && rules.ElevenBack.Duration != ElevenBackDuration.NextTurnOnly)
         {
             double delta = HandAnalysis.HandValue(remaining, !reversed, rules) - HandAnalysis.HandValue(remaining, reversed, rules);
             score += delta * 0.3;

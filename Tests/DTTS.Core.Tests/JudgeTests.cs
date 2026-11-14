@@ -140,6 +140,13 @@ internal static class JudgeTests
             Check(!rev.IsStrengthReversed && rev.Flushed().IsStrengthReversed && rev.Flushed().IsRevolution, "11back inside a revolution");
             var fresh = FieldState.CreateInitial();
             Check(!fresh.IsElevenBack && !fresh.IsElevenBackPersistent && !fresh.IsRevolution && !fresh.IsSandstormStopPending, "new round field is clean");
+            // 「次の手番だけ」：フラグは反転中だけ立ち、場流れ・解除・次のJで落ちる
+            var one = empty.WithElevenBackToggled(persistent: false, oneTurn: true);
+            Check(one.IsElevenBack && one.IsElevenBackOneTurn && !one.IsElevenBackPersistent && one.IsStrengthReversed, "one-turn 11back on");
+            Check(!one.Flushed().IsElevenBack && !one.Flushed().IsElevenBackOneTurn, "one-turn 11back ends on flush");
+            Check(!one.WithElevenBackCleared().IsElevenBack && !one.WithElevenBackCleared().IsElevenBackOneTurn, "one-turn 11back cleared");
+            Check(!one.WithElevenBackToggled(false, oneTurn: true).IsElevenBackOneTurn, "toggling off drops the one-turn flag");
+            Check(!empty.WithElevenBackToggled(persistent: true, oneTurn: true).IsElevenBackOneTurn, "persistent wins over one-turn");
 
             // 判定側：強化の有無で効果の種類が変わる
             var rules = RuleSettings.CreateDefault();

@@ -167,6 +167,10 @@ public sealed class RuleSettings
         {
             ForbiddenFinish.Penalty = ForbiddenFinishPenalty.LastPlace;
         }
+        if (!Enum.IsDefined(ElevenBack.Duration))
+        {
+            ElevenBack.Duration = ElevenBackDuration.UntilFlush;
+        }
 
         // トリガー数字が Joker 等の不正値になっていたら既定値へ戻す
         Revolution.CoupRank = ClampNatural(Revolution.CoupRank, Rank.Nine);
@@ -401,7 +405,7 @@ public sealed class FlowRules
 /// <summary>5. 11バック系ルール。</summary>
 public sealed class ElevenBackRules
 {
-    /// <summary>11バック：<see cref="TriggerRank"/> を含む出し札で、場が流れるまで強さが反転する。</summary>
+    /// <summary>11バック：<see cref="TriggerRank"/> を含む出し札で強さが反転する（いつまで続くかは <see cref="Duration"/>）。</summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>11バックのトリガー数字。</summary>
@@ -410,8 +414,34 @@ public sealed class ElevenBackRules
     /// <summary>
     /// 強化11バック：反転が場流れ後も持続し、次に11バックが出るまで解除されない。
     /// ※地域差の大きいルールのため、本実装ではこの定義を採用。
+    /// <para>
+    /// 旧バージョンの設定（JSON）との互換用。値の実体は <see cref="Duration"/> で、
+    /// true は <see cref="ElevenBackDuration.Persistent"/> と同じ意味になる。
+    /// false を書き込んでも、<see cref="Duration"/> が「次の手番だけ」なら変更しない（JSON の項目順に左右されないため）。
+    /// </para>
     /// </summary>
-    public bool StrongElevenBackEnabled { get; set; } = false;
+    public bool StrongElevenBackEnabled
+    {
+        get => Duration == ElevenBackDuration.Persistent;
+        set
+        {
+            if (value)
+            {
+                Duration = ElevenBackDuration.Persistent;
+            }
+            else if (Duration == ElevenBackDuration.Persistent)
+            {
+                Duration = ElevenBackDuration.UntilFlush;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 11バックの持続方式（場が流れるまで／次の1手番だけ／永続）。
+    /// JSON では <see cref="StrongElevenBackEnabled"/> より後に読み書きされるので、両方ある場合はこちらが優先される。
+    /// </summary>
+    [JsonPropertyOrder(1)]
+    public ElevenBackDuration Duration { get; set; } = ElevenBackDuration.UntilFlush;
 }
 
 // ======================================================================

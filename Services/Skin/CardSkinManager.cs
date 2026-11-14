@@ -26,8 +26,14 @@ public interface ICardSkinManager
     /// <summary>画像の読み込みに失敗した（そのカードはベクター描画へ切り替える）。</summary>
     event EventHandler<Card>? ImageLoadFailed;
 
-    /// <summary>カード表面の画像。画像がない・読み込み失敗済みなら null。</summary>
+    /// <summary>カード表面の画像（スキンパックのもの）。画像がない・読み込み失敗済みなら null。</summary>
     ImageSource? GetCardImage(Card card);
+
+    /// <summary>
+    /// 標準のジョーカーの絵柄（アプリに同梱した Assets\Jokers\joker1.jpg・joker2.jpg）。
+    /// スキンパックにジョーカーの画像がないときに使う。ジョーカー以外・画像がない・読み込み失敗済みなら null。
+    /// </summary>
+    ImageSource? GetBuiltInJokerImage(Card card);
 
     /// <summary>カード裏面の画像。なければ null。</summary>
     ImageSource? GetBackImage();
@@ -64,6 +70,12 @@ public sealed class CardSkinManager : ICardSkinManager
 
     private const string BackKey = "back";
 
+    /// <summary>標準のジョーカー画像のフォルダ（アプリのインストール先からの相対パス）。</summary>
+    public const string BuiltInJokerDirectory = "Assets\\Jokers";
+
+    /// <summary>標準のジョーカー画像のパス（1枚目＝joker1.jpg、2枚目＝joker2.jpg）。存在確認済みで、ないものは null。</summary>
+    private readonly string?[] _builtInJokerPaths;
+
     private readonly string _skinsRoot;
     private readonly int _decodePixelWidth;
     private readonly int _maxCacheEntries;
@@ -77,12 +89,26 @@ public sealed class CardSkinManager : ICardSkinManager
     /// <param name="skinsRoot">スキンのルートフォルダ（アプリのローカルフォルダ配下を推奨）。</param>
     /// <param name="decodePixelWidth">デコード幅（物理ピクセル、64〜1024）。</param>
     /// <param name="maxCacheEntries">キャッシュ上限枚数。</param>
-    public CardSkinManager(string skinsRoot, int decodePixelWidth = DefaultDecodePixelWidth, int maxCacheEntries = DefaultMaxCacheEntries)
+    /// <param name="builtInJokerDirectory">標準のジョーカー画像のフォルダ（省略時はインストール先の Assets\Jokers）。</param>
+    public CardSkinManager(
+        string skinsRoot,
+        int decodePixelWidth = DefaultDecodePixelWidth,
+        int maxCacheEntries = DefaultMaxCacheEntries,
+        string? builtInJokerDirectory = null)
     {
         _skinsRoot = skinsRoot ?? throw new ArgumentNullException(nameof(skinsRoot));
         _decodePixelWidth = Math.Clamp(decodePixelWidth, 64, 1024);
         _maxCacheEntries = Math.Max(8, maxCacheEntries);
         Directory.CreateDirectory(_skinsRoot);
+
+        // 存在確認は起動時に1回だけ行う（カードを描くたびにディスクを見に行かない）
+        string jokerDir = builtInJokerDirectory ?? Path.Combine(AppContext.BaseDirectory, BuiltInJokerDirectory);
+        _builtInJokerPaths = new string?[Card.MaxJokerCount];
+        for (int i = 0; i < _builtInJokerPaths.Length; i++)
+        {
+            string path = Path.Combine(jokerDir, $"joker{i + 1}.jpg");
+            _builtInJokerPaths[i] = File.Exists(path) ? path : null;
+        }
         Refresh();
     }
 
@@ -144,6 +170,19 @@ public sealed class CardSkinManager : ICardSkinManager
             return null;
         }
         return GetOrLoad(card.Code, path, card);
+    }
+
+    /// <inheritdoc />
+    public ImageSource? GetBuiltInJokerImage(Card card)
+    {
+        ArgumentNullException.ThrowIfNull(card);
+        if (!card.IsJoker || card.JokerIndex < 0 || card.JokerIndex >= _builtInJokerPaths.Length
+            || _builtInJokerPaths[card.JokerIndex] is not { } path)
+        {
+            return null;
+        }
+        // パックの画像とは別のキーにする（パックのジョーカーが読めなくても、標準の絵柄は使えるように）
+        return GetOrLoad("builtin:" + card.Code, path, card);
     }
 
     /// <inheritdoc />
