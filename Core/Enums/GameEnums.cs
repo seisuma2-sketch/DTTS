@@ -54,6 +54,20 @@ public enum DecisionKind : byte
     SelectCards,
     /// <summary>12ボンバーの数字宣言。</summary>
     DeclareRanks,
+    /// <summary>ろくろ首・99車への砂嵐の割り込み：砂嵐を出して流しを止めるか、パスで見送る。</summary>
+    SandstormStopChance,
+}
+
+/// <summary><see cref="DecisionKind"/> の補助メソッド。</summary>
+public static class DecisionKindExtensions
+{
+    /// <summary>カードを出すかパスするかの判断か（手番・4止め・砂嵐の割り込み）。</summary>
+    public static bool IsPlayDecision(this DecisionKind kind)
+        => kind is DecisionKind.PlayOrPass or DecisionKind.FourStopChance or DecisionKind.SandstormStopChance;
+
+    /// <summary>手番外の割り込みの機会か（4止め・砂嵐）。パスは「見送り」になる。</summary>
+    public static bool IsInterruptChance(this DecisionKind kind)
+        => kind is DecisionKind.FourStopChance or DecisionKind.SandstormStopChance;
 }
 
 /// <summary>カード選択の目的。</summary>

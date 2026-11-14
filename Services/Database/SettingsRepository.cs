@@ -21,8 +21,13 @@ public sealed class SettingsRepository
     public const string NpcKey = "npc";
     /// <summary>フィードバック設定のキー。</summary>
     public const string FeedbackKey = "feedback";
+    /// <summary>マイプリセット（名前を付けて保存したルール構成）のキー。</summary>
+    public const string RulePresetsKey = "rule_presets";
 
     private readonly AppDatabaseContext _db;
+
+    // 外見設定の「読み込み → 一部変更 → 保存」を直列にする（サウンド切替と進行スピード切替が互いの変更を消さないように）
+    private readonly SemaphoreSlim _appearanceUpdateLock = new(1, 1);
 
     /// <summary>リポジトリを生成する。</summary>
     public SettingsRepository(AppDatabaseContext db)
@@ -106,6 +111,45 @@ public sealed class SettingsRepository
     /// <summary>外見設定を保存する。</summary>
     public Task SaveAppearanceAsync(AppearanceSettings settings, CancellationToken cancellationToken = default)
         => SetAsync(AppearanceKey, JsonSerializer.Serialize(settings, SettingsJsonContext.Default.AppearanceSettings), cancellationToken);
+
+    /// <summary>
+    /// 外見設定の一部だけを書き換えて保存する（対戦画面のサウンド・進行スピードのワンクリック切替用）。
+    /// 複数の切替が同時に走っても、互いの変更を上書きしない。
+    /// </summary>
+    /// <returns>保存後の設定。</returns>
+    public async Task<AppearanceSettings> UpdateAppearanceAsync(Action<AppearanceSettings> change, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        await _appearanceUpdateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var settings = await LoadAppearanceAsync(cancellationToken).ConfigureAwait(false);
+            change(settings);
+            settings.Normalize();
+            await SaveAppearanceAsync(settings, cancellationToken).ConfigureAwait(false);
+            return settings;
+        }
+        finally
+        {
+            _appearanceUpdateLock.Release();
+        }
+    }
+
+    /// <summary>マイプリセットの一覧を読み込む（未保存・破損時は空）。</summary>
+    public async Task<CustomRulePresetList> LoadRulePresetsAsync(CancellationToken cancellationToken = default)
+    {
+        var json = await GetAsync(RulePresetsKey, cancellationToken).ConfigureAwait(false);
+        var value = Deserialize(json, SettingsJsonContext.Default.CustomRulePresetList) ?? new CustomRulePresetList();
+        value.Normalize();
+        return value;
+    }
+
+    /// <summary>マイプリセットの一覧を保存する。</summary>
+    public Task SaveRulePresetsAsync(CustomRulePresetList presets, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(presets);
+        return SetAsync(RulePresetsKey, JsonSerializer.Serialize(presets, SettingsJsonContext.Default.CustomRulePresetList), cancellationToken);
+    }
 
     /// <summary>NPC設定を読み込む。</summary>
     public async Task<NpcSettings> LoadNpcAsync(CancellationToken cancellationToken = default)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace DTTS.ViewModels;
 
@@ -23,6 +24,52 @@ public sealed class CutInEventArgs : EventArgs
         AccentColorHex = accentColorHex;
         Glyph = glyph;
     }
+}
+
+/// <summary>12ボンバーで消えた数字1つ分。</summary>
+/// <param name="Rank">宣言された数字（ジョーカーは <see cref="DTTS.Core.Enums.Rank.Joker"/>）。</param>
+/// <param name="Label">表示名（3〜10・J・Q・K・A・2・JK）。</param>
+/// <param name="DiscardedCount">全員の手札から消えた枚数の合計（誰も持っていなければ 0）。</param>
+public sealed record BomberVanishItem(DTTS.Core.Enums.Rank Rank, string Label, int DiscardedCount);
+
+/// <summary>12ボンバーで消えた数字を画面中央で順に見せる演出のパラメータ。</summary>
+public sealed class BomberVanishEventArgs : EventArgs
+{
+    public BomberVanishEventArgs(string declarerName, IReadOnlyList<BomberVanishItem> items)
+    {
+        DeclarerName = declarerName;
+        Items = items;
+    }
+
+    /// <summary>宣言したプレイヤーの表示名。</summary>
+    public string DeclarerName { get; }
+
+    /// <summary>消えた数字（弱い順：3 … K・A・2・ジョーカー）。</summary>
+    public IReadOnlyList<BomberVanishItem> Items { get; }
+}
+
+/// <summary>あがりの演出のパラメータ。</summary>
+public sealed class FinishCelebrationEventArgs : EventArgs
+{
+    public FinishCelebrationEventArgs(string playerName, int place, bool isSelf, string rankTitle)
+    {
+        PlayerName = playerName;
+        Place = place;
+        IsSelf = isSelf;
+        RankTitle = rankTitle;
+    }
+
+    /// <summary>あがったプレイヤーの表示名。</summary>
+    public string PlayerName { get; }
+
+    /// <summary>順位（1始まり）。</summary>
+    public int Place { get; }
+
+    /// <summary>この端末のプレイヤーか（自分のあがりは少し大きく見せる）。</summary>
+    public bool IsSelf { get; }
+
+    /// <summary>この順位で得る階級の名前（大富豪・富豪・貧民など）。</summary>
+    public string RankTitle { get; }
 }
 
 /// <summary>

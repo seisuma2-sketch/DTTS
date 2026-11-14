@@ -25,4 +25,6 @@ public enum PlayRejectReason : byte
     FourStopOnly,
     /// <summary>禁止あがり（厳格判定：その手ではあがれない設定）。</summary>
     ForbiddenFinish,
+    /// <summary>ろくろ首・99車の割り込み受付中で、砂嵐以外は出せない。</summary>
+    SandstormStopOnly,
 }

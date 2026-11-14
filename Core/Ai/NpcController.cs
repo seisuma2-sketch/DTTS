@@ -28,9 +28,60 @@ public sealed class ImmediateNpcScheduler : INpcScheduler
     public void Schedule(TimeSpan delay, Action action) => action();
 }
 
+/// <summary>ゲームの進行スピード（NPCが考える時間の長さ）。</summary>
+public enum GameSpeed : byte
+{
+    /// <summary>ゆっくり：何が起きたかを1手ずつ追える。</summary>
+    Slow = 0,
+    /// <summary>普通。</summary>
+    Normal = 1,
+    /// <summary>速い。</summary>
+    Fast = 2,
+    /// <summary>超速：ほぼ待ち時間なし。</summary>
+    VeryFast = 3,
+}
+
 /// <summary>NPCの「考え中」演出の時間設定。</summary>
 public sealed record NpcTimingOptions
 {
+    /// <summary>進行スピードに対応する時間設定を返す。</summary>
+    public static NpcTimingOptions ForSpeed(GameSpeed speed) => speed switch
+    {
+        GameSpeed.Slow => new NpcTimingOptions
+        {
+            BaseDelay = TimeSpan.FromMilliseconds(1900),
+            Jitter = TimeSpan.FromMilliseconds(700),
+            SideDecisionDelay = TimeSpan.FromMilliseconds(1300),
+        },
+        GameSpeed.Fast => new NpcTimingOptions
+        {
+            BaseDelay = TimeSpan.FromMilliseconds(500),
+            Jitter = TimeSpan.FromMilliseconds(300),
+            SideDecisionDelay = TimeSpan.FromMilliseconds(350),
+        },
+        GameSpeed.VeryFast => new NpcTimingOptions
+        {
+            BaseDelay = TimeSpan.FromMilliseconds(140),
+            Jitter = TimeSpan.FromMilliseconds(80),
+            SideDecisionDelay = TimeSpan.FromMilliseconds(100),
+        },
+        _ => new NpcTimingOptions
+        {
+            BaseDelay = TimeSpan.FromMilliseconds(1000),
+            Jitter = TimeSpan.FromMilliseconds(500),
+            SideDecisionDelay = TimeSpan.FromMilliseconds(700),
+        },
+    };
+
+    /// <summary>進行スピードの表示名。</summary>
+    public static string SpeedName(GameSpeed speed) => speed switch
+    {
+        GameSpeed.Slow => "ゆっくり",
+        GameSpeed.Fast => "速い",
+        GameSpeed.VeryFast => "超速",
+        _ => "普通",
+    };
+
     /// <summary>基本の思考時間。</summary>
     public TimeSpan BaseDelay { get; init; } = TimeSpan.FromMilliseconds(700);
 
@@ -55,7 +106,7 @@ public sealed class NpcController : IDisposable
 {
     private readonly GameEngine _engine;
     private readonly INpcScheduler _scheduler;
-    private readonly NpcTimingOptions _timing;
+    private NpcTimingOptions _timing;
     private readonly IRandomSource _random;
     private readonly Dictionary<int, INpcStrategy> _strategies = new();
     private readonly HashSet<Card> _seenCards = new();
@@ -75,6 +126,15 @@ public sealed class NpcController : IDisposable
         _timing = timing ?? new NpcTimingOptions();
         _random = random ?? new SystemRandomSource();
         _engine.EventOccurred += OnEngineEvent;
+    }
+
+    /// <summary>
+    /// 思考時間の設定。対戦中に変更でき、次に予約する判断から反映される（予約済みの判断は元の時間で実行される）。
+    /// </summary>
+    public NpcTimingOptions Timing
+    {
+        get => _timing;
+        set => _timing = value ?? throw new ArgumentNullException(nameof(value));
     }
 
     /// <summary>判断時に例外が発生した（フォールバックで応答済み）。ログ・フィードバック送信用。</summary>
@@ -148,7 +208,7 @@ public sealed class NpcController : IDisposable
         }
         _lastHandled = decision;
 
-        var delay = decision.Kind is DecisionKind.PlayOrPass or DecisionKind.FourStopChance
+        var delay = decision.Kind.IsPlayDecision()
             ? _timing.BaseDelay + TimeSpan.FromMilliseconds(_random.Next((int)Math.Max(1, _timing.Jitter.TotalMilliseconds)))
             : _timing.SideDecisionDelay;
 
@@ -199,6 +259,7 @@ public sealed class NpcController : IDisposable
         {
             case DecisionKind.PlayOrPass:
             case DecisionKind.FourStopChance:
+            case DecisionKind.SandstormStopChance:
                 var play = strategy.DecidePlay(context);
                 return play.IsPass ? _engine.SubmitPass(id) : _engine.SubmitPlay(id, play.Cards!);
             case DecisionKind.SelectCards:
@@ -240,6 +301,7 @@ public sealed class NpcController : IDisposable
         {
             case DecisionKind.PlayOrPass:
             case DecisionKind.FourStopChance:
+            case DecisionKind.SandstormStopChance:
                 if (decision.CanPass)
                 {
                     return _engine.SubmitPass(id);

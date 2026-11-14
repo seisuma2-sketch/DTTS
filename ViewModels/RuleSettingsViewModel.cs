@@ -17,6 +17,11 @@ using Windows.Storage.Pickers;
 
 namespace DTTS.ViewModels;
 
+/// <summary>マイプリセットの一覧の1行。</summary>
+/// <param name="Name">プリセット名。</param>
+/// <param name="Summary">内容の要約（有効なルールの数・ラウンド数・保存日時）。</param>
+public sealed record CustomPresetItemViewModel(string Name, string Summary);
+
 public sealed partial class RuleSettingsViewModel : ViewModelBase
 {
     private readonly INavigationService _navigation;
@@ -45,6 +50,143 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
         }
         OnPropertyChanged(nameof(RoundCount));
         UpdateRuleSummary();
+    }
+
+    // ------------------------------------------------------------------
+    // ルール詳細ガイド（右ペイン）
+    // ------------------------------------------------------------------
+
+    /// <summary>右ペインに表示しているルールの詳しい説明（左でホバー・フォーカス・クリックした項目）。</summary>
+    [ObservableProperty]
+    public partial RuleGuide SelectedGuide { get; set; } = RuleGuide.Placeholder;
+
+    /// <summary>ガイドに表示する項目を切り替える。</summary>
+    public void ShowGuide(RuleGuide? guide)
+    {
+        if (guide is not null && !ReferenceEquals(guide, SelectedGuide))
+        {
+            SelectedGuide = guide;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 進行スピード（変更は即座に保存。対戦画面のヘッダーからも変えられる）
+    // ------------------------------------------------------------------
+
+    /// <summary>進行スピードの選択肢（ゆっくり・普通・速い・超速）。</summary>
+    public IReadOnlyList<string> SpeedOptions { get; } =
+        Enum.GetValues<GameSpeed>().Select(NpcTimingOptions.SpeedName).ToArray();
+
+    /// <summary>選んでいる進行スピードの番号。</summary>
+    public int SpeedIndex
+    {
+        get => (int)Appearance.GameSpeed;
+        set
+        {
+            // コンボボックスは項目の読み込み中に -1 を書き戻すことがある。範囲外の値は無視する
+            if (value < 0 || value >= SpeedOptions.Count || (int)Appearance.GameSpeed == value) return;
+            Appearance.GameSpeed = (GameSpeed)value;
+            OnPropertyChanged();
+            StatusMessage = $"進行スピードを「{SpeedOptions[value]}」にしました";
+            _ = SaveAppearanceAsync();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // マイプリセット（現在のルール構成に名前を付けて保存・読み込み・削除）
+    // ------------------------------------------------------------------
+
+    private CustomRulePresetList _presetStore = new();
+
+    /// <summary>保存済みのマイプリセット（新しい順）。</summary>
+    public ObservableCollection<CustomPresetItemViewModel> CustomPresets { get; } = new();
+
+    /// <summary>マイプリセットが1件もないか（空の案内を出す）。</summary>
+    public bool HasNoCustomPresets => CustomPresets.Count == 0;
+
+    /// <summary>保存するプリセットの名前（入力欄）。</summary>
+    [ObservableProperty]
+    public partial string NewPresetName { get; set; } = "";
+
+    /// <summary>マイプリセットの操作結果（保存しました・読み込みました など）。</summary>
+    [ObservableProperty]
+    public partial string PresetStatus { get; set; } = "";
+
+    private void RefreshCustomPresets()
+    {
+        CustomPresets.Clear();
+        foreach (var preset in _presetStore.Presets)
+        {
+            var rules = preset.ToRules();
+            if (rules is null) continue;
+            var (enabled, total) = RuleCatalog.CountEnabled(rules);
+            string saved = preset.SavedAt == default ? "" : $" ・ {preset.SavedAt.ToLocalTime():M/d HH:mm} 保存";
+            CustomPresets.Add(new CustomPresetItemViewModel(
+                preset.Name,
+                $"有効 {enabled} / {total} ・ {rules.Progress.RoundCount}ラウンド{saved}"));
+        }
+        OnPropertyChanged(nameof(HasNoCustomPresets));
+    }
+
+    /// <summary>現在のルール構成を、入力した名前でマイプリセットに保存する（同じ名前は上書き）。</summary>
+    [RelayCommand]
+    private async Task SaveCurrentAsPresetAsync()
+    {
+        var name = CustomRulePresetList.SanitizeName(NewPresetName);
+        if (name is null)
+        {
+            PresetStatus = "プリセット名を入力してください";
+            return;
+        }
+        bool overwrite = _presetStore.Presets.Any(p => p.Name == name);
+        if (_presetStore.Upsert(name, Rules, DateTimeOffset.Now) is null)
+        {
+            PresetStatus = $"マイプリセットは {CustomRulePresetList.MaxCount} 件までです。不要なものを削除してください";
+            return;
+        }
+        try
+        {
+            await _settingsRepo.SaveRulePresetsAsync(_presetStore);
+            PresetStatus = overwrite ? $"「{name}」を現在のルールで上書きしました" : $"「{name}」を保存しました";
+            NewPresetName = "";
+        }
+        catch (Exception ex)
+        {
+            PresetStatus = $"保存に失敗しました: {ex.Message}";
+        }
+        RefreshCustomPresets();
+    }
+
+    /// <summary>マイプリセットを読み込み、現在のルールとして編集できるようにする。</summary>
+    [RelayCommand]
+    private void LoadCustomPreset(CustomPresetItemViewModel? item)
+    {
+        var rules = item is null ? null : _presetStore.Presets.FirstOrDefault(p => p.Name == item.Name)?.ToRules();
+        if (item is null || rules is null)
+        {
+            PresetStatus = "プリセットを読み込めませんでした";
+            return;
+        }
+        Rules = rules;
+        PresetStatus = $"「{item.Name}」を読み込みました";
+        StatusMessage = $"マイプリセット「{item.Name}」を適用しました（「設定を保存」またはタイトルへ戻ると保存されます）";
+    }
+
+    /// <summary>マイプリセットを削除する（確認はページ側で行う）。</summary>
+    [RelayCommand]
+    private async Task DeleteCustomPresetAsync(CustomPresetItemViewModel? item)
+    {
+        if (item is null || !_presetStore.Remove(item.Name)) return;
+        try
+        {
+            await _settingsRepo.SaveRulePresetsAsync(_presetStore);
+            PresetStatus = $"「{item.Name}」を削除しました";
+        }
+        catch (Exception ex)
+        {
+            PresetStatus = $"削除を保存できませんでした: {ex.Message}";
+        }
+        RefreshCustomPresets();
     }
 
     private void OnRuleToggled()
@@ -204,6 +346,17 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(SoundEnabled));
         OnPropertyChanged(nameof(SeVolume));
         OnPropertyChanged(nameof(BgmVolume));
+        OnPropertyChanged(nameof(SpeedIndex));
+        try
+        {
+            _presetStore = await _settingsRepo.LoadRulePresetsAsync();
+        }
+        catch (Exception ex)
+        {
+            _presetStore = new CustomRulePresetList();
+            PresetStatus = $"マイプリセットを読み込めませんでした: {ex.Message}";
+        }
+        RefreshCustomPresets();
         OnPropertyChanged(nameof(Seat1Name));
         OnPropertyChanged(nameof(Seat2Name));
         OnPropertyChanged(nameof(Seat3Name));

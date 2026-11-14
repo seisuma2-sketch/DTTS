@@ -280,7 +280,8 @@ public sealed class JudgeLogic : IJudgeLogic
     private PlayJudgement BuildJudgement(
         CardPlay play, BeatMethod method, FieldState field, bool isFinishingPlay, IReadOnlyList<CardPlay> alternatives)
     {
-        var nextLock = ComputeNextLock(play, field);
+        // 砂嵐の割り込みは枚数の違う場札の上に出すため、縛りは発生させない（直後に場が流れる）
+        var nextLock = method == BeatMethod.SandstormStop ? LockState.None : ComputeNextLock(play, field);
         var effects = DetectEffects(play, field, method, nextLock);
         var forbidden = isFinishingPlay ? GetForbiddenFinishReasons(play, field, effects) : ForbiddenFinishReason.None;
 
@@ -343,6 +344,17 @@ public sealed class JudgeLogic : IJudgeLogic
                 return PlayRejectReason.None;
             }
             return PlayRejectReason.FourStopOnly;
+        }
+
+        // --- ろくろ首・99車の直後の砂嵐受付中（枚数・種別・縛りは問わず、砂嵐だけが出せる） ---
+        if (field.IsSandstormStopPending)
+        {
+            if (current is not null && IsSandstorm(play))
+            {
+                method = BeatMethod.SandstormStop;
+                return PlayRejectReason.None;
+            }
+            return PlayRejectReason.SandstormStopOnly;
         }
 
         // --- 親出し ---
@@ -910,7 +922,8 @@ public sealed class JudgeLogic : IJudgeLogic
         ArgumentNullException.ThrowIfNull(field);
         var results = new List<PlayJudgement>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        int? requiredCount = field.CurrentPlay?.Count;
+        // 砂嵐の割り込み受付中は、場札と枚数が違っても砂嵐を出せる
+        int? requiredCount = field.IsSandstormStopPending ? null : field.CurrentPlay?.Count;
 
         foreach (var candidate in EnumerateCandidates(hand))
         {

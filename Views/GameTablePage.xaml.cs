@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Threading.Tasks;
@@ -145,6 +146,180 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         ViewModel.FieldCards.CollectionChanged += OnFieldCardsCollectionChanged;
         ViewModel.HumanHand.CollectionChanged += OnHumanHandCollectionChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        ViewModel.BomberVanishTriggered += OnBomberVanishTriggered;
+        ViewModel.FinishCelebrationTriggered += OnFinishCelebrationTriggered;
+    }
+
+    // ------------------------------------------------------------------
+    // 12ボンバー：消えた数字を画面中央で弱い順に1つずつ見せる
+    // ------------------------------------------------------------------
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _bomberTimer;
+    private IReadOnlyList<BomberVanishItem>? _bomberItems;
+    private int _bomberIndex;
+    private double _bomberStepMs;
+
+    private void OnBomberVanishTriggered(object? sender, BomberVanishEventArgs e)
+    {
+        // ラウンド結果の表示中は出さない（結果を読む邪魔をしない）
+        if (ViewModel.IsRoundResultOpen || e.Items.Count == 0) return;
+
+        HideCutIn(); // 同じ中央に重ならないように
+        _bomberItems = e.Items;
+        _bomberIndex = 0;
+        // 数字が多いときは1枚あたりを短くして、全体が長くなりすぎないようにする
+        _bomberStepMs = e.Items.Count > 4 ? 560 : 860;
+        BomberHeaderText.Text = $"12ボンバー  {e.DeclarerName} の宣言";
+        BomberOverlay.Visibility = Visibility.Visible;
+
+        if (_bomberTimer is null)
+        {
+            _bomberTimer = DispatcherQueue.CreateTimer();
+            _bomberTimer.IsRepeating = true;
+            _bomberTimer.Tick += (_, _) => ShowNextBomberChip();
+        }
+        _bomberTimer.Stop();
+        _bomberTimer.Interval = TimeSpan.FromMilliseconds(_bomberStepMs);
+        ShowNextBomberChip();
+        _bomberTimer.Start();
+    }
+
+    /// <summary>次の数字を表示する。すべて見せ終えたら片付ける。</summary>
+    private void ShowNextBomberChip()
+    {
+        if (_bomberItems is null || _bomberIndex >= _bomberItems.Count)
+        {
+            HideBomberVanish();
+            return;
+        }
+        var item = _bomberItems[_bomberIndex++];
+        bool isJoker = item.Rank == DTTS.Core.Enums.Rank.Joker;
+        BomberChipRank.Text = item.Label;
+        BomberChipRank.FontSize = isJoker ? 54 : 78;
+        BomberChipCornerTop.Text = isJoker ? "★" : item.Label;
+        BomberChipCornerBottom.Text = isJoker ? "★" : item.Label;
+        BomberCountText.Text = item.DiscardedCount > 0
+            ? $"{(isJoker ? "ジョーカー" : item.Label)}  {item.DiscardedCount}枚 消滅"
+            : $"{(isJoker ? "ジョーカー" : item.Label)}  持っている人なし";
+        try
+        {
+            // 次の数字へ切り替わる直前に消え終わるよう、わずかに短くする
+            CompositionAnimationHelper.AnimateBomberChip(BomberChipHost, BomberStrike, item.DiscardedCount > 0, _bomberStepMs - 40);
+        }
+        catch (Exception ex)
+        {
+            // 演出の失敗で対戦を止めない
+            App.WriteCrashLog("BomberVanish", ex);
+            HideBomberVanish();
+        }
+    }
+
+    private void HideBomberVanish()
+    {
+        _bomberTimer?.Stop();
+        _bomberItems = null;
+        BomberOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    // ------------------------------------------------------------------
+    // あがりの演出（柔らかい光・細い線・順位リボン）
+    // ------------------------------------------------------------------
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _finishTimer;
+
+    // 1位：プラチナゴールド、2位：プラチナ、3位：ローズブロンズ（どれも淡い色。テーマカラーと合わせて使う）
+    private static readonly Windows.UI.Color[] FinishPlaceColors =
+    {
+        Windows.UI.Color.FromArgb(255, 0xF6, 0xE9, 0xC4),
+        Windows.UI.Color.FromArgb(255, 0xE8, 0xEA, 0xF0),
+        Windows.UI.Color.FromArgb(255, 0xE9, 0xC6, 0xAD),
+    };
+
+    private void OnFinishCelebrationTriggered(object? sender, FinishCelebrationEventArgs e)
+    {
+        try
+        {
+            var platinum = FinishPlaceColors[Math.Clamp(e.Place, 1, FinishPlaceColors.Length) - 1];
+            var accent = AccentColor();
+
+            FinishPlaceText.Text = $"{e.Place}位";
+            FinishPlaceText.FontSize = e.IsSelf ? 46 : 36;
+            FinishPlaceText.Foreground = new SolidColorBrush(platinum);
+            FinishNameText.Text = e.IsSelf ? "あがり！" : $"{e.PlayerName}  あがり";
+            FinishNameText.FontSize = e.IsSelf ? 24 : 19;
+            FinishRankText.Text = e.RankTitle;
+
+            // 光：中心はプラチナ、外へ向かってテーマカラーに溶けて透明になる
+            var glow = new RadialGradientBrush();
+            glow.GradientStops.Add(new GradientStop { Color = WithAlpha(platinum, (byte)(e.IsSelf ? 120 : 84)), Offset = 0.0 });
+            glow.GradientStops.Add(new GradientStop { Color = WithAlpha(accent, (byte)(e.IsSelf ? 64 : 44)), Offset = 0.45 });
+            glow.GradientStops.Add(new GradientStop { Color = WithAlpha(accent, 0), Offset = 1.0 });
+            FinishGlow.Fill = glow;
+            FinishGlow.Width = e.IsSelf ? 760 : 620;
+            FinishGlow.Height = e.IsSelf ? 280 : 230;
+
+            // 線：両端は透明、テーマカラーからプラチナへ
+            var line = new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0.5),
+                EndPoint = new Windows.Foundation.Point(1, 0.5),
+            };
+            line.GradientStops.Add(new GradientStop { Color = WithAlpha(accent, 0), Offset = 0.0 });
+            line.GradientStops.Add(new GradientStop { Color = WithAlpha(accent, 220), Offset = 0.25 });
+            line.GradientStops.Add(new GradientStop { Color = platinum, Offset = 0.5 });
+            line.GradientStops.Add(new GradientStop { Color = WithAlpha(accent, 220), Offset = 0.75 });
+            line.GradientStops.Add(new GradientStop { Color = WithAlpha(accent, 0), Offset = 1.0 });
+            FinishLineTop.Fill = line;
+            FinishLineBottom.Fill = line;
+            FinishLineTop.Width = FinishLineBottom.Width = e.IsSelf ? 460 : 380;
+
+            PlaceFinishOverlay();
+            FinishOverlay.Visibility = Visibility.Visible;
+            FinishOverlay.UpdateLayout(); // 中心点の計算に実サイズを使う
+
+            double durationMs = e.IsSelf ? 2600 : 2000;
+            CompositionAnimationHelper.AnimateFinishCelebration(FinishGlow, FinishLineTop, FinishLineBottom, FinishRibbon, durationMs);
+
+            if (_finishTimer is null)
+            {
+                _finishTimer = DispatcherQueue.CreateTimer();
+                _finishTimer.IsRepeating = false;
+                _finishTimer.Tick += (_, _) => HideFinishCelebration();
+            }
+            _finishTimer.Stop();
+            _finishTimer.Interval = TimeSpan.FromMilliseconds(durationMs + 60);
+            _finishTimer.Start();
+        }
+        catch (Exception ex)
+        {
+            // 演出の失敗で対戦を止めない
+            App.WriteCrashLog("FinishCelebration", ex);
+            HideFinishCelebration();
+        }
+    }
+
+    /// <summary>
+    /// あがりの演出の位置。対戦中は場札の少し上、ラウンド結果の表示中は結果の上（画面上部）に出す。
+    /// 最後のあがりはラウンド結果と同時になるため、結果に隠れないようにする。
+    /// </summary>
+    private void PlaceFinishOverlay()
+    {
+        if (ViewModel.IsRoundResultOpen)
+        {
+            FinishOverlay.VerticalAlignment = VerticalAlignment.Top;
+            FinishOverlay.Margin = new Thickness(0, 18, 0, 0);
+        }
+        else
+        {
+            FinishOverlay.VerticalAlignment = VerticalAlignment.Center;
+            FinishOverlay.Margin = new Thickness(0, 0, 0, 170);
+        }
+    }
+
+    private void HideFinishCelebration()
+    {
+        _finishTimer?.Stop();
+        FinishOverlay.Visibility = Visibility.Collapsed;
     }
 
     // ------------------------------------------------------------------
@@ -160,6 +335,12 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         if (e.PropertyName == nameof(GameTableViewModel.IsRoundResultOpen) && ViewModel.IsRoundResultOpen)
         {
             HideCutIn();
+            HideBomberVanish();
+            // 最後のあがりの演出は消さず、結果の上（画面上部）へ移して最後まで見せる
+            if (FinishOverlay.Visibility == Visibility.Visible)
+            {
+                PlaceFinishOverlay();
+            }
         }
 
         // オーバーレイ（ラウンド結果・判断ダイアログ）が閉じると、その中のボタンにあったフォーカスが
@@ -364,7 +545,11 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         ViewModel.HumanHand.CollectionChanged -= OnHumanHandCollectionChanged;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.SweepTriggered -= OnSweepTriggered;
+        ViewModel.BomberVanishTriggered -= OnBomberVanishTriggered;
+        ViewModel.FinishCelebrationTriggered -= OnFinishCelebrationTriggered;
         _cutInTimer?.Stop();
+        _bomberTimer?.Stop();
+        _finishTimer?.Stop();
     }
 
     // ------------------------------------------------------------------

@@ -23,4 +23,6 @@ public enum BeatMethod : byte
     Ambulance,
     /// <summary>ダウンナンバー（同スート1つ下）。</summary>
     DownNumber,
+    /// <summary>砂嵐による割り込み（ろくろ首・99車の流しを止める。枚数・縛りは問わない）。</summary>
+    SandstormStop,
 }

@@ -139,6 +139,82 @@ internal static class ServicesTests
             Check(DTTS.Services.Audio.SoundEffectCatalog.Polyphony(effect) >= 1, $"polyphony {effect}");
         }
 
+        // 進行スピード（外見設定と一緒に保存する）
+        await settings.DeleteAsync(SettingsRepository.AppearanceKey);
+        Check((await settings.LoadAppearanceAsync()).GameSpeed == GameSpeed.Normal, "game speed defaults to normal");
+        await settings.SaveAppearanceAsync(new AppearanceSettings { GameSpeed = GameSpeed.Slow, SeVolume = 40 });
+        Check((await settings.LoadAppearanceAsync()).GameSpeed == GameSpeed.Slow, "game speed roundtrip");
+        await settings.SetAsync(SettingsRepository.AppearanceKey, "{\"gameSpeed\":\"Warp\"}");
+        Check((await settings.LoadAppearanceAsync()).GameSpeed == GameSpeed.Normal, "unknown game speed -> normal");
+        await settings.SetAsync(SettingsRepository.AppearanceKey, "{\"seVolume\":40,\"soundEnabled\":false}");
+        Check((await settings.LoadAppearanceAsync()).GameSpeed == GameSpeed.Normal, "older settings without game speed -> normal");
+
+        // 一部だけの更新：サウンドと進行スピードを同時に切り替えても互いの変更を消さない
+        await settings.SaveAppearanceAsync(new AppearanceSettings { ThemeColor = ThemeColor.HotPink, SoundEnabled = true, GameSpeed = GameSpeed.Normal });
+        var updates = new List<Task<AppearanceSettings>>();
+        for (int i = 0; i < 12; i++)
+        {
+            bool sound = i % 2 == 1;
+            var speed = (GameSpeed)(i % 4);
+            updates.Add(settings.UpdateAppearanceAsync(a => a.SoundEnabled = sound));
+            updates.Add(settings.UpdateAppearanceAsync(a => a.GameSpeed = speed));
+        }
+        await Task.WhenAll(updates);
+        var merged = await settings.LoadAppearanceAsync();
+        Check(merged.SoundEnabled && merged.GameSpeed == GameSpeed.VeryFast && merged.ThemeColor == ThemeColor.HotPink,
+            $"partial appearance updates do not overwrite each other: sound={merged.SoundEnabled} speed={merged.GameSpeed}");
+        var bad = await settings.UpdateAppearanceAsync(a => a.GameSpeed = (GameSpeed)99);
+        Check(bad.GameSpeed == GameSpeed.Normal, "partial update normalizes");
+
+        // マイプリセット（名前を付けて保存したルール構成）
+        var presets = await settings.LoadRulePresetsAsync();
+        Check(presets.Presets.Count == 0, "no custom presets at first");
+        var mine = RuleSettings.CreateDefault();
+        mine.Sequence.MinLength = 2;
+        mine.Lock.TriggerCount = 2;
+        mine.Special.TwelveBomberEnabled = true;
+        var t0 = new DateTimeOffset(2026, 11, 14, 9, 0, 0, TimeSpan.Zero);
+        Check(presets.Upsert("  うちのルール  ", mine, t0)?.Name == "うちのルール", "preset name is trimmed");
+        Check(presets.Upsert("全部盛り改", RulePresets.Create(RulePreset.Chaos), t0.AddMinutes(1)) is not null, "second preset");
+        Check(presets.Upsert("   ", mine, t0) is null && presets.Upsert(null, mine, t0) is null, "blank preset name rejected");
+        Check(presets.Presets.Select(x => x.Name).SequenceEqual(new[] { "全部盛り改", "うちのルール" }), "newest preset first");
+        await settings.SaveRulePresetsAsync(presets);
+        var reloaded = await settings.LoadRulePresetsAsync();
+        Check(reloaded.Presets.Count == 2 && reloaded.Presets[1].SavedAt == t0, "presets roundtrip");
+        var restored = reloaded.Presets[1].ToRules();
+        Check(restored is not null && restored.Sequence.MinLength == 2 && restored.Lock.TriggerCount == 2
+            && restored.Special.TwelveBomberEnabled && restored.ToJson() == mine.ToJson(), "preset restores the exact rules");
+        Check(reloaded.Presets[0].ToRules()!.Flow.SandstormEnabled, "second preset restores its own rules");
+        // 同じ名前は上書きして先頭へ
+        mine.Flow.FourStopEnabled = true;
+        reloaded.Upsert("うちのルール", mine, t0.AddHours(1));
+        Check(reloaded.Presets.Count == 2 && reloaded.Presets[0].Name == "うちのルール" && reloaded.Presets[0].ToRules()!.Flow.FourStopEnabled,
+            "same name overwrites");
+        Check(reloaded.Remove("全部盛り改") && !reloaded.Remove("全部盛り改") && reloaded.Presets.Count == 1, "preset removed");
+        await settings.SaveRulePresetsAsync(reloaded);
+        Check((await settings.LoadRulePresetsAsync()).Presets.Single().Name == "うちのルール", "removal persisted");
+        // 保存したプリセットを読み込んでも、元の設定オブジェクトとは独立している
+        var copy = reloaded.Presets[0].ToRules()!;
+        copy.Flow.EightCutEnabled = false;
+        Check(reloaded.Presets[0].ToRules()!.Flow.EightCutEnabled, "loaded preset is a copy");
+        // 名前の長さ・件数の上限
+        string longName = new string('あ', 60);
+        Check(CustomRulePresetList.SanitizeName(longName)!.Length == CustomRulePresetList.MaxNameLength, "long preset name is cut");
+        Check(CustomRulePresetList.SanitizeName("a\tb\nc") == "abc", "control characters removed from the name");
+        var full = new CustomRulePresetList();
+        for (int i = 0; i < CustomRulePresetList.MaxCount; i++) full.Upsert("p" + i, mine, t0);
+        Check(full.Presets.Count == CustomRulePresetList.MaxCount && full.Upsert("one more", mine, t0) is null, "preset count is capped");
+        Check(full.Upsert("p3", mine, t0) is not null && full.Presets.Count == CustomRulePresetList.MaxCount, "overwrite allowed at the cap");
+        // 破損データ：壊れた JSON 全体は空に、壊れた項目・重複は取り除く
+        await settings.SetAsync(SettingsRepository.RulePresetsKey, "{broken");
+        Check((await settings.LoadRulePresetsAsync()).Presets.Count == 0, "broken presets -> empty");
+        await settings.SetAsync(SettingsRepository.RulePresetsKey,
+            "{\"presets\":[{\"name\":\"ok\",\"rulesJson\":\"{}\"},{\"name\":\"ok\",\"rulesJson\":\"{}\"},{\"name\":\"bad\",\"rulesJson\":\"{broken\"},{\"name\":\" \",\"rulesJson\":\"{}\"},null]}");
+        var cleaned = await settings.LoadRulePresetsAsync();
+        Check(cleaned.Presets.Count == 1 && cleaned.Presets[0].Name == "ok" && cleaned.Presets[0].ToRules()!.Flow.EightCutEnabled,
+            "invalid and duplicate presets dropped: " + cleaned.Presets.Count);
+        await settings.DeleteAsync(SettingsRepository.AppearanceKey);
+
         var npc = await settings.LoadNpcAsync();
         Check(npc.Seats.Count == 3, "npc default seats");
         npc.Seats[1].Difficulty = NpcDifficulty.Hard;
@@ -418,6 +494,57 @@ internal static class ServicesTests
             Check(onlyCounts, "other players carry no card arrays in JSON");
         }
         Check(view.Players.All(p => p.HandCount == engine.GetPlayer(p.Id).HandCount), "counts only");
+
+        // 場の公開情報：強化11バックの持続・砂嵐の割り込み受付がゲストへ届く（古い形式の JSON では false）
+        {
+            var fr = RuleSettings.CreateDefault();
+            fr.ElevenBack.StrongElevenBackEnabled = true;
+            fr.Flow.SandstormEnabled = true;
+            fr.Flow.RokurokubiEnabled = true;
+            fr.Lock.SuitLockEnabled = false;
+            fr.Exchange.Enabled = false;
+            var fe = new GameEngine(fr, Enumerable.Range(0, 4).Select(i => new PlayerSetup("P" + i, PlayerKind.Remote)).ToList(), new SystemRandomSource(3));
+            var notices = new List<NoticeDto>();
+            fe.EventOccurred += (_, ev) => { if (ClientViewBuilder.ToNotice(ev, 0) is { } n) notices.Add(n); };
+            fe.StartGame();
+            int l = fe.PendingDecision!.PlayerId, a = (l + 1) % 4, b = (l + 2) % 4, c = (l + 3) % 4;
+            fe.GetPlayer(l).SetHand(Card.ParseMany("D3 SJ S6 H6 SK"));
+            fe.GetPlayer(a).SetHand(Card.ParseMany("C8 C9"));
+            fe.GetPlayer(b).SetHand(Card.ParseMany("S3 H3 C3 D7"));
+            fe.GetPlayer(c).SetHand(Card.ParseMany("D4 CK"));
+            fe.SubmitPlay(l, Card.ParseMany("D3"));
+            fe.SubmitPass(a); fe.SubmitPass(b); fe.SubmitPass(c);
+            fe.SubmitPlay(l, Card.ParseMany("SJ"));
+            var jv = ClientViewBuilder.Build(fe, b, 5);
+            Check(jv.Field.IsElevenBack && jv.Field.IsElevenBackPersistent, "view carries the persistent 11back flag");
+            var jvBack = ((ViewUpdate)NetProtocol.Deserialize(NetProtocol.Serialize(new ViewUpdate(jv)))!).View;
+            Check(jvBack.Field.IsElevenBackPersistent && !jvBack.Field.IsSandstormStopPending, "persistent 11back survives JSON");
+            fe.SubmitPass(a); fe.SubmitPass(b); fe.SubmitPass(c);
+            // 強化11バックは場が流れても続く。l が親のまま、ろくろ首を出す
+            fe.SubmitPlay(l, Card.ParseMany("S6 H6"));
+            var sv = ClientViewBuilder.Build(fe, b, 6);
+            Check(sv.Decision is { Kind: DecisionKind.SandstormStopChance, CanPass: true } sd && sd.PlayerId == b
+                && sd.Effect == SpecialEffectType.Rokurokubi && sd.TargetPlayerId == l, "view carries the sandstorm chance");
+            Check(sv.Field.IsSandstormStopPending && sv.LegalPlays is { Length: 1 } lp && lp[0].Length == 3, "guest receives the sandstorm as its only legal play");
+            var other = ClientViewBuilder.Build(fe, c, 7);
+            Check(other.Decision is { Kind: DecisionKind.SandstormStopChance, CanPass: false } && other.LegalPlays is null, "other guests see who is deciding only");
+            var svBack = ((ViewUpdate)NetProtocol.Deserialize(NetProtocol.Serialize(new ViewUpdate(sv)))!).View;
+            Check(svBack.Decision!.Kind == DecisionKind.SandstormStopChance && svBack.Field.IsSandstormStopPending, "sandstorm chance survives JSON");
+            var legacy = NetProtocol.Deserialize(Encoding.UTF8.GetBytes(
+                Encoding.UTF8.GetString(NetProtocol.Serialize(new ViewUpdate(sv)))
+                    .Replace(",\"isElevenBackPersistent\":true", "").Replace(",\"isSandstormStopPending\":true", "")));
+            Check(legacy is ViewUpdate { View.Field: { IsElevenBackPersistent: false, IsSandstormStopPending: false } }, "missing field flags default to false");
+            // あがりの通知には順位が載る
+            var finished = ClientViewBuilder.ToNotice(new PlayerFinishedEvent(2, FinishKind.Normal, 3), 0)!;
+            Check(finished.Kind == "PlayerFinished" && finished.PlayerId == 2 && finished.Count == 3 && finished.FinishKind == FinishKind.Normal, "finish notice carries the place");
+            var finishedBack = ((GameNotice)NetProtocol.Deserialize(NetProtocol.Serialize(new GameNotice(finished)))!).Notice;
+            Check(finishedBack.Count == 3, "finish place survives JSON");
+            // 12ボンバーのジョーカー宣言が通知に載る
+            var jokerNotice = ClientViewBuilder.ToNotice(new RanksDeclaredEvent(1, new[] { Rank.Three, Rank.Joker }), 0)!;
+            var jokerNoticeBack = ((GameNotice)NetProtocol.Deserialize(NetProtocol.Serialize(new GameNotice(jokerNotice)))!).Notice;
+            Check(jokerNoticeBack.Ranks is { Length: 2 } rk && rk[1] == Rank.Joker, "joker declaration survives JSON");
+            Check(NetProtocol.Version == 2, "protocol version bumped for the new decision kind");
+        }
         var d = engine.PendingDecision!;
         Check(view.IsMyDecision == (d.PlayerId == 2) && (view.LegalPlays is null) == (d.PlayerId != 2), "legal plays only for own decision");
         var transfer = new CardsTransferredEvent(0, 3, new[] { Card.Parse("S2") }, CardTransferReason.Exchange);
@@ -494,12 +621,13 @@ internal static class ServicesTests
                     var hand = v.MyHandCards;
                     CommandResponse r = d.Kind switch
                     {
-                        DecisionKind.PlayOrPass or DecisionKind.FourStopChance =>
+                        DecisionKind.PlayOrPass or DecisionKind.FourStopChance or DecisionKind.SandstormStopChance =>
                             v.LegalPlays is { Length: > 0 } lp && (!d.CanPass || _rnd.Next(4) != 0)
                                 ? await _client.PlayAsync(lp[_rnd.Next(lp.Length)].Select(Card.FromId))
                                 : await _client.PassAsync(),
                         DecisionKind.SelectCards => await _client.SelectCardsAsync(hand.Take(d.MinCount)),
-                        DecisionKind.DeclareRanks => await _client.DeclareRanksAsync(Enumerable.Range(1, d.MinCount).Select(i => (Rank)i)),
+                        // ジョーカー（Rank.Joker = 0）も宣言に含める
+                        DecisionKind.DeclareRanks => await _client.DeclareRanksAsync(Enumerable.Range(0, d.MinCount).Select(i => (Rank)i)),
                         DecisionKind.RevolutionChoice => await _client.ChooseRevolutionAsync(true),
                         _ => new CommandResponse(0, CommandError.InvalidSelection, PlayRejectReason.None),
                     };

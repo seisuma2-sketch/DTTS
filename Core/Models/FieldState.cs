@@ -130,6 +130,9 @@ public sealed record FieldState
     /// <summary>8切り発生直後で、4止めの割り込みを受付中か。</summary>
     public bool IsEightCutPending { get; init; }
 
+    /// <summary>ろくろ首・99車の発生直後で、砂嵐の割り込みを受付中か。</summary>
+    public bool IsSandstormStopPending { get; init; }
+
     /// <summary>次の出し札に必ず含めなければならないカード（ダイヤ3初手など）。不要なら null。</summary>
     public Card? RequiredCard { get; init; }
 
@@ -166,6 +169,7 @@ public sealed record FieldState
             Lock = nextLock,
             RequiredCard = null,
             IsEightCutPending = false,
+            IsSandstormStopPending = false,
             TurnNumber = TurnNumber + 1,
         };
     }
@@ -208,6 +212,9 @@ public sealed record FieldState
     /// <summary>8切りの4止め受付状態を設定した状態を返す。</summary>
     public FieldState WithEightCutPending(bool pending) => this with { IsEightCutPending = pending };
 
+    /// <summary>ろくろ首・99車への砂嵐の割り込み受付状態を設定した状態を返す。</summary>
+    public FieldState WithSandstormStopPending(bool pending) => this with { IsSandstormStopPending = pending };
+
     /// <summary>
     /// 場を流した状態を返す。場札・履歴・縛りはリセットされ、
     /// 11バックは強化11バック（持続）でなければ解除される。革命状態は維持される。
@@ -223,6 +230,7 @@ public sealed record FieldState
             IsElevenBack = IsElevenBack && IsElevenBackPersistent,
             IsElevenBackPersistent = IsElevenBack && IsElevenBackPersistent,
             IsEightCutPending = false,
+            IsSandstormStopPending = false,
             TrickNumber = TrickNumber + 1,
         };
 

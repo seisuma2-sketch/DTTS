@@ -51,8 +51,11 @@ public sealed class GameEngine
     private readonly List<int> _finishOrder = new();
     private readonly List<int> _bottomOrder = new();
     private readonly Dictionary<int, FinishKind> _finishKinds = new();
-    private readonly Queue<int> _fourStopQueue = new();
-    private int? _eightCutPlayerId;
+    // 割り込み（4止め・砂嵐）の受付：機会を与える順番、場を流そうとしたプレイヤーとその効果
+    private readonly Queue<int> _interruptQueue = new();
+    private int? _interruptedPlayerId;
+    private TriggeredEffect? _interruptedEffect;
+    private DecisionKind _interruptKind;
     private int? _miyakoOchiPlayerId;
     private bool _gekokujo;
 
@@ -143,13 +146,13 @@ public sealed class GameEngine
     }
 
     /// <summary>
-    /// 指定プレイヤーが今出せる合法手を列挙する（手番または4止めの判断待ちでなければ空）。
+    /// 指定プレイヤーが今出せる合法手を列挙する（手番または割り込み（4止め・砂嵐）の判断待ちでなければ空）。
     /// UIの「出せるカード」強調表示やNPCの候補生成に使用する。
     /// </summary>
     public IReadOnlyList<PlayJudgement> GetLegalPlays(int playerId)
     {
         var d = PendingDecision;
-        if (d is null || d.PlayerId != playerId || d.Kind is not (DecisionKind.PlayOrPass or DecisionKind.FourStopChance))
+        if (d is null || d.PlayerId != playerId || !d.Kind.IsPlayDecision())
         {
             return Array.Empty<PlayJudgement>();
         }
@@ -194,7 +197,7 @@ public sealed class GameEngine
         return Ok();
     });
 
-    /// <summary>カードを出す（手番、または4止めの割り込み）。</summary>
+    /// <summary>カードを出す（手番、または4止め・砂嵐の割り込み）。</summary>
     public CommandResult SubmitPlay(int playerId, IEnumerable<Card> cards) => Run(() =>
     {
         if (!IsValidPlayer(playerId))
@@ -206,7 +209,7 @@ public sealed class GameEngine
             return Fail(CommandError.WrongPhase, playerId);
         }
         var d = PendingDecision;
-        if (d is null || d.PlayerId != playerId || d.Kind is not (DecisionKind.PlayOrPass or DecisionKind.FourStopChance))
+        if (d is null || d.PlayerId != playerId || !d.Kind.IsPlayDecision())
         {
             return Fail(CommandError.NotYourTurn, playerId);
         }
@@ -232,7 +235,7 @@ public sealed class GameEngine
         return Ok(playerId);
     });
 
-    /// <summary>パスする（4止めの判断待ちでは「見送り」）。</summary>
+    /// <summary>パスする（4止め・砂嵐の割り込みの判断待ちでは「見送り」）。</summary>
     public CommandResult SubmitPass(int playerId) => Run(() =>
     {
         if (!IsValidPlayer(playerId))
@@ -249,11 +252,11 @@ public sealed class GameEngine
             return Fail(CommandError.NotYourTurn, playerId);
         }
 
-        if (d.Kind == DecisionKind.FourStopChance)
+        if (d.Kind.IsInterruptChance())
         {
             PendingDecision = null;
             Emit(new PlayerPassedEvent(playerId, true));
-            AskNextFourStop();
+            AskNextInterrupt();
             RunSteps();
             return Ok(playerId);
         }
@@ -319,7 +322,7 @@ public sealed class GameEngine
         return Ok(playerId);
     });
 
-    /// <summary>12ボンバーの数字宣言に応答する。</summary>
+    /// <summary>12ボンバーの数字宣言に応答する（<see cref="Rank.Joker"/> を宣言するとジョーカーも捨てさせられる）。</summary>
     public CommandResult SubmitRankDeclaration(int playerId, IEnumerable<Rank> ranks) => Run(() =>
     {
         if (!IsValidPlayer(playerId))
@@ -335,7 +338,7 @@ public sealed class GameEngine
         bool valid = list.Count >= d.MinCount
             && list.Count <= d.MaxCount
             && list.Distinct().Count() == list.Count
-            && list.All(r => (int)r >= 1 && (int)r <= Card.RanksPerSuit);
+            && list.All(r => Enum.IsDefined(r));
         if (!valid)
         {
             return Fail(CommandError.InvalidSelection, playerId);
@@ -509,8 +512,7 @@ public sealed class GameEngine
         _finishOrder.Clear();
         _bottomOrder.Clear();
         _finishKinds.Clear();
-        _fourStopQueue.Clear();
-        _eightCutPlayerId = null;
+        ClearInterrupt();
         _miyakoOchiPlayerId = null;
         _gekokujo = false;
         CurrentPlayerId = null;
@@ -853,10 +855,10 @@ public sealed class GameEngine
         Field = Field.WithPlay(playerId, play, judgement.NextLock);
         _passesSinceLastPlay.Clear();
         _skippedSinceLastPlay.Clear();
-        if (judgement.BeatMethod == BeatMethod.FourStop)
+        if (judgement.BeatMethod is BeatMethod.FourStop or BeatMethod.SandstormStop)
         {
-            _fourStopQueue.Clear();
-            _eightCutPlayerId = null;
+            // 割り込みが成立：止められた効果（8切り・ろくろ首・99車）は発動しない
+            ClearInterrupt();
         }
         CurrentPlayerId = playerId;
         Emit(new CardsPlayedEvent(playerId, judgement, Field));
@@ -1006,9 +1008,13 @@ public sealed class GameEngine
         });
     }
 
+    /// <summary>12ボンバーで宣言できる数字の種類の上限（A〜K の13種＋ジョーカー）。</summary>
+    public const int MaxDeclarableRanks = Card.RanksPerSuit + 1;
+
     private void RequestTwelveBomber(int playerId, TriggeredEffect effect)
     {
-        int n = Math.Min(effect.Magnitude, Card.RanksPerSuit);
+        // 宣言できるのは 13種の数字＋ジョーカーの最大14種
+        int n = Math.Min(effect.Magnitude, MaxDeclarableRanks);
         _rankDeclarationHandler = ranks =>
         {
             Emit(new RanksDeclaredEvent(playerId, ranks.ToArray()));
@@ -1023,7 +1029,8 @@ public sealed class GameEngine
                 {
                     continue;
                 }
-                var hit = p.Hand.Where(c => !c.IsJoker && declared.Contains(c.Rank)).ToList();
+                // ジョーカーの数字は Rank.Joker。宣言に含まれていればジョーカーも捨てさせる
+                var hit = p.Hand.Where(c => declared.Contains(c.Rank)).ToList();
                 if (hit.Count > 0)
                 {
                     p.RemoveCards(hit);
@@ -1052,7 +1059,7 @@ public sealed class GameEngine
         });
     }
 
-    /// <summary>出し札の後処理：リバース → 場流し（または4止め受付）→ スキップ → 次の手番。</summary>
+    /// <summary>出し札の後処理：リバース → 場流し（または4止め・砂嵐の割り込み受付）→ スキップ → 次の手番。</summary>
     private void ConcludePlay(int playerId, TriggeredEffect? flushEffect, int skipCount, int reverseCount, TriggeredEffect? reverseEffect)
     {
         if (reverseCount % 2 == 1)
@@ -1068,7 +1075,13 @@ public sealed class GameEngine
         {
             if (flushEffect.Type == SpecialEffectType.EightCut && _rules.Flow.FourStopEnabled)
             {
-                OpenFourStopWindow(playerId);
+                OpenInterruptWindow(playerId, flushEffect, DecisionKind.FourStopChance);
+                return;
+            }
+            if (flushEffect.Type is SpecialEffectType.Rokurokubi or SpecialEffectType.Ambulance && _rules.Flow.SandstormEnabled)
+            {
+                // ろくろ首・99車は、砂嵐を持つ他のプレイヤーが割り込んで止められる
+                OpenInterruptWindow(playerId, flushEffect, DecisionKind.SandstormStopChance);
                 return;
             }
             Emit(new EffectAppliedEvent(playerId, flushEffect, true, Field));
@@ -1108,47 +1121,70 @@ public sealed class GameEngine
     }
 
     // ======================================================================
-    // 4止め
+    // 割り込み（8切りへの4止め／ろくろ首・99車への砂嵐）
     // ======================================================================
 
-    private void OpenFourStopWindow(int eightCutPlayerId)
+    /// <summary>
+    /// 場を流す効果の発動を保留し、止められる手を持つ他のプレイヤーへ進行方向順に割り込みの機会を与える。
+    /// </summary>
+    /// <param name="flusherId">場を流そうとしているプレイヤー。</param>
+    /// <param name="effect">保留する効果（8切り・ろくろ首・99車）。</param>
+    /// <param name="kind">割り込みの種類（4止め・砂嵐）。</param>
+    private void OpenInterruptWindow(int flusherId, TriggeredEffect effect, DecisionKind kind)
     {
-        Field = Field.WithEightCutPending(true);
-        _eightCutPlayerId = eightCutPlayerId;
-        _fourStopQueue.Clear();
-        foreach (int id in ActivePlayersAfter(eightCutPlayerId).Where(id => id != eightCutPlayerId))
+        Field = kind == DecisionKind.SandstormStopChance
+            ? Field.WithSandstormStopPending(true)
+            : Field.WithEightCutPending(true);
+        _interruptedPlayerId = flusherId;
+        _interruptedEffect = effect;
+        _interruptKind = kind;
+        _interruptQueue.Clear();
+        foreach (int id in ActivePlayersAfter(flusherId).Where(id => id != flusherId))
         {
-            // 4止めできる手を持つプレイヤーにのみ機会を与える（不要な判断要求を出さない）
+            // 止められる手を持つプレイヤーにのみ機会を与える（不要な判断要求を出さない）
             if (_judge.GetLegalPlays(GetPlayer(id).Hand, Field).Count > 0)
             {
-                _fourStopQueue.Enqueue(id);
+                _interruptQueue.Enqueue(id);
             }
         }
-        AskNextFourStop();
+        AskNextInterrupt();
     }
 
-    private void AskNextFourStop()
+    private void AskNextInterrupt()
     {
-        while (_fourStopQueue.Count > 0)
+        while (_interruptQueue.Count > 0)
         {
-            int id = _fourStopQueue.Dequeue();
+            int id = _interruptQueue.Dequeue();
             if (GetPlayer(id).IsFinished)
             {
                 continue;
             }
-            Request(new PendingDecision(DecisionKind.FourStopChance, id) { CanPass = true });
+            Request(new PendingDecision(_interruptKind, id)
+            {
+                CanPass = true,
+                Effect = _interruptedEffect?.Type,
+                TargetPlayerId = _interruptedPlayerId,
+            });
             return;
         }
 
-        // 誰も4止めしなかった：8切り成立
-        int? cutter = _eightCutPlayerId;
-        _eightCutPlayerId = null;
-        Field = Field.WithEightCutPending(false);
-        if (cutter is { } c)
+        // 誰も割り込まなかった：保留していた効果（8切り・ろくろ首・99車）が成立して場が流れる
+        int? flusher = _interruptedPlayerId;
+        var effect = _interruptedEffect;
+        ClearInterrupt();
+        Field = Field.WithEightCutPending(false).WithSandstormStopPending(false);
+        if (flusher is { } f && effect is not null)
         {
-            Emit(new EffectAppliedEvent(c, new TriggeredEffect(SpecialEffectType.EightCut), true, Field));
+            Emit(new EffectAppliedEvent(f, effect, true, Field));
         }
-        FlushAndLead(SpecialEffectType.EightCut, cutter);
+        FlushAndLead(effect?.Type, flusher);
+    }
+
+    private void ClearInterrupt()
+    {
+        _interruptQueue.Clear();
+        _interruptedPlayerId = null;
+        _interruptedEffect = null;
     }
 
     // ======================================================================
@@ -1172,7 +1208,11 @@ public sealed class GameEngine
         {
             _finishOrder.Add(playerId);
         }
-        Emit(new PlayerFinishedEvent(playerId, kind));
+        // 通常のあがりは上から、反則・都落ちは下から順位が埋まる
+        int place = kind is FinishKind.Foul or FinishKind.MiyakoOchi
+            ? _players.Count - _bottomOrder.Count + 1
+            : _finishOrder.Count;
+        Emit(new PlayerFinishedEvent(playerId, kind, place));
 
         // --- 1位あがり時の階級変動ルール ---
         if (kind == FinishKind.Normal && _finishOrder.Count == 1 && _previousRanks.Count > 0)
@@ -1220,7 +1260,7 @@ public sealed class GameEngine
             last.IsFinished = true;
             _finishOrder.Add(last.Id);
             _finishKinds[last.Id] = FinishKind.LastRemaining;
-            Emit(new PlayerFinishedEvent(last.Id, FinishKind.LastRemaining));
+            Emit(new PlayerFinishedEvent(last.Id, FinishKind.LastRemaining, _finishOrder.Count));
         }
         EndRound();
     }
@@ -1229,7 +1269,7 @@ public sealed class GameEngine
     {
         _steps.Clear();
         ClearDecision();
-        _fourStopQueue.Clear();
+        ClearInterrupt();
         CurrentPlayerId = null;
 
         int n = _players.Count;

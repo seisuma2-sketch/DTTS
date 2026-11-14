@@ -70,7 +70,7 @@ public enum CommandKind : byte
 {
     /// <summary>カードを出す。</summary>
     Play = 0,
-    /// <summary>パス（4止めの見送り）。</summary>
+    /// <summary>パス（4止め・砂嵐の割り込みの見送り）。</summary>
     Pass,
     /// <summary>カード選択（交換・7渡し・10捨て）。</summary>
     SelectCards,
@@ -97,7 +97,9 @@ public sealed record FieldViewDto(
     Suit[] LockedSuits,
     bool IsNumberLocked,
     PlayDirection Direction,
-    bool IsEightCutPending);
+    bool IsEightCutPending,
+    bool IsElevenBackPersistent = false,
+    bool IsSandstormStopPending = false);
 
 /// <summary>判断要求（誰が何を判断中か。自分宛てなら詳細込み）。</summary>
 public sealed record DecisionViewDto(
@@ -141,7 +143,7 @@ public sealed record ClientView(
 /// <param name="PlayerId">主体のプレイヤー。</param>
 /// <param name="OtherPlayerId">相手のプレイヤー（カード移動の受け手など）。</param>
 /// <param name="CardIds">公開されたカード（非公開なら null）。</param>
-/// <param name="Count">枚数など。</param>
+/// <param name="Count">枚数など（RoundStarted・RoundEnded はラウンド番号、PlayerFinished はその時点の順位）。</param>
 /// <param name="Effect">特殊効果。</param>
 /// <param name="FinishKind">あがり方。</param>
 /// <param name="Applied">効果が適用されたか。</param>
@@ -168,7 +170,7 @@ public sealed record StandingDto(int PlayerId, int Position, PlayerRank Rank, in
 public static class NetProtocol
 {
     /// <summary>プロトコルバージョン（非互換の変更時に上げる）。</summary>
-    public const int Version = 1;
+    public const int Version = 2;
 
     /// <summary>既定のTCPポート。</summary>
     public const int DefaultTcpPort = 47820;
@@ -212,7 +214,7 @@ public static class ClientViewBuilder
         bool mine = d is not null && d.PlayerId == playerId;
 
         int[][]? legal = null;
-        if (mine && d!.Kind is DecisionKind.PlayOrPass or DecisionKind.FourStopChance)
+        if (mine && d!.Kind.IsPlayDecision())
         {
             legal = engine.GetLegalPlays(playerId).Select(j => j.Play!.Cards.Select(c => c.Id).ToArray()).ToArray();
         }
@@ -237,14 +239,16 @@ public static class ClientViewBuilder
                 field.Lock.LockedSuits.ToArray(),
                 field.Lock.IsNumberLocked,
                 field.Direction,
-                field.IsEightCutPending),
+                field.IsEightCutPending,
+                field.IsElevenBackPersistent,
+                field.IsSandstormStopPending),
             d is null ? null : new DecisionViewDto(
                 d.Kind,
                 d.PlayerId,
                 mine ? d.Purpose : null,
                 mine ? d.MinCount : 0,
                 mine ? d.MaxCount : 0,
-                mine ? d.TargetPlayerId : null,
+                mine || d.Kind.IsInterruptChance() ? d.TargetPlayerId : null,
                 d.Effect,
                 mine && d.CanPass),
             legal);
@@ -273,7 +277,7 @@ public static class ClientViewBuilder
             CardsDiscardedEvent cd => new NoticeDto("CardsDiscarded", cd.PlayerId, CardIds: Ids(cd.Cards), Count: cd.Cards.Count, DiscardReason: cd.Reason),
             RanksDeclaredEvent rd => new NoticeDto("RanksDeclared", rd.PlayerId, Count: rd.Ranks.Count, Ranks: rd.Ranks.ToArray()),
             FieldFlushedEvent ff => new NoticeDto("FieldFlushed", ff.NextLeaderId, Effect: ff.Cause),
-            PlayerFinishedEvent pf => new NoticeDto("PlayerFinished", pf.PlayerId, FinishKind: pf.Kind),
+            PlayerFinishedEvent pf => new NoticeDto("PlayerFinished", pf.PlayerId, Count: pf.Place, FinishKind: pf.Kind),
             RoundEndedEvent re => new NoticeDto("RoundEnded", Count: re.Result.RoundNumber, Applied: re.IsGameOver,
                 Standings: re.Result.Standings.Select(s => new StandingDto(s.PlayerId, s.Position, s.Rank, s.Points, 0)).ToArray()),
             GameEndedEvent ge => new NoticeDto("GameEnded", Count: ge.Result.RoundsPlayed,

@@ -137,7 +137,7 @@ public sealed class RuleSettings
         Revolution.OmenCount = Math.Clamp(Revolution.OmenCount, 2, 6);
         Revolution.NanasanCount = Math.Clamp(Revolution.NanasanCount, 2, 6);
 
-        Sequence.MinLength = Math.Clamp(Sequence.MinLength, 3, 13);
+        Sequence.MinLength = Math.Clamp(Sequence.MinLength, 2, 13);
 
         Lock.TriggerCount = Math.Clamp(Lock.TriggerCount, 1, 5);
 
@@ -272,7 +272,7 @@ public sealed class SequenceRules
     /// <summary>階段（同スート連番）を出せる。</summary>
     public bool Enabled { get; set; } = true;
 
-    /// <summary>階段の最小枚数（既定3）。</summary>
+    /// <summary>階段の最小枚数（既定3。2にすると同スートの連番2枚から階段として出せる）。</summary>
     public int MinLength { get; set; } = 3;
 
     /// <summary>階段にジョーカーを含められる（欠番・端の補完）。</summary>
@@ -327,8 +327,8 @@ public sealed class LockRules
     public bool PartialSuitLockEnabled { get; set; } = false;
 
     /// <summary>
-    /// 縛り発生回数：縛りの成立に必要な連続一致回数（既定1＝1回一致で成立）。
-    /// 2にすると「3回連続で同スートが出たら縛り」となる。
+    /// 縛り発生回数：縛りの成立に必要な連続一致回数（既定1＝1回一致で成立＝同スートが2回続いたら縛り）。
+    /// 2にすると「3回連続で同スートが出たら縛り」となる。数しばにも同じ回数を使う。
     /// </summary>
     public int TriggerCount { get; set; } = 1;
 }
@@ -358,6 +358,7 @@ public sealed class FlowRules
     /// <summary>
     /// 砂嵐：<see cref="SandstormRank"/> をちょうど <see cref="SandstormCount"/> 枚出すと、
     /// 同枚数のどんな組にも強さに関係なく勝ち、場を流す（既定：3を3枚）。縛りには従う。
+    /// 有効時は、ろくろ首・99車が出た直後に砂嵐を割り込みで出して流しを止められる（枚数・縛りは問わない）。
     /// </summary>
     public bool SandstormEnabled { get; set; } = false;
 
@@ -464,7 +465,7 @@ public sealed class SpecialEffectRules
     /// <summary>10捨てのトリガー数字。</summary>
     public Rank TenDiscardRank { get; set; } = Rank.Ten;
 
-    /// <summary>12ボンバー：出した枚数分の数字を宣言し、全員がその数字のカードを手札から捨てる。</summary>
+    /// <summary>12ボンバー：出した枚数分の数字（ジョーカーも可）を宣言し、全員がそのカードを手札から捨てる。</summary>
     public bool TwelveBomberEnabled { get; set; } = false;
 
     /// <summary>12ボンバーのトリガー数字。</summary>

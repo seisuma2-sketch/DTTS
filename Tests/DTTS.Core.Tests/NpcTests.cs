@@ -46,9 +46,132 @@ internal static class NpcTests
     public static (int Pass, int Fail) Run()
     {
         UnitDecisions();
+        NewRuleDecisions();
         ControllerTakeover();
         Tournaments();
         return (_pass, _fail);
+    }
+
+    /// <summary>進行スピード・12ボンバーのジョーカー宣言・砂嵐の割り込みに対する思考。</summary>
+    private static void NewRuleDecisions()
+    {
+        // ---- 進行スピード：遅い設定ほど待ち時間が長い ----
+        var speeds = new[] { GameSpeed.Slow, GameSpeed.Normal, GameSpeed.Fast, GameSpeed.VeryFast };
+        var timings = speeds.Select(NpcTimingOptions.ForSpeed).ToList();
+        for (int i = 1; i < timings.Count; i++)
+        {
+            Check(timings[i].BaseDelay < timings[i - 1].BaseDelay && timings[i].Jitter <= timings[i - 1].Jitter
+                && timings[i].SideDecisionDelay < timings[i - 1].SideDecisionDelay, $"speed {speeds[i]} is faster than {speeds[i - 1]}");
+        }
+        Check(timings.All(t => t.BaseDelay > TimeSpan.Zero && t.Jitter > TimeSpan.Zero), "every speed keeps a visible delay");
+        Check(timings[0].BaseDelay >= TimeSpan.FromMilliseconds(1500), "slow speed is slow enough to follow");
+        Check(speeds.Select(NpcTimingOptions.SpeedName).Distinct().Count() == 4, "speed names are distinct");
+
+        // 対戦中の切り替え：次に予約される判断から新しい時間が使われる
+        {
+            var engine = new GameEngine(RuleSettings.CreateDefault(),
+                Enumerable.Range(0, 4).Select(i => new PlayerSetup("P" + i, PlayerKind.Npc)).ToList(), new SystemRandomSource(5));
+            var delays = new List<TimeSpan>();
+            var pending = new Queue<Action>();
+            var scheduler = new RecordingScheduler((delay, action) => { delays.Add(delay); pending.Enqueue(action); });
+            using var npc = new NpcController(engine, scheduler, NpcTimingOptions.ForSpeed(GameSpeed.Slow), new SystemRandomSource(1));
+            for (int i = 0; i < 4; i++) npc.Assign(i, NpcProfile.Default);
+            engine.StartGame();
+            Check(delays.Count == 1 && delays[0] >= NpcTimingOptions.ForSpeed(GameSpeed.Slow).BaseDelay, "slow timing used for the first decision");
+            npc.Timing = NpcTimingOptions.ForSpeed(GameSpeed.VeryFast);
+            Check(npc.Timing.BaseDelay == NpcTimingOptions.ForSpeed(GameSpeed.VeryFast).BaseDelay, "timing replaced");
+            pending.Dequeue()();
+            var veryFast = NpcTimingOptions.ForSpeed(GameSpeed.VeryFast);
+            Check(delays.Count == 2 && delays[1] < veryFast.BaseDelay + veryFast.Jitter + TimeSpan.FromMilliseconds(1),
+                "new timing applies from the next decision: " + (delays.Count > 1 ? delays[1].TotalMilliseconds : -1));
+            try { npc.Timing = null!; Check(false, "null timing rejected"); }
+            catch (ArgumentNullException) { Check(true, "null timing rejected"); }
+        }
+
+        // ---- 12ボンバー：自分のジョーカーは決して宣言しない／つよいは相手のジョーカーを消しに行く ----
+        {
+            var rules = RuleSettings.CreateDefault();
+            rules.Special.TwelveBomberEnabled = true;
+            var judge = new JudgeLogic(rules);
+            NpcContext Declare(string hand, int count, IReadOnlyCollection<Card> seen)
+                => new(0, C(hand), FieldState.CreateInitial(), rules, judge,
+                    new PendingDecision(DecisionKind.DeclareRanks, 0) { MinCount = count, MaxCount = count },
+                    Array.Empty<PlayJudgement>(), new Dictionary<int, int> { [1] = 5, [2] = 5, [3] = 5 }, seen);
+
+            foreach (var difficulty in Enum.GetValues<NpcDifficulty>())
+            {
+                for (int seed = 0; seed < 20; seed++)
+                {
+                    var brain = new StandardNpcBrain(new NpcProfile(difficulty, NpcPersonality.Steady), new SystemRandomSource(seed));
+                    var own = brain.DeclareRanks(Declare("JK0 S4 H4 D9", 3, Array.Empty<Card>()));
+                    Check(own.Count == 3 && own.Distinct().Count() == 3 && !own.Contains(Rank.Joker), $"never declares own joker ({difficulty}, seed {seed})");
+                }
+            }
+            var hardBrain = new StandardNpcBrain(new NpcProfile(NpcDifficulty.Hard, NpcPersonality.Steady), new SystemRandomSource(1));
+            Check(hardBrain.DeclareRanks(Declare("S9 HK", 1, Array.Empty<Card>())).Single() == Rank.Joker, "hard declares the opponents' joker");
+            Check(hardBrain.DeclareRanks(Declare("S9 HK", 1, new[] { Card.Joker(0) })).Single() != Rank.Joker, "hard skips the joker once it has been played");
+            // 14種すべてを宣言させられた場合だけ、最後の候補としてジョーカーが入る
+            var all = hardBrain.DeclareRanks(Declare("S9 HK", GameEngine.MaxDeclarableRanks, new[] { Card.Joker(0) }));
+            Check(all.Count == 14 && all.Distinct().Count() == 14 && all[^1] == Rank.Joker, "all 14 ranks can be declared");
+        }
+
+        // ---- 砂嵐の割り込み：NPCが判断を取りこぼさず、止めるか見送るかを必ず返す ----
+        {
+            int stops = 0, declines = 0;
+            for (int seed = 0; seed < 12; seed++)
+            {
+                var rules = RuleSettings.CreateDefault();
+                rules.Flow.SandstormEnabled = true;
+                rules.Flow.RokurokubiEnabled = true;
+                rules.Lock.SuitLockEnabled = false;
+                rules.Exchange.Enabled = false;
+                var engine = new GameEngine(rules, Enumerable.Range(0, 4).Select(i => new PlayerSetup("P" + i, i == 0 ? PlayerKind.Human : PlayerKind.Npc)).ToList(),
+                    new SystemRandomSource(seed));
+                using var npc = new NpcController(engine, null, null, new SystemRandomSource(seed));
+                engine.StartGame();
+                int l = engine.PendingDecision!.PlayerId;
+                // 人間（席0）を親にして筋書きを進める
+                engine.GetPlayer(0).SetHand(C("D3 S6 H6 SK"));
+                engine.GetPlayer(1).SetHand(C("C5 C8 D9 DQ"));
+                engine.GetPlayer(2).SetHand(C("S3 H3 C3 D7 D8"));
+                engine.GetPlayer(3).SetHand(C("D4 CK C10 CJ"));
+                if (l != 0)
+                {
+                    continue; // ♦3 を持つ席が親。席0 以外が親の配牌は対象外
+                }
+                bool chance = false, stopped = false, declined = false;
+                FieldFlushedEvent? flush = null;
+                engine.EventOccurred += (_, ev) =>
+                {
+                    // 割り込みの決着で起きる最初の場流しを記録する（止めたNPCはそのまま次の手を出すため）
+                    if (ev is FieldFlushedEvent ff && chance && flush is null) flush = ff;
+                    if (ev is DecisionRequestedEvent { Decision.Kind: DecisionKind.SandstormStopChance }) chance = true;
+                    if (ev is CardsPlayedEvent { Judgement.BeatMethod: BeatMethod.SandstormStop }) stopped = true;
+                    if (ev is PlayerPassedEvent { IsFourStopDecline: true }) declined = true;
+                };
+                engine.SubmitPlay(0, C("D3"));
+                engine.SubmitPass(1); engine.SubmitPass(2); engine.SubmitPass(3);
+                var difficulty = (NpcDifficulty)(seed % 3);
+                npc.Assign(2, new NpcProfile(difficulty, (NpcPersonality)(seed % 4)), new SystemRandomSource(seed));
+                Check(engine.SubmitPlay(0, C("S6 H6")).IsAccepted, "npc sandstorm: rokurokubi played");
+                Check(chance && (stopped ^ declined), $"npc answers the sandstorm chance (seed {seed}, {difficulty})");
+                Check(flush is not null && flush.NextLeaderId == (stopped ? 2 : 0)
+                    && flush.Cause == (stopped ? SpecialEffectType.Sandstorm : SpecialEffectType.Rokurokubi),
+                    $"npc sandstorm: the right player leads afterwards (seed {seed})");
+                Check(engine.PendingDecision is not null, $"npc sandstorm: the game keeps going (seed {seed})");
+                if (stopped) stops++; else if (declined) declines++;
+            }
+            Console.WriteLine($"  npc sandstorm chance: stop={stops} decline={declines}");
+        }
+    }
+
+    private sealed class RecordingScheduler : INpcScheduler
+    {
+        private readonly Action<TimeSpan, Action> _onSchedule;
+
+        public RecordingScheduler(Action<TimeSpan, Action> onSchedule) => _onSchedule = onSchedule;
+
+        public void Schedule(TimeSpan delay, Action action) => _onSchedule(delay, action);
     }
 
     private static void UnitDecisions()
@@ -178,6 +301,7 @@ internal static class NpcTests
                     {
                         case DecisionKind.PlayOrPass:
                         case DecisionKind.FourStopChance:
+                        case DecisionKind.SandstormStopChance:
                             var p = humanBot.DecidePlay(ctx);
                             if (p.IsPass) engine.SubmitPass(0); else engine.SubmitPlay(0, p.Cards!);
                             break;

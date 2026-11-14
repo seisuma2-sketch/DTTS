@@ -39,7 +39,7 @@ DTTS は MSIX パッケージで配布します。テスト用の自己署名証
 **PowerShell（管理者として実行）で行う場合**
 
 ```powershell
-Import-Certificate -FilePath .\DTTS_1.0.1.0_x64.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+Import-Certificate -FilePath .\DTTS_1.0.2.0_x64.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
 ```
 
 > 「信頼されたルート証明機関」には入れないでください。MSIX のサイドロードには「信頼されたユーザー」で足ります。
@@ -51,7 +51,7 @@ Import-Certificate -FilePath .\DTTS_1.0.1.0_x64.cer -CertStoreLocation Cert:\Loc
 **PowerShell で行う場合**（管理者権限は不要）:
 
 ```powershell
-Add-AppxPackage -Path .\DTTS_1.0.1.0_x64.msix
+Add-AppxPackage -Path .\DTTS_1.0.2.0_x64.msix
 ```
 
 インストール後、スタートメニューの **DTTS** から起動できます。
@@ -61,7 +61,7 @@ Add-AppxPackage -Path .\DTTS_1.0.1.0_x64.msix
 Windows App Runtime が入っていない PC です。同梱の依存パッケージを指定してインストールします。
 
 ```powershell
-Add-AppxPackage -Path .\DTTS_1.0.1.0_x64.msix -DependencyPath (Get-ChildItem .\Dependencies\x64\*.msix).FullName
+Add-AppxPackage -Path .\DTTS_1.0.2.0_x64.msix -DependencyPath (Get-ChildItem .\Dependencies\x64\*.msix).FullName
 ```
 
 ## 更新・アンインストール

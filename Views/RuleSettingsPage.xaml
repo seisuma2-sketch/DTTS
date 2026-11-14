@@ -12,13 +12,41 @@
     Loaded="OnPageLoaded">
 
     <Grid Padding="24">
+        <!--
+            画面幅に応じた2ペイン／1列の切り替え。
+            広い画面：左（約62%）に設定、右（約38%）にルール詳細ガイドとマイプリセットを常時表示。
+            狭い画面：右ペインを下段に回し、設定の下に固定の高さで表示する。
+        -->
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="LayoutStates">
+                <VisualState x:Name="WideLayout">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="1000" />
+                    </VisualState.StateTriggers>
+                </VisualState>
+                <VisualState x:Name="NarrowLayout">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="0" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="RightColumnDefinition.Width" Value="0" />
+                        <Setter Target="PaneGrid.ColumnSpacing" Value="0" />
+                        <Setter Target="RightPane.(Grid.Column)" Value="0" />
+                        <Setter Target="RightPane.(Grid.Row)" Value="1" />
+                        <Setter Target="RightPane.MaxHeight" Value="330" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <!-- ヘッダーバー -->
-        <Grid Grid.Row="0" Margin="0,0,0,16">
+        <Grid Grid.Row="0" Margin="0,0,0,8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -51,263 +79,523 @@
             </StackPanel>
         </Grid>
 
-        <!-- メイン設定リスト -->
-        <ScrollViewer Grid.Row="1" Padding="0,0,16,0">
-            <StackPanel Spacing="24" MaxWidth="880" HorizontalAlignment="Left">
+        <!-- ステータスメッセージ通知（どちらのペインをスクロールしていても見える位置） -->
+        <TextBlock
+            Grid.Row="1"
+            Margin="8,0,0,10"
+            Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+            Foreground="{StaticResource AppAccentBrush}"
+            FontSize="13"
+            FontWeight="Medium"
+            TextTrimming="CharacterEllipsis"
+            Visibility="{x:Bind ViewModel.StatusMessage, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}" />
 
-                <!-- ステータスメッセージ通知 -->
-                <TextBlock
-                    Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
-                    Foreground="{StaticResource AppAccentBrush}"
-                    FontSize="14"
-                    FontWeight="Medium"
-                    Visibility="{x:Bind ViewModel.StatusMessage, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}" />
+        <!-- 2ペイン -->
+        <Grid x:Name="PaneGrid" Grid.Row="2" ColumnSpacing="20" RowSpacing="14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="62*" />
+                <ColumnDefinition x:Name="RightColumnDefinition" Width="38*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
 
-                <!-- 1. 外見設定（テーマカラー 8色 & スキン） -->
-                <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
-                    <StackPanel Spacing="16">
-                        <TextBlock Text="テーマカラー（8色プリセット）" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
-                        
-                        <!-- 8色のカラーピッカーボタン -->
-                        <ItemsControl ItemsSource="{x:Bind ViewModel.AvailableThemes}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <VariableSizedWrapGrid Orientation="Horizontal" MaximumRowsOrColumns="4" ItemWidth="180" ItemHeight="44" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="settings:ThemeColorInfo">
-                                    <Button
-                                        Click="OnThemeButtonClicked"
-                                        Tag="{x:Bind Color}"
-                                        HorizontalAlignment="Stretch"
-                                        VerticalAlignment="Stretch"
-                                        Margin="4"
-                                        CornerRadius="6"
-                                        Background="#1E222B"
-                                        BorderBrush="{StaticResource AppBorderSubtleBrush}"
-                                        BorderThickness="1">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <Border Width="16" Height="16" CornerRadius="8" Background="{x:Bind AccentHex, Converter={StaticResource HexToBrushConverter}}" />
-                                            <TextBlock Text="{x:Bind DisplayName}" FontSize="12" Foreground="{StaticResource AppTextPrimaryBrush}" VerticalAlignment="Center" />
+            <!-- ============================ 左ペイン：設定 ============================ -->
+            <ScrollViewer x:Name="LeftPane" Grid.Column="0" Grid.Row="0" Padding="0,0,14,0" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="20">
+
+                    <!-- 1. ローカルルール（プリセットバー ＋ カテゴリごとの折りたたみカード） -->
+                    <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
+                        <StackPanel Spacing="16">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="ローカルルール" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                    <TextBlock Text="{x:Bind ViewModel.RuleSummaryText, Mode=OneWay}" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                    <Button Command="{x:Bind ViewModel.SetAllCategoriesExpandedCommand}" CommandParameter="true" Background="Transparent" BorderThickness="0" Padding="8,4" ToolTipService.ToolTip="すべて開く">
+                                        <FontIcon Glyph="&#xE70D;" FontSize="12" />
+                                    </Button>
+                                    <Button Command="{x:Bind ViewModel.SetAllCategoriesExpandedCommand}" CommandParameter="false" Background="Transparent" BorderThickness="0" Padding="8,4" ToolTipService.ToolTip="すべて閉じる">
+                                        <FontIcon Glyph="&#xE70E;" FontSize="12" />
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- プリセットバー（ワンクリックで全項目を切り替え。自分で保存したものは右側の「マイプリセット」） -->
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="プリセット" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Command="{x:Bind ViewModel.ApplyPresetCommand}" CommandParameter="Standard" CornerRadius="16" Padding="14,6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Background="{StaticResource AppBackgroundDeepBrush}">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon Glyph="&#xE8FD;" FontSize="13" />
+                                            <TextBlock Text="標準" FontSize="13" />
                                         </StackPanel>
                                     </Button>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                                    <Button Command="{x:Bind ViewModel.ApplyPresetCommand}" CommandParameter="Simple" CornerRadius="16" Padding="14,6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Background="{StaticResource AppBackgroundDeepBrush}">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon Glyph="&#xE73E;" FontSize="13" />
+                                            <TextBlock Text="シンプル" FontSize="13" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Command="{x:Bind ViewModel.ApplyPresetCommand}" CommandParameter="Chaos" CornerRadius="16" Padding="14,6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Background="{StaticResource AppBackgroundDeepBrush}">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon Glyph="&#xE945;" FontSize="13" />
+                                            <TextBlock Text="全部盛り" FontSize="13" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </StackPanel>
 
-                        <!-- スキン着せ替え -->
-                        <TextBlock Text="カードスキン設定" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" Margin="0,8,0,0" />
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <Button Click="OnSelectDefaultSkinClicked" Background="#262A36" CornerRadius="6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1">
-                                <TextBlock Text="標準ベクター描画を使用" FontSize="13" Foreground="{StaticResource AppTextPrimaryBrush}" />
-                            </Button>
-                            <Button Click="OnImportZipClicked" Background="#262A36" CornerRadius="6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1">
-                                <TextBlock Text="ZIPからスキンパックをインポート..." FontSize="13" Foreground="{StaticResource AppAccentBrush}" />
-                            </Button>
+                            <!-- ラウンド数・進行スピード -->
+                            <StackPanel Orientation="Horizontal" Spacing="28">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <TextBlock Text="ラウンド数" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                    <NumberBox
+                                        Value="{x:Bind ViewModel.RoundCount, Mode=TwoWay}"
+                                        Minimum="1"
+                                        Maximum="20"
+                                        SmallChange="1"
+                                        SpinButtonPlacementMode="Inline"
+                                        Width="130" />
+                                </StackPanel>
+                                <!-- 進行スピード（NPCが考える時間）。変更は即座に保存され、対戦画面のヘッダーからも切り替えられる -->
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <TextBlock Text="進行スピード" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                    <ComboBox
+                                        ItemsSource="{x:Bind ViewModel.SpeedOptions}"
+                                        SelectedIndex="{x:Bind ViewModel.SpeedIndex, Mode=TwoWay}"
+                                        MinWidth="120"
+                                        VerticalAlignment="Center"
+                                        ToolTipService.ToolTip="NPCが考える時間の長さ。「ゆっくり」にすると1手ずつ追いやすくなります"
+                                        AutomationProperties.Name="進行スピード" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- カテゴリごとの折りたたみカード -->
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.RuleCategories, Mode=OneWay}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Spacing="8" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:RuleCategoryViewModel">
+                                        <Expander
+                                            IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Stretch">
+                                            <Expander.Header>
+                                                <Grid ColumnSpacing="12" Padding="0,6">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel Spacing="1">
+                                                        <TextBlock Text="{x:Bind Heading}" FontSize="14" FontWeight="SemiBold" />
+                                                        <TextBlock Text="{x:Bind Summary}" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                                    </StackPanel>
+                                                    <!-- 有効数バッジ（1つでも有効ならテーマカラー） -->
+                                                    <Border
+                                                        Grid.Column="1"
+                                                        CornerRadius="10"
+                                                        Padding="10,2"
+                                                        VerticalAlignment="Center"
+                                                        Background="{x:Bind views:RuleSettingsPage.BadgeBackground(HasEnabled), Mode=OneWay}">
+                                                        <TextBlock Text="{x:Bind BadgeText, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" Foreground="{x:Bind views:RuleSettingsPage.BadgeForeground(HasEnabled), Mode=OneWay}" />
+                                                    </Border>
+                                                </Grid>
+                                            </Expander.Header>
+                                            <StackPanel Spacing="6">
+                                                <!-- ON/OFF の項目：幅に応じて1〜2列。行にマウスを重ねる・クリック・フォーカスで右のガイドに解説を出す -->
+                                                <ItemsRepeater ItemsSource="{x:Bind Items}">
+                                                    <ItemsRepeater.Layout>
+                                                        <UniformGridLayout MinItemWidth="290" MinItemHeight="56" MinColumnSpacing="12" MinRowSpacing="4" ItemsStretch="Fill" />
+                                                    </ItemsRepeater.Layout>
+                                                    <ItemsRepeater.ItemTemplate>
+                                                        <DataTemplate x:DataType="vm:RuleToggleViewModel">
+                                                            <!-- Tag に項目そのものを入れておく（ItemsRepeater は行の DataContext を保証しないため） -->
+                                                            <Grid
+                                                                Tag="{x:Bind}"
+                                                                ColumnSpacing="8"
+                                                                Padding="8,4"
+                                                                CornerRadius="6"
+                                                                Background="Transparent"
+                                                                PointerEntered="OnRuleRowPointerEntered"
+                                                                PointerExited="OnRuleRowPointerExited"
+                                                                Tapped="OnRuleRowTapped"
+                                                                GotFocus="OnRuleRowGotFocus">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <StackPanel VerticalAlignment="Center" Spacing="1">
+                                                                    <TextBlock Text="{x:Bind Label}" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                                                    <TextBlock Text="{x:Bind Hint}" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource AppTextMutedBrush}" />
+                                                                </StackPanel>
+                                                                <ToggleSwitch
+                                                                    Grid.Column="1"
+                                                                    IsOn="{x:Bind IsOn, Mode=TwoWay}"
+                                                                    OnContent=""
+                                                                    OffContent=""
+                                                                    MinWidth="0"
+                                                                    VerticalAlignment="Center"
+                                                                    AutomationProperties.Name="{x:Bind Label}" />
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsRepeater.ItemTemplate>
+                                                </ItemsRepeater>
+
+                                                <!-- 選択式の項目（縛りが成立する連続回数・階段の最小枚数など） -->
+                                                <ItemsRepeater ItemsSource="{x:Bind Choices}" Visibility="{x:Bind HasChoices}">
+                                                    <ItemsRepeater.Layout>
+                                                        <StackLayout Spacing="4" />
+                                                    </ItemsRepeater.Layout>
+                                                    <ItemsRepeater.ItemTemplate>
+                                                        <DataTemplate x:DataType="vm:RuleChoiceViewModel">
+                                                            <Grid
+                                                                Tag="{x:Bind}"
+                                                                ColumnSpacing="12"
+                                                                Padding="8,6"
+                                                                CornerRadius="6"
+                                                                Background="{StaticResource AppBackgroundDeepBrush}"
+                                                                PointerEntered="OnRuleRowPointerEntered"
+                                                                PointerExited="OnRuleRowPointerExited"
+                                                                Tapped="OnRuleRowTapped"
+                                                                GotFocus="OnRuleRowGotFocus">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <StackPanel VerticalAlignment="Center" Spacing="1">
+                                                                    <TextBlock Text="{x:Bind Label}" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                                                    <TextBlock Text="{x:Bind Hint}" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource AppTextMutedBrush}" />
+                                                                </StackPanel>
+                                                                <ComboBox
+                                                                    Grid.Column="1"
+                                                                    ItemsSource="{x:Bind OptionLabels}"
+                                                                    SelectedIndex="{x:Bind SelectedIndex, Mode=TwoWay}"
+                                                                    MinWidth="130"
+                                                                    VerticalAlignment="Center"
+                                                                    AutomationProperties.Name="{x:Bind Label}" />
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsRepeater.ItemTemplate>
+                                                </ItemsRepeater>
+                                            </StackPanel>
+                                        </Expander>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                         </StackPanel>
+                    </Border>
 
-                        <!-- サウンド（変更は即座に反映・保存） -->
-                        <TextBlock Text="サウンド" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" Margin="0,8,0,0" />
-                        <ToggleSwitch Header="効果音" IsOn="{x:Bind ViewModel.SoundEnabled, Mode=TwoWay}" />
-                        <StackPanel Orientation="Horizontal" Spacing="12">
+                    <!-- 2. 外見設定（テーマカラー 8色 & スキン & サウンド） -->
+                    <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
+                        <StackPanel Spacing="16">
+                            <TextBlock Text="テーマカラー（8色プリセット）" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+
+                            <!-- 8色のカラーピッカーボタン（ペインの幅に合わせて列数が変わる） -->
+                            <ItemsRepeater ItemsSource="{x:Bind ViewModel.AvailableThemes}">
+                                <ItemsRepeater.Layout>
+                                    <UniformGridLayout MinItemWidth="168" MinItemHeight="40" MinColumnSpacing="8" MinRowSpacing="8" ItemsStretch="Fill" />
+                                </ItemsRepeater.Layout>
+                                <ItemsRepeater.ItemTemplate>
+                                    <DataTemplate x:DataType="settings:ThemeColorInfo">
+                                        <Button
+                                            Click="OnThemeButtonClicked"
+                                            Tag="{x:Bind Color}"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Left"
+                                            VerticalAlignment="Stretch"
+                                            CornerRadius="6"
+                                            Background="#1E222B"
+                                            BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                                            BorderThickness="1">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <Border Width="16" Height="16" CornerRadius="8" Background="{x:Bind AccentHex, Converter={StaticResource HexToBrushConverter}}" />
+                                                <TextBlock Text="{x:Bind DisplayName}" FontSize="12" Foreground="{StaticResource AppTextPrimaryBrush}" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Button>
+                                    </DataTemplate>
+                                </ItemsRepeater.ItemTemplate>
+                            </ItemsRepeater>
+
+                            <!-- スキン着せ替え -->
+                            <TextBlock Text="カードスキン設定" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" Margin="0,8,0,0" />
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <Button Click="OnSelectDefaultSkinClicked" Background="#262A36" CornerRadius="6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1">
+                                    <TextBlock Text="標準ベクター描画を使用" FontSize="13" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                </Button>
+                                <Button Click="OnImportZipClicked" Background="#262A36" CornerRadius="6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1">
+                                    <TextBlock Text="ZIPからスキンパックをインポート..." FontSize="13" Foreground="{StaticResource AppAccentBrush}" />
+                                </Button>
+                            </StackPanel>
+
+                            <!-- サウンド（変更は即座に反映・保存） -->
+                            <TextBlock Text="サウンド" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" Margin="0,8,0,0" />
+                            <ToggleSwitch Header="効果音" IsOn="{x:Bind ViewModel.SoundEnabled, Mode=TwoWay}" />
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <Slider
+                                    Header="効果音の音量"
+                                    Width="300"
+                                    Minimum="0"
+                                    Maximum="100"
+                                    StepFrequency="1"
+                                    TickFrequency="10"
+                                    Value="{x:Bind ViewModel.SeVolume, Mode=TwoWay}"
+                                    IsEnabled="{x:Bind ViewModel.SoundEnabled, Mode=OneWay}" />
+                                <Button
+                                    VerticalAlignment="Bottom"
+                                    Command="{x:Bind ViewModel.PreviewSoundCommand}"
+                                    IsEnabled="{x:Bind ViewModel.SoundEnabled, Mode=OneWay}"
+                                    Background="#262A36"
+                                    CornerRadius="6"
+                                    BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                                    BorderThickness="1">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE768;" FontSize="12" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                        <TextBlock Text="試聴" FontSize="13" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
                             <Slider
-                                Header="効果音の音量"
-                                Width="320"
+                                Header="BGM の音量（BGM は今後追加予定）"
+                                Width="300"
+                                HorizontalAlignment="Left"
                                 Minimum="0"
                                 Maximum="100"
                                 StepFrequency="1"
                                 TickFrequency="10"
-                                Value="{x:Bind ViewModel.SeVolume, Mode=TwoWay}"
-                                IsEnabled="{x:Bind ViewModel.SoundEnabled, Mode=OneWay}" />
-                            <Button
-                                VerticalAlignment="Bottom"
-                                Command="{x:Bind ViewModel.PreviewSoundCommand}"
-                                IsEnabled="{x:Bind ViewModel.SoundEnabled, Mode=OneWay}"
-                                Background="#262A36"
-                                CornerRadius="6"
-                                BorderBrush="{StaticResource AppBorderSubtleBrush}"
-                                BorderThickness="1">
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <FontIcon Glyph="&#xE768;" FontSize="12" Foreground="{StaticResource AppTextPrimaryBrush}" />
-                                    <TextBlock Text="試聴" FontSize="13" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                Value="{x:Bind ViewModel.BgmVolume, Mode=TwoWay}" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 3. NPC（対戦相手）設定 -->
+                    <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
+                        <StackPanel Spacing="16">
+                            <TextBlock Text="NPC（CPU）設定" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <!-- 席1 (東) -->
+                                <StackPanel Grid.Column="0" Spacing="8">
+                                    <TextBlock Text="席 1 (東)" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
+                                    <TextBox Header="名前" Text="{x:Bind ViewModel.Seat1Name, Mode=TwoWay}" />
                                 </StackPanel>
-                            </Button>
+
+                                <!-- 席2 (北) -->
+                                <StackPanel Grid.Column="1" Spacing="8">
+                                    <TextBlock Text="席 2 (北)" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
+                                    <TextBox Header="名前" Text="{x:Bind ViewModel.Seat2Name, Mode=TwoWay}" />
+                                </StackPanel>
+
+                                <!-- 席3 (西) -->
+                                <StackPanel Grid.Column="2" Spacing="8">
+                                    <TextBlock Text="席 3 (西)" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
+                                    <TextBox Header="名前" Text="{x:Bind ViewModel.Seat3Name, Mode=TwoWay}" />
+                                </StackPanel>
+                            </Grid>
                         </StackPanel>
-                        <Slider
-                            Header="BGM の音量（BGM は今後追加予定）"
-                            Width="320"
-                            HorizontalAlignment="Left"
-                            Minimum="0"
-                            Maximum="100"
-                            StepFrequency="1"
-                            TickFrequency="10"
-                            Value="{x:Bind ViewModel.BgmVolume, Mode=TwoWay}" />
-                    </StackPanel>
-                </Border>
+                    </Border>
 
-                <!-- 2. NPC（対戦相手）設定 -->
-                <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
-                    <StackPanel Spacing="16">
-                        <TextBlock Text="NPC（CPU）設定" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
-                        
-                        <Grid ColumnSpacing="16">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
+                </StackPanel>
+            </ScrollViewer>
 
-                            <!-- 席1 (東) -->
-                            <StackPanel Grid.Column="0" Spacing="8">
-                                <TextBlock Text="席 1 (東)" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
-                                <TextBox Header="名前" Text="{x:Bind ViewModel.Seat1Name, Mode=TwoWay}" />
-                            </StackPanel>
+            <!-- ==================== 右ペイン：ルール詳細ガイド ＋ マイプリセット（常時表示） ==================== -->
+            <ScrollViewer x:Name="RightPane" Grid.Column="1" Grid.Row="0" Padding="0,0,14,0" VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="16">
 
-                            <!-- 席2 (北) -->
-                            <StackPanel Grid.Column="1" Spacing="8">
-                                <TextBlock Text="席 2 (北)" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
-                                <TextBox Header="名前" Text="{x:Bind ViewModel.Seat2Name, Mode=TwoWay}" />
-                            </StackPanel>
-
-                            <!-- 席3 (西) -->
-                            <StackPanel Grid.Column="2" Spacing="8">
-                                <TextBlock Text="席 3 (西)" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
-                                <TextBox Header="名前" Text="{x:Bind ViewModel.Seat3Name, Mode=TwoWay}" />
-                            </StackPanel>
-                        </Grid>
-                    </StackPanel>
-                </Border>
-
-                <!-- 3. ローカルルール（カテゴリごとの折りたたみカード・2列のトグル・ワンクリックのプリセット） -->
-                <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
-                    <StackPanel Spacing="16">
-                        <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Spacing="2">
-                                <TextBlock Text="ローカルルール" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
-                                <TextBlock Text="{x:Bind ViewModel.RuleSummaryText, Mode=OneWay}" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                                <Button Command="{x:Bind ViewModel.SetAllCategoriesExpandedCommand}" CommandParameter="true" Background="Transparent" BorderThickness="0" Padding="8,4" ToolTipService.ToolTip="すべて開く">
-                                    <FontIcon Glyph="&#xE70D;" FontSize="12" />
-                                </Button>
-                                <Button Command="{x:Bind ViewModel.SetAllCategoriesExpandedCommand}" CommandParameter="false" Background="Transparent" BorderThickness="0" Padding="8,4" ToolTipService.ToolTip="すべて閉じる">
-                                    <FontIcon Glyph="&#xE70E;" FontSize="12" />
-                                </Button>
-                            </StackPanel>
-                        </Grid>
-
-                        <!-- プリセット（ワンクリックで全項目を切り替え） -->
-                        <StackPanel Spacing="8">
-                            <TextBlock Text="プリセット" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                    <!-- ルール詳細ガイド：左でホバー・フォーカス・クリックしたルールの解説 -->
+                    <Border
+                        CornerRadius="{StaticResource PanelCornerRadius}"
+                        Background="{StaticResource AppBackgroundElevatedBrush}"
+                        BorderBrush="{StaticResource AppAccentBrush}"
+                        BorderThickness="1"
+                        Padding="20">
+                        <StackPanel Spacing="14">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Button Command="{x:Bind ViewModel.ApplyPresetCommand}" CommandParameter="Standard" CornerRadius="16" Padding="14,6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Background="{StaticResource AppBackgroundDeepBrush}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <FontIcon Glyph="&#xE8FD;" FontSize="13" />
-                                        <TextBlock Text="標準" FontSize="13" />
-                                    </StackPanel>
-                                </Button>
-                                <Button Command="{x:Bind ViewModel.ApplyPresetCommand}" CommandParameter="Simple" CornerRadius="16" Padding="14,6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Background="{StaticResource AppBackgroundDeepBrush}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <FontIcon Glyph="&#xE73E;" FontSize="13" />
-                                        <TextBlock Text="シンプル" FontSize="13" />
-                                    </StackPanel>
-                                </Button>
-                                <Button Command="{x:Bind ViewModel.ApplyPresetCommand}" CommandParameter="Chaos" CornerRadius="16" Padding="14,6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Background="{StaticResource AppBackgroundDeepBrush}">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <FontIcon Glyph="&#xE945;" FontSize="13" />
-                                        <TextBlock Text="全部盛り" FontSize="13" />
-                                    </StackPanel>
-                                </Button>
+                                <FontIcon Glyph="&#xE82D;" FontSize="15" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
+                                <TextBlock Text="ルール詳細ガイド" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AppTextSecondaryBrush}" VerticalAlignment="Center" />
+                                <Border
+                                    CornerRadius="9"
+                                    Padding="9,1"
+                                    VerticalAlignment="Center"
+                                    Background="{StaticResource AppAccentSubtleBrush}"
+                                    Visibility="{x:Bind ViewModel.SelectedGuide.Category, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}">
+                                    <TextBlock Text="{x:Bind ViewModel.SelectedGuide.Category, Mode=OneWay}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppAccentBrush}" />
+                                </Border>
                             </StackPanel>
+
+                            <TextBlock
+                                Text="{x:Bind ViewModel.SelectedGuide.Title, Mode=OneWay}"
+                                FontSize="24"
+                                FontWeight="Bold"
+                                TextWrapping="Wrap"
+                                Foreground="{StaticResource AppTextPrimaryBrush}" />
+
+                            <!-- 詳しい解説 -->
+                            <TextBlock
+                                Text="{x:Bind ViewModel.SelectedGuide.Detail, Mode=OneWay}"
+                                FontSize="15"
+                                LineHeight="25"
+                                TextWrapping="Wrap"
+                                Foreground="{StaticResource AppTextPrimaryBrush}" />
+
+                            <!-- 発動条件 -->
+                            <Border CornerRadius="8" Padding="14,10" Background="{StaticResource AppBackgroundDeepBrush}">
+                                <StackPanel Spacing="4">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE945;" FontSize="12" Foreground="#F2C94C" VerticalAlignment="Center" />
+                                        <TextBlock Text="発動条件" FontSize="12" FontWeight="Bold" Foreground="#F2C94C" />
+                                    </StackPanel>
+                                    <TextBlock
+                                        Text="{x:Bind ViewModel.SelectedGuide.Condition, Mode=OneWay}"
+                                        FontSize="14"
+                                        LineHeight="23"
+                                        TextWrapping="Wrap"
+                                        Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- 戦略ポイント・具体例 -->
+                            <Border CornerRadius="8" Padding="14,10" Background="{StaticResource AppBackgroundDeepBrush}">
+                                <StackPanel Spacing="4">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xEA80;" FontSize="12" Foreground="#6FCF97" VerticalAlignment="Center" />
+                                        <TextBlock Text="戦略ポイント・具体例" FontSize="12" FontWeight="Bold" Foreground="#6FCF97" />
+                                    </StackPanel>
+                                    <TextBlock
+                                        Text="{x:Bind ViewModel.SelectedGuide.Tip, Mode=OneWay}"
+                                        FontSize="14"
+                                        LineHeight="23"
+                                        TextWrapping="Wrap"
+                                        Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
+                    </Border>
 
-                        <!-- ラウンド数 -->
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <TextBlock Text="ラウンド数" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{StaticResource AppTextSecondaryBrush}" />
-                            <NumberBox
-                                Value="{x:Bind ViewModel.RoundCount, Mode=TwoWay}"
-                                Minimum="1"
-                                Maximum="20"
-                                SmallChange="1"
-                                SpinButtonPlacementMode="Inline"
-                                Width="130" />
+                    <!-- マイプリセット：現在のルール構成に名前を付けて保存・読み込み・削除 -->
+                    <Border
+                        CornerRadius="{StaticResource PanelCornerRadius}"
+                        Background="{StaticResource AppBackgroundElevatedBrush}"
+                        BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                        BorderThickness="1"
+                        Padding="20">
+                        <StackPanel Spacing="12">
+                            <StackPanel Spacing="2">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE734;" FontSize="15" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
+                                    <TextBlock Text="マイプリセット" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                </StackPanel>
+                                <TextBlock
+                                    Text="いまのルール構成に名前を付けて保存し、いつでも呼び出せます（同じ名前は上書き）"
+                                    FontSize="12"
+                                    TextWrapping="Wrap"
+                                    Foreground="{StaticResource AppTextSecondaryBrush}" />
+                            </StackPanel>
+
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox
+                                    Text="{x:Bind ViewModel.NewPresetName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                    PlaceholderText="プリセット名（例：うちのルール）"
+                                    MaxLength="24"
+                                    KeyDown="OnPresetNameKeyDown"
+                                    AutomationProperties.Name="プリセット名" />
+                                <Button
+                                    Grid.Column="1"
+                                    Command="{x:Bind ViewModel.SaveCurrentAsPresetCommand}"
+                                    ToolTipService.ToolTip="現在のルール構成を、この名前でマイプリセットに保存"
+                                    AutomationProperties.Name="現在のルールを保存"
+                                    Background="{StaticResource AppAccentBrush}"
+                                    Foreground="{StaticResource AppOnAccentBrush}"
+                                    CornerRadius="{StaticResource ButtonCornerRadius}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE74E;" FontSize="13" />
+                                        <TextBlock Text="保存" FontSize="13" FontWeight="SemiBold" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+
+                            <TextBlock
+                                Text="{x:Bind ViewModel.PresetStatus, Mode=OneWay}"
+                                FontSize="12"
+                                TextWrapping="Wrap"
+                                Foreground="{StaticResource AppAccentBrush}"
+                                Visibility="{x:Bind ViewModel.PresetStatus, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}" />
+
+                            <TextBlock
+                                Text="まだ保存されたプリセットはありません。"
+                                FontSize="12"
+                                Foreground="{StaticResource AppTextMutedBrush}"
+                                Visibility="{x:Bind ViewModel.HasNoCustomPresets, Mode=OneWay}" />
+
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.CustomPresets, Mode=OneWay}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Spacing="6" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:CustomPresetItemViewModel">
+                                        <Grid ColumnSpacing="8" Padding="12,8" CornerRadius="8" Background="{StaticResource AppBackgroundDeepBrush}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel VerticalAlignment="Center" Spacing="1">
+                                                <TextBlock Text="{x:Bind Name}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                                <TextBlock Text="{x:Bind Summary}" FontSize="11" TextTrimming="CharacterEllipsis" Foreground="{StaticResource AppTextMutedBrush}" />
+                                            </StackPanel>
+                                            <Button
+                                                Grid.Column="1"
+                                                Tag="{x:Bind}"
+                                                Click="OnLoadPresetClicked"
+                                                VerticalAlignment="Center"
+                                                Padding="12,5"
+                                                CornerRadius="{StaticResource ButtonCornerRadius}"
+                                                BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                                                BorderThickness="1"
+                                                ToolTipService.ToolTip="このプリセットを現在のルールとして読み込む">
+                                                <TextBlock Text="読み込む" FontSize="12" />
+                                            </Button>
+                                            <Button
+                                                Grid.Column="2"
+                                                Tag="{x:Bind}"
+                                                Click="OnDeletePresetClicked"
+                                                VerticalAlignment="Center"
+                                                Padding="8,5"
+                                                Background="Transparent"
+                                                BorderThickness="0"
+                                                ToolTipService.ToolTip="このプリセットを削除"
+                                                AutomationProperties.Name="削除">
+                                                <FontIcon Glyph="&#xE74D;" FontSize="13" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                            </Button>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                         </StackPanel>
+                    </Border>
 
-                        <!-- カテゴリごとの折りたたみカード -->
-                        <ItemsControl ItemsSource="{x:Bind ViewModel.RuleCategories, Mode=OneWay}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Spacing="8" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="vm:RuleCategoryViewModel">
-                                    <Expander
-                                        IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}"
-                                        HorizontalAlignment="Stretch"
-                                        HorizontalContentAlignment="Stretch">
-                                        <Expander.Header>
-                                            <Grid ColumnSpacing="12" Padding="0,6">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <StackPanel Spacing="1">
-                                                    <TextBlock Text="{x:Bind Heading}" FontSize="14" FontWeight="SemiBold" />
-                                                    <TextBlock Text="{x:Bind Summary}" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
-                                                </StackPanel>
-                                                <!-- 有効数バッジ（1つでも有効ならテーマカラー） -->
-                                                <Border
-                                                    Grid.Column="1"
-                                                    CornerRadius="10"
-                                                    Padding="10,2"
-                                                    VerticalAlignment="Center"
-                                                    Background="{x:Bind views:RuleSettingsPage.BadgeBackground(HasEnabled), Mode=OneWay}">
-                                                    <TextBlock Text="{x:Bind BadgeText, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" Foreground="{x:Bind views:RuleSettingsPage.BadgeForeground(HasEnabled), Mode=OneWay}" />
-                                                </Border>
-                                            </Grid>
-                                        </Expander.Header>
-                                        <!-- 項目：幅に応じて1〜2列。1行＝名前・説明・スイッチ -->
-                                        <ItemsRepeater ItemsSource="{x:Bind Items}">
-                                            <ItemsRepeater.Layout>
-                                                <UniformGridLayout MinItemWidth="300" MinItemHeight="56" MinColumnSpacing="16" MinRowSpacing="4" ItemsStretch="Fill" />
-                                            </ItemsRepeater.Layout>
-                                            <ItemsRepeater.ItemTemplate>
-                                                <DataTemplate x:DataType="vm:RuleToggleViewModel">
-                                                    <Grid ColumnSpacing="8" Padding="4,4">
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="*" />
-                                                            <ColumnDefinition Width="Auto" />
-                                                        </Grid.ColumnDefinitions>
-                                                        <StackPanel VerticalAlignment="Center" Spacing="1">
-                                                            <TextBlock Text="{x:Bind Label}" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" />
-                                                            <TextBlock Text="{x:Bind Hint}" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource AppTextMutedBrush}" />
-                                                        </StackPanel>
-                                                        <ToggleSwitch
-                                                            Grid.Column="1"
-                                                            IsOn="{x:Bind IsOn, Mode=TwoWay}"
-                                                            OnContent=""
-                                                            OffContent=""
-                                                            MinWidth="0"
-                                                            VerticalAlignment="Center"
-                                                            AutomationProperties.Name="{x:Bind Label}" />
-                                                    </Grid>
-                                                </DataTemplate>
-                                            </ItemsRepeater.ItemTemplate>
-                                        </ItemsRepeater>
-                                    </Expander>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                </Border>
-
-            </StackPanel>
-        </ScrollViewer>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
     </Grid>
 </Page>

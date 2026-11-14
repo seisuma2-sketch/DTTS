@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json.Serialization;
 using DTTS.Core.Ai;
+using DTTS.Core.Models;
 
 namespace DTTS.Services.Settings;
 
@@ -72,6 +73,9 @@ public sealed class AppearanceSettings
     /// <summary>BGM の音量（0〜100）。BGM は未実装で、将来の追加に備えて値だけ保持する。</summary>
     public int BgmVolume { get; set; } = DefaultBgmVolume;
 
+    /// <summary>ゲームの進行スピード（NPCが考える時間）。設定画面と対戦画面のどちらからでも変えられる。</summary>
+    public GameSpeed GameSpeed { get; set; } = GameSpeed.Normal;
+
     /// <summary>効果音の既定音量。</summary>
     public const int DefaultSeVolume = 80;
 
@@ -84,6 +88,10 @@ public sealed class AppearanceSettings
         if (!Enum.IsDefined(ThemeColor))
         {
             ThemeColor = ThemeColor.DeepAzure;
+        }
+        if (!Enum.IsDefined(GameSpeed))
+        {
+            GameSpeed = GameSpeed.Normal;
         }
         SeVolume = Math.Clamp(SeVolume, 0, 100);
         BgmVolume = Math.Clamp(BgmVolume, 0, 100);
@@ -148,6 +156,117 @@ public sealed class NpcSettings
     }
 }
 
+/// <summary>ユーザーが名前を付けて保存したルール構成（マイプリセット）1件。</summary>
+public sealed class CustomRulePreset
+{
+    /// <summary>プリセット名（一覧内で一意）。</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>ルール設定（<see cref="RuleSettings.ToJson"/> の出力）。</summary>
+    public string RulesJson { get; set; } = "";
+
+    /// <summary>保存した日時。</summary>
+    public DateTimeOffset SavedAt { get; set; }
+
+    /// <summary>保存されているルール設定を復元する（壊れていれば null）。</summary>
+    public RuleSettings? ToRules()
+    {
+        if (string.IsNullOrWhiteSpace(RulesJson))
+        {
+            return null;
+        }
+        try
+        {
+            return RuleSettings.FromJson(RulesJson);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+}
+
+/// <summary>マイプリセットの一覧（保存の新しい順）。</summary>
+public sealed class CustomRulePresetList
+{
+    /// <summary>保存できる件数の上限。</summary>
+    public const int MaxCount = 30;
+
+    /// <summary>プリセット名の最大文字数。</summary>
+    public const int MaxNameLength = 24;
+
+    /// <summary>プリセット（保存の新しい順）。</summary>
+    public List<CustomRulePreset> Presets { get; set; } = new();
+
+    /// <summary>名前を整える（前後の空白・制御文字を除き、長すぎる分は切る）。使えない名前なら null。</summary>
+    public static string? SanitizeName(string? name)
+    {
+        var cleaned = new string((name ?? string.Empty).Where(ch => !char.IsControl(ch)).ToArray()).Trim();
+        if (cleaned.Length == 0)
+        {
+            return null;
+        }
+        return cleaned.Length > MaxNameLength ? cleaned[..MaxNameLength].Trim() : cleaned;
+    }
+
+    /// <summary>
+    /// 現在のルール構成を名前を付けて保存する。同じ名前があれば上書きし、先頭（最新）へ移す。
+    /// </summary>
+    /// <returns>保存したプリセット。名前が使えない、または上限に達していて新規追加できない場合は null。</returns>
+    public CustomRulePreset? Upsert(string? name, RuleSettings rules, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+        var clean = SanitizeName(name);
+        if (clean is null)
+        {
+            return null;
+        }
+        var existing = Presets.FirstOrDefault(p => string.Equals(p.Name, clean, StringComparison.Ordinal));
+        if (existing is null && Presets.Count >= MaxCount)
+        {
+            return null;
+        }
+        if (existing is not null)
+        {
+            Presets.Remove(existing);
+        }
+        var preset = new CustomRulePreset { Name = clean, RulesJson = rules.ToJson(), SavedAt = now };
+        Presets.Insert(0, preset);
+        return preset;
+    }
+
+    /// <summary>名前を指定して削除する。削除したら true。</summary>
+    public bool Remove(string? name)
+        => Presets.RemoveAll(p => string.Equals(p.Name, name, StringComparison.Ordinal)) > 0;
+
+    /// <summary>壊れた項目・重複した名前を取り除き、上限件数に収める（破損データ対策）。</summary>
+    public void Normalize()
+    {
+        Presets ??= new List<CustomRulePreset>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var valid = new List<CustomRulePreset>();
+        foreach (var p in Presets)
+        {
+            if (p is null)
+            {
+                continue;
+            }
+            var clean = SanitizeName(p.Name);
+            if (clean is null || p.ToRules() is null || !seen.Add(clean))
+            {
+                continue;
+            }
+            p.Name = clean;
+            valid.Add(p);
+            if (valid.Count >= MaxCount)
+            {
+                break;
+            }
+        }
+        Presets = valid;
+    }
+}
+
 /// <summary>フィードバック送信設定。</summary>
 public sealed class FeedbackOptions
 {
@@ -168,6 +287,7 @@ public sealed class FeedbackOptions
 [JsonSerializable(typeof(AppearanceSettings))]
 [JsonSerializable(typeof(NpcSettings))]
 [JsonSerializable(typeof(FeedbackOptions))]
+[JsonSerializable(typeof(CustomRulePresetList))]
 internal sealed partial class SettingsJsonContext : JsonSerializerContext
 {
 }

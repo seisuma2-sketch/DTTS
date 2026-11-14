@@ -32,7 +32,7 @@ public sealed record PendingDecision(DecisionKind Kind, int PlayerId)
     /// <summary>関連する効果（革命選択時の革命種別など）。</summary>
     public SpecialEffectType? Effect { get; init; }
 
-    /// <summary>パス（4止めの見送りを含む）できるか。</summary>
+    /// <summary>パス（4止め・砂嵐の割り込みの見送りを含む）できるか。</summary>
     public bool CanPass { get; init; }
 }
 
@@ -100,7 +100,7 @@ public sealed record DecisionRequestedEvent(PendingDecision Decision) : GameEven
 /// <summary>カードが場に出された。</summary>
 public sealed record CardsPlayedEvent(int PlayerId, PlayJudgement Judgement, FieldState Field) : GameEvent;
 
-/// <summary>パスした（4止めの見送りを含む）。</summary>
+/// <summary>パスした（<paramref name="IsFourStopDecline"/> が true なら割り込み（4止め・砂嵐）の見送り）。</summary>
 public sealed record PlayerPassedEvent(int PlayerId, bool IsFourStopDecline) : GameEvent;
 
 /// <summary>特殊効果が適用された（Applied=false は革命選択で見送った場合）。</summary>
@@ -122,7 +122,10 @@ public sealed record CardsDiscardedEvent(int PlayerId, IReadOnlyList<Card> Cards
 public sealed record FieldFlushedEvent(int? NextLeaderId, SpecialEffectType? Cause, FieldState Field) : GameEvent;
 
 /// <summary>プレイヤーがラウンドを抜けた。</summary>
-public sealed record PlayerFinishedEvent(int PlayerId, FinishKind Kind) : GameEvent;
+/// <param name="PlayerId">抜けたプレイヤー。</param>
+/// <param name="Kind">抜け方。</param>
+/// <param name="Place">この時点での順位（1始まり。反則・都落ちは下位から確定する。下剋上が起きるとラウンド結果で入れ替わる）。</param>
+public sealed record PlayerFinishedEvent(int PlayerId, FinishKind Kind, int Place) : GameEvent;
 
 /// <summary>ラウンドが終了した。</summary>
 public sealed record RoundEndedEvent(RoundResult Result, bool IsGameOver) : GameEvent;

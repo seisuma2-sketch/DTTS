@@ -14,7 +14,7 @@ public sealed partial class RankOptionViewModel : ObservableObject
 
     public Rank Rank { get; }
 
-    /// <summary>表示名（3〜10・J・Q・K・A・2）。</summary>
+    /// <summary>表示名（3〜10・J・Q・K・A・2・JK）。</summary>
     public string Label { get; }
 
     [ObservableProperty]
@@ -35,10 +35,10 @@ public sealed partial class RankOptionViewModel : ObservableObject
         _ => ((int)rank).ToString(),
     };
 
-    /// <summary>宣言の候補を弱い順（3〜K・A・2）に並べたもの。</summary>
+    /// <summary>宣言の候補を弱い順（3〜K・A・2・ジョーカー）に並べたもの。7個ずつ2行に並ぶ。</summary>
     public static readonly Rank[] DeclarationOrder =
     {
         Rank.Three, Rank.Four, Rank.Five, Rank.Six, Rank.Seven, Rank.Eight, Rank.Nine, Rank.Ten,
-        Rank.Jack, Rank.Queen, Rank.King, Rank.Ace, Rank.Two,
+        Rank.Jack, Rank.Queen, Rank.King, Rank.Ace, Rank.Two, Rank.Joker,
     };
 }

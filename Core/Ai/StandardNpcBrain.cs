@@ -214,7 +214,7 @@ public sealed class StandardNpcBrain : INpcStrategy
         {
             score -= 5.0; // 相手があがりそうなら止めに行く
         }
-        if (context.Decision.Kind == DecisionKind.FourStopChance)
+        if (context.Decision.Kind.IsInterruptChance())
         {
             score += 2.0; // 割り込みは強制ではない
         }
@@ -383,12 +383,12 @@ public sealed class StandardNpcBrain : INpcStrategy
     public IReadOnlyList<Rank> DeclareRanks(NpcContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        int count = Math.Clamp(context.Decision.MinCount, 1, Card.RanksPerSuit);
+        int count = Math.Clamp(context.Decision.MinCount, 1, GameEngine.MaxDeclarableRanks);
         bool reversed = context.Field.IsStrengthReversed;
         var unseen = _w.CountsCards ? context.GetUnseenCards() : null;
 
         // 全員が宣言した数字を捨てる：自分が多く持ち（特に弱いカード）、相手が少なく持つ数字ほど得
-        return Enumerable.Range(1, Card.RanksPerSuit)
+        var candidates = Enumerable.Range(1, Card.RanksPerSuit)
             .Select(i => (Rank)i)
             .Select(rank =>
             {
@@ -397,6 +397,16 @@ public sealed class StandardNpcBrain : INpcStrategy
                 double weakness = own > 0 ? (1.0 - HandAnalysis.NormalizedStrength(rank, reversed)) * 2.0 : 0.0;
                 return (rank, score: (own * 4.0) - (opponents * 1.5) + weakness + Noise());
             })
+            .ToList();
+
+        // ジョーカー：自分が持っていれば決して宣言しない。カードを記憶する思考（つよい）は、
+        // 相手がまだ持っていると分かるときに最強札を消しに行く。それ以外は数字が足りないときの最後の候補
+        bool ownJoker = context.Hand.Any(c => c.IsJoker);
+        int jokersOut = unseen?.Count(c => c.IsJoker) ?? 0;
+        double jokerScore = ownJoker ? double.NegativeInfinity : (jokersOut > 0 ? 5.0 * jokersOut : -100.0);
+        candidates.Add((Rank.Joker, jokerScore));
+
+        return candidates
             .OrderByDescending(x => x.score)
             .ThenBy(x => (int)x.rank)
             .Take(count)

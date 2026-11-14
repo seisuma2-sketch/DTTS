@@ -24,6 +24,136 @@ internal static class JudgeTests
         return f.WithPlay(player, r.Play!, r.NextLock);
     }
 
+    /// <summary>砂嵐の割り込み・2枚階段・3枚縛り・11バックの解除条件。</summary>
+    private static void NewRuleTests()
+    {
+        var empty = FieldState.CreateInitial();
+
+        // ---- 砂嵐の割り込み（ろくろ首・99車の直後。枚数・縛りを問わず砂嵐だけが出せる）----
+        {
+            var rules = RuleSettings.CreateDefault();
+            rules.Flow.SandstormEnabled = true;
+            rules.Flow.RokurokubiEnabled = true;
+            rules.Flow.AmbulanceEnabled = true;
+            var j = new JudgeLogic(rules);
+            var pending = Play(j, empty, "S6 H6").WithSandstormStopPending(true);
+            var stop = j.Judge(C("S3 H3 D3"), pending);
+            Check(stop.IsLegal && stop.BeatMethod == BeatMethod.SandstormStop && stop.FlushesField
+                && stop.HasEffect(SpecialEffectType.Sandstorm), "sandstorm stops a 2-card rokurokubi with 3 cards");
+            Check(!stop.NextLock.IsAnyLocked, "sandstorm stop creates no lock");
+            Check(j.Judge(C("S7 H7"), pending).RejectReason == PlayRejectReason.SandstormStopOnly, "only sandstorm during the window (pair)");
+            Check(j.Judge(C("S2"), pending).RejectReason == PlayRejectReason.SandstormStopOnly, "only sandstorm during the window (single)");
+            Check(j.Judge(C("S3 H3"), pending).RejectReason == PlayRejectReason.SandstormStopOnly, "two 3s are not a sandstorm");
+            Check(j.Judge(C("S3 H3 D3 C3"), pending).RejectReason == PlayRejectReason.SandstormStopOnly, "four 3s are not a sandstorm");
+            Check(j.Judge(C("S3 H3 JK0"), pending).RejectReason == PlayRejectReason.SandstormStopOnly, "joker does not substitute by default");
+            var legal = j.GetLegalPlays(C("S3 H3 D3 C3 S9 H9 JK0"), pending);
+            Check(legal.Count == 4 && legal.All(x => x.BeatMethod == BeatMethod.SandstormStop && x.Play!.Count == 3),
+                "legal plays during the window are the 3-card sandstorms only: " + legal.Count);
+            Check(j.GetLegalPlays(C("S3 H3 S9 H9 D2"), pending).Count == 0, "no sandstorm -> no legal play");
+            // スート縛りが掛かっていても割り込める
+            var locked = Play(j, Play(j, empty, "S5 H5"), "S6 H6").WithSandstormStopPending(true);
+            Check(locked.Lock.IsSuitLocked && j.Judge(C("C3 D3 H3"), locked).BeatMethod == BeatMethod.SandstormStop, "sandstorm stop ignores the suit lock");
+            // 受付が終われば（場札が置かれる・流れる）通常の判定に戻る
+            Check(!pending.WithPlay(1, stop.Play!, stop.NextLock).IsSandstormStopPending, "window closes when a card is played");
+            Check(!pending.Flushed().IsSandstormStopPending, "window closes on flush");
+            // 通常時（受付中でない）の砂嵐は従来どおり同枚数にしか出せない
+            var normal = Play(j, empty, "S6 H6");
+            Check(j.Judge(C("S3 H3 D3"), normal).RejectReason == PlayRejectReason.CountMismatch, "sandstorm outside the window needs the same count");
+            rules.Joker.JokerTriggersEffects = true;
+            Check(j.Judge(C("S3 H3 JK0"), pending).BeatMethod == BeatMethod.SandstormStop, "joker substitutes when joker effects are on");
+            rules.Flow.SandstormEnabled = false;
+            Check(j.Judge(C("S3 H3 D3"), pending).RejectReason == PlayRejectReason.SandstormStopOnly, "sandstorm disabled -> nothing can interrupt");
+        }
+
+        // ---- 2枚階段 ----
+        {
+            var rules = RuleSettings.CreateDefault();
+            var j = new JudgeLogic(rules);
+            Check(j.Analyze(C("S3 S4")).Count == 0, "2-card run is not a sequence by default");
+            Check(!j.GetLegalPlays(C("S3 S4 H9"), empty).Any(x => x.Play!.Type == HandType.Sequence), "no 2-card sequence enumerated by default");
+            rules.Sequence.MinLength = 2;
+            var two = j.Analyze(C("S3 S4"));
+            Check(two.Count == 1 && two[0].Type == HandType.Sequence && two[0].Count == 2, "2-card sequence");
+            Check(j.Analyze(C("S3 H4")).Count == 0, "2 cards of different suits are not a sequence");
+            Check(j.Analyze(C("S3 S5")).Count == 0, "2 cards with a gap are not a sequence");
+            Check(j.Analyze(C("S2 S3")).Count == 0, "no wrap for a 2-card sequence");
+            Check(j.Analyze(C("SA S2")).Count == 1, "A-2 is a 2-card sequence");
+            // ジョーカー＋1枚：ペア・1つ下からの階段・1つ上への階段の3通り。親出しではペアが優先される
+            var withJoker = j.Analyze(C("S5 JK0"));
+            Check(withJoker.Count == 3 && withJoker.Count(x => x.Type == HandType.Sequence) == 2, "S5+JK interpretations=3 got " + withJoker.Count);
+            Check(j.Judge(C("S5 JK0"), empty).Play!.Type == HandType.Multiple, "S5+JK leads as a pair");
+            var fSeq2 = Play(j, empty, "H3 H4");
+            Check(fSeq2.CurrentPlay!.Type == HandType.Sequence, "2-card sequence on the field");
+            Check(j.Judge(C("S5 S6"), fSeq2).IsLegal, "2-card sequence beats a weaker one");
+            Check(j.Judge(C("S4 S5"), fSeq2).RejectReason == PlayRejectReason.NotStronger, "overlapping 2-card sequence is not stronger");
+            Check(j.Judge(C("S7 H7"), fSeq2).RejectReason == PlayRejectReason.TypeMismatch, "pair cannot beat a 2-card sequence");
+            Check(j.Judge(C("S5 S6 S7"), fSeq2).RejectReason == PlayRejectReason.CountMismatch, "3-card sequence cannot beat a 2-card one");
+            var onSeq = j.Judge(C("S5 JK0"), fSeq2);
+            Check(onSeq.IsLegal && onSeq.Play!.Type == HandType.Sequence, "S5+JK answers a sequence as a sequence");
+            var fPair = Play(j, empty, "H3 D3");
+            Check(j.Judge(C("S5 S6"), fPair).RejectReason == PlayRejectReason.TypeMismatch, "2-card sequence cannot beat a pair");
+            var enumerated = j.GetLegalPlays(C("S3 S4 S5 H9"), empty).Where(x => x.Play!.Type == HandType.Sequence).ToList();
+            Check(enumerated.Count == 3, "2-card sequences enumerated (S3S4, S4S5, S3S4S5): " + enumerated.Count);
+            Check(j.GetLegalPlays(C("S5 S6 D9 CK"), fSeq2).Count == 1, "legal answer to a 2-card sequence");
+            // 階段革命（既定5枚）は2枚階段では起きない
+            rules.Revolution.SequenceRevolutionEnabled = true;
+            Check(!j.Judge(C("S3 S4"), empty).TriggersRevolution, "2-card sequence is not a revolution");
+        }
+
+        // ---- 3枚縛り（縛り発生回数 2）----
+        {
+            var rules = RuleSettings.CreateDefault();
+            rules.Lock.TriggerCount = 2;
+            rules.Lock.NumberLockEnabled = true;
+            var j = new JudgeLogic(rules);
+            var f1 = Play(j, empty, "S4");
+            var f2 = Play(j, f1, "S6");
+            Check(!f2.Lock.IsSuitLocked && f2.Lock.SuitMatchStreak == 1, "lock3: 2 in a row -> no lock yet");
+            Check(j.Judge(C("H9"), f2).IsLegal, "lock3: other suits still allowed after 2");
+            var third = j.Judge(C("S9"), f2);
+            Check(third.NextLock.IsSuitLocked && third.HasEffect(SpecialEffectType.SuitLock), "lock3: 3 in a row -> suit lock");
+            var f3 = Play(j, f2, "S9");
+            Check(j.Judge(C("HK"), f3).RejectReason == PlayRejectReason.SuitLockViolation, "lock3: locked after 3");
+            // 数しばも同じ回数：4→5 では成立せず、4→5→6 で成立
+            var n2 = Play(j, Play(j, empty, "H4"), "D5");
+            Check(!n2.Lock.IsNumberLocked && n2.Lock.NumberMatchStreak == 1, "lock3: number lock needs 3 in a row");
+            Check(Play(j, n2, "C6").Lock.IsNumberLocked, "lock3: number lock after 3 in a row");
+            rules.Lock.TriggerCount = 1;
+            Check(Play(j, Play(j, empty, "S4"), "S6").Lock.IsSuitLocked, "lock2: 2 in a row locks");
+        }
+
+        // ---- 11バックの解除条件（FieldState の遷移）----
+        {
+            var f = empty.WithElevenBackToggled(persistent: false);
+            Check(f.IsElevenBack && !f.IsElevenBackPersistent && f.IsStrengthReversed, "11back toggled on");
+            var flushed = f.Flushed();
+            Check(!flushed.IsElevenBack && !flushed.IsElevenBackPersistent && !flushed.IsStrengthReversed, "normal 11back ends on flush");
+            Check(!f.WithElevenBackToggled(false).IsElevenBack, "second J cancels the 11back");
+            var strong = empty.WithElevenBackToggled(persistent: true);
+            Check(strong.Flushed().IsElevenBack && strong.Flushed().Flushed().IsElevenBackPersistent, "strong 11back survives flushes");
+            var released = strong.Flushed().WithElevenBackToggled(true);
+            Check(!released.IsElevenBack && !released.IsElevenBackPersistent, "strong 11back released by the next J");
+            // 強化で掛かった反転を通常の J で解除しても持続フラグは残らない
+            Check(!strong.WithElevenBackToggled(false).Flushed().IsElevenBack, "no stale persistent flag");
+            // 革命中の11バックは打ち消し合い、場が流れると革命だけが残る
+            var rev = (empty with { IsRevolution = true }).WithElevenBackToggled(false);
+            Check(!rev.IsStrengthReversed && rev.Flushed().IsStrengthReversed && rev.Flushed().IsRevolution, "11back inside a revolution");
+            var fresh = FieldState.CreateInitial();
+            Check(!fresh.IsElevenBack && !fresh.IsElevenBackPersistent && !fresh.IsRevolution && !fresh.IsSandstormStopPending, "new round field is clean");
+
+            // 判定側：強化の有無で効果の種類が変わる
+            var rules = RuleSettings.CreateDefault();
+            var j = new JudgeLogic(rules);
+            Check(j.Judge(C("SJ"), empty).HasEffect(SpecialEffectType.ElevenBack)
+                && !j.Judge(C("SJ"), empty).HasEffect(SpecialEffectType.StrongElevenBack), "normal 11back effect");
+            rules.ElevenBack.StrongElevenBackEnabled = true;
+            Check(j.Judge(C("SJ"), empty).HasEffect(SpecialEffectType.StrongElevenBack), "strong 11back effect");
+            rules.ElevenBack.Enabled = false;
+            Check(!j.Judge(C("SJ"), empty).HasEffect(SpecialEffectType.StrongElevenBack)
+                && !j.Judge(C("SJ"), empty).HasEffect(SpecialEffectType.ElevenBack), "11back disabled");
+        }
+    }
+
     public static (int pass, int fail) Run()
     {
         _pass = 0;
@@ -324,6 +454,8 @@ internal static class JudgeTests
         Check(j.Judge(C("H8 JK0"), empty).GetEffect(SpecialEffectType.EightCut)?.Magnitude == 2, "joker substitute effect");
         rules.Joker.JokerTriggersEffects = false;
         Check(j.Judge(C("H8 JK0"), empty).GetEffect(SpecialEffectType.EightCut)?.Magnitude == 1, "joker no substitute effect");
+
+        NewRuleTests();
 
         Console.WriteLine($"judge: pass={_pass} fail={_fail}");
         return (_pass, _fail);

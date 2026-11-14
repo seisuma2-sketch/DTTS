@@ -1,5 +1,4 @@
 using System;
-using System.Threading;
 using System.Threading.Tasks;
 using DTTS.Services.Audio;
 using DTTS.Services.Database;
@@ -18,9 +17,6 @@ public sealed partial class SoundToggleButton : Button
 {
     private const string GlyphOn = "";  // Volume
     private const string GlyphOff = ""; // Mute
-
-    // 連打しても保存が前後しないよう、保存は1つずつ行う
-    private static readonly SemaphoreSlim SaveLock = new(1, 1);
 
     private readonly FontIcon _icon = new() { FontSize = 16 };
 
@@ -57,22 +53,16 @@ public sealed partial class SoundToggleButton : Button
 
     private static async Task SaveAsync(bool enabled)
     {
-        await SaveLock.WaitAsync();
         try
         {
+            // 連打しても、進行スピードの切り替えと重なっても、保存が前後・上書きしないよう直列に更新する
             var repo = App.Services.GetRequiredService<SettingsRepository>();
-            var appearance = await repo.LoadAppearanceAsync();
-            appearance.SoundEnabled = enabled;
-            await repo.SaveAppearanceAsync(appearance);
+            await repo.UpdateAppearanceAsync(a => a.SoundEnabled = enabled);
         }
         catch (Exception ex)
         {
             // 保存に失敗しても音の切り替え自体は効いている。次回起動時は以前の設定に戻る
             App.WriteCrashLog("SoundToggleButton.Save", ex);
-        }
-        finally
-        {
-            SaveLock.Release();
         }
     }
 }

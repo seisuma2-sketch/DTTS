@@ -83,6 +83,16 @@ public sealed partial class GameTableViewModel : ViewModelBase
     [ObservableProperty]
     public partial bool IsElevenBack { get; set; }
 
+    /// <summary>
+    /// 11バックのバッジの文言。通常の11バック（場が流れるまで）と、強化11バック（次のJが出るまで続く）を
+    /// 見分けられるように出し分ける。
+    /// </summary>
+    [ObservableProperty]
+    public partial string ElevenBackBadgeText { get; set; } = NormalElevenBackLabel;
+
+    private const string NormalElevenBackLabel = "11バック";
+    private const string StrongElevenBackLabel = "強化11バック（永続）";
+
     [ObservableProperty]
     public partial string LockDescription { get; set; } = "";
 
@@ -127,7 +137,97 @@ public sealed partial class GameTableViewModel : ViewModelBase
     [ObservableProperty]
     public partial bool CanConfirmDecision { get; set; }
 
-    /// <summary>12ボンバーで宣言できる数字（3〜2）。</summary>
+    // ------------------------------------------------------------------
+    // 割り込みの確認（8切りへの4止め／ろくろ首・99車への砂嵐）
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// 手番外の割り込み（4止め・砂嵐）の確認を出しているか。画面は覆わず、手札の上の操作バーで
+    /// 「止める」か「見送る」かを選ぶ。止める札は自動で選択済みにする。
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsInterruptPromptOpen { get; set; }
+
+    [ObservableProperty]
+    public partial string InterruptTitle { get; set; } = "";
+
+    [ObservableProperty]
+    public partial string InterruptMessage { get; set; } = "";
+
+    /// <summary>「止める」ボタンの文言（例：「砂嵐で止める」）。</summary>
+    [ObservableProperty]
+    public partial string InterruptAcceptText { get; set; } = "止める";
+
+    // ------------------------------------------------------------------
+    // 進行スピード（NPCが考える時間）
+    // ------------------------------------------------------------------
+
+    /// <summary>現在の進行スピード。</summary>
+    [ObservableProperty]
+    public partial GameSpeed Speed { get; set; } = GameSpeed.Normal;
+
+    /// <summary>ヘッダーのボタンに出す進行スピードの名前。</summary>
+    public string SpeedLabel => NpcTimingOptions.SpeedName(Speed);
+
+    /// <summary>進行スピードのボタンの説明。</summary>
+    public string SpeedToolTip => $"進行スピード: {SpeedLabel}（クリックで切り替え：ゆっくり → 普通 → 速い → 超速）";
+
+    /// <summary>進行スピードを変えられるか（ゲストは変えられない。NPCはホスト側で動いている）。</summary>
+    public bool CanChangeSpeed => !IsGuest;
+
+    partial void OnSpeedChanged(GameSpeed value)
+    {
+        OnPropertyChanged(nameof(SpeedLabel));
+        OnPropertyChanged(nameof(SpeedToolTip));
+        ApplySpeed();
+    }
+
+    partial void OnIsGuestChanged(bool value) => OnPropertyChanged(nameof(CanChangeSpeed));
+
+    /// <summary>NPCの思考時間へ進行スピードを反映する（次の判断から効く）。</summary>
+    private void ApplySpeed()
+    {
+        var timing = NpcTimingOptions.ForSpeed(Speed);
+        if (_npcController is not null)
+        {
+            _npcController.Timing = timing;
+        }
+        if (_hostSession?.Npc is { } hostNpc)
+        {
+            hostNpc.Timing = timing;
+        }
+    }
+
+    /// <summary>進行スピードを次の段階へ切り替えて保存する（ゆっくり → 普通 → 速い → 超速 → ゆっくり）。</summary>
+    [RelayCommand]
+    private async Task CycleSpeedAsync()
+    {
+        if (!CanChangeSpeed) return;
+        var next = (GameSpeed)(((int)Speed + 1) % 4);
+        Speed = next;
+        NoticeMessage = $"進行スピード: {SpeedLabel}";
+        try
+        {
+            await _settingsRepo.UpdateAppearanceAsync(a => a.GameSpeed = next);
+        }
+        catch (Exception ex)
+        {
+            // 保存に失敗してもこの対戦中の切り替えは効いている
+            App.WriteCrashLog("GameTable.SaveSpeed", ex);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 演出の要求（表示側が Composition で描く）
+    // ------------------------------------------------------------------
+
+    /// <summary>12ボンバーで消えた数字を、画面中央に弱い順で1つずつ見せる演出の要求。</summary>
+    public event EventHandler<BomberVanishEventArgs>? BomberVanishTriggered;
+
+    /// <summary>あがりの演出（柔らかい光と順位リボン）の要求。</summary>
+    public event EventHandler<FinishCelebrationEventArgs>? FinishCelebrationTriggered;
+
+    /// <summary>12ボンバーで宣言できる数字（3〜2 とジョーカー）。</summary>
     public ObservableCollection<RankOptionViewModel> RankOptions { get; } = new();
 
     partial void OnIsDecisionDialogOpenChanged(bool value)
@@ -141,6 +241,14 @@ public sealed partial class GameTableViewModel : ViewModelBase
             IsModalDecisionOpen = false;
             CanConfirmDecision = false;
             SelectionCountText = "";
+        }
+    }
+
+    partial void OnIsRoundResultOpenChanged(bool value)
+    {
+        if (value)
+        {
+            IsInterruptPromptOpen = false;
         }
     }
 
@@ -197,6 +305,16 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
     public async Task InitializeAsync(NetworkGameParams? netParams = null)
     {
+        // 進行スピード（設定画面・前回の対戦で選んだもの）
+        try
+        {
+            Speed = (await _settingsRepo.LoadAppearanceAsync()).GameSpeed;
+        }
+        catch (Exception ex)
+        {
+            App.WriteCrashLog("GameTable.LoadSpeed", ex);
+        }
+
         if (netParams?.Client != null)
         {
             // ゲスト（クライアント）モード
@@ -230,6 +348,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
             _engineHandler = (sender, ev) => OnEngineEvent(ev);
             _engine.EventOccurred += _engineHandler;
+            ApplySpeed(); // 補充・引き継ぎのNPCにも進行スピードを反映する
             RoundInfoText = FormatRoundInfo(Math.Max(1, _engine.RoundNumber), _engine.Rules.Progress.RoundCount);
             ApplyFieldBadges(_engine.Field);
             UpdateAllPlayersInfo();
@@ -274,7 +393,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         // NPCコントローラー初期化（UIのワンショットタイマーを渡す）
         _npcScheduler = new DispatcherQueueNpcScheduler(_dispatcherQueue);
-        _npcController = new NpcController(_engine, _npcScheduler);
+        _npcController = new NpcController(_engine, _npcScheduler, NpcTimingOptions.ForSpeed(Speed));
 
         _npcController.Assign(1, _npcProfiles[1]);
         _npcController.Assign(2, _npcProfiles[2]);
@@ -303,6 +422,11 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         switch (ev)
         {
+            case RoundStartedEvent:
+                // 新しいラウンドは、革命・11バック・縛りが一切残っていない状態から始める
+                ResetRoundBadges();
+                break;
+
             case HandsDealtEvent:
                 ApplyFieldBadges(_engine.Field); // 新しいラウンドの場の状態に戻す
                 NoticeMessage = "";
@@ -311,6 +435,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 break;
 
             case DecisionRequestedEvent dr:
+                IsInterruptPromptOpen = false; // 前の割り込み確認は決着済み。自分宛ての割り込みなら下で開き直す
                 UpdateTurnState(dr.Decision.PlayerId);
                 HandleDecisionRequested(dr.Decision);
                 break;
@@ -337,7 +462,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 ApplyFieldBadges(ea.Field);
                 if (ea.Applied)
                 {
-                    TriggerCutInForEffect(ea.Effect.Type, ea.PlayerId);
+                    TriggerCutInForEffect(ea.Effect.Type, ea.PlayerId, ea.Field.IsElevenBack);
                     PlayEffectSound(ea.Effect.Type);
                 }
                 break;
@@ -357,15 +482,12 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 break;
 
             case CardsDiscardedEvent cd:
-                OnCardsDiscarded(cd.PlayerId, cd.Cards.Count, cd.Reason);
+                OnCardsDiscarded(cd.PlayerId, cd.Cards, cd.Cards.Count, cd.Reason);
                 UpdateAllPlayersInfo(); // 残り手札の枚数をすぐ反映する
                 break;
 
             case PlayerFinishedEvent pf:
-                var pos = _engine.GetPlayer(pf.PlayerId).FinishPosition;
-                GetPlayerVm(pf.PlayerId).FinishPlace = pos;
-                StatusMessage = $"{GetPlayerVm(pf.PlayerId).Name} が {pos}位 であがりました！";
-                PlayFinishSound(pf.PlayerId, pf.Kind);
+                OnPlayerFinished(pf.PlayerId, pf.Kind, pf.Place);
                 break;
 
             case RoundEndedEvent re:
@@ -404,24 +526,78 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private int? _bomberDeclarer;
     private List<Rank> _bomberRanks = new();
     private readonly Dictionary<int, int> _bomberDiscards = new();
+    private readonly Dictionary<Rank, int> _bomberRankCounts = new();
+
+    /// <summary>革命・11バック・縛りの表示を、ラウンド開始時の「何もない」状態へ戻す。</summary>
+    private void ResetRoundBadges()
+    {
+        IsRevolution = false;
+        IsElevenBack = false;
+        ElevenBackBadgeText = NormalElevenBackLabel;
+        LockDescription = "";
+        IsInterruptPromptOpen = false;
+    }
+
+    /// <summary>あがり・脱落の表示と演出。1人用・ホスト・ゲストで共通。</summary>
+    private void OnPlayerFinished(int playerId, FinishKind kind, int place)
+    {
+        var vm = GetPlayerVm(playerId);
+        if (place > 0)
+        {
+            vm.FinishPlace = place;
+        }
+        vm.IsTurn = false;
+        vm.IsThinking = false;
+        string name = vm.Name;
+        StatusMessage = kind switch
+        {
+            FinishKind.Foul => $"{name} は禁止あがりで反則負けになりました",
+            FinishKind.MiyakoOchi => $"{name} は都落ちしました",
+            FinishKind.LastRemaining => place > 0 ? $"{name} が {place}位 で確定しました" : $"{name} の順位が確定しました",
+            _ => place > 0 ? $"{name} が {place}位 であがりました！" : $"{name} があがりました！",
+        };
+        PlayFinishSound(playerId, kind);
+
+        // きれいなあがり方（通常のあがり）だけ、静かな光の演出で祝う
+        if (kind == FinishKind.Normal && place > 0)
+        {
+            FinishCelebrationTriggered?.Invoke(this, new FinishCelebrationEventArgs(
+                name, place, playerId == _myPlayerId, RankTitle(GameEngine.RankForPosition(place, 4))));
+        }
+    }
+
+    private static string RankTitle(PlayerRank rank) => rank switch
+    {
+        PlayerRank.Daifugo => "大富豪",
+        PlayerRank.Fugo => "富豪",
+        PlayerRank.Hinmin => "貧民",
+        PlayerRank.Daihinmin => "大貧民",
+        _ => "平民",
+    };
 
     private static string RankList(IEnumerable<Rank> ranks) => string.Join("・", ranks.Select(RankOptionViewModel.LabelOf));
 
     private void OnRanksDeclared(int playerId, IReadOnlyList<Rank> ranks)
     {
         _bomberDeclarer = playerId;
-        _bomberRanks = ranks.ToList();
+        // 画面に出す順番はいつも弱い順（3 … K・A・2・ジョーカー）
+        _bomberRanks = ranks.OrderBy(Card.GetBaseStrength).ToList();
         _bomberDiscards.Clear();
-        NoticeMessage = $"{GetPlayerVm(playerId).Name} が12ボンバーで【{RankList(ranks)}】を宣言しました";
+        _bomberRankCounts.Clear();
+        NoticeMessage = $"{GetPlayerVm(playerId).Name} が12ボンバーで【{RankList(_bomberRanks)}】を宣言しました";
     }
 
-    private void OnCardsDiscarded(int playerId, int count, CardDiscardReason? reason)
+    private void OnCardsDiscarded(int playerId, IReadOnlyList<Card>? cards, int count, CardDiscardReason? reason)
     {
         string name = GetPlayerVm(playerId).Name;
         switch (reason)
         {
             case CardDiscardReason.TwelveBomber:
                 _bomberDiscards[playerId] = (_bomberDiscards.TryGetValue(playerId, out int n) ? n : 0) + count;
+                foreach (var card in cards ?? Array.Empty<Card>())
+                {
+                    _bomberRankCounts[card.Rank] = (_bomberRankCounts.TryGetValue(card.Rank, out int k) ? k : 0) + 1;
+                }
                 break;
             case CardDiscardReason.TenDiscard:
                 NoticeMessage = $"{name} が10捨てで {count}枚 捨てました";
@@ -491,7 +667,10 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         bool isMyTurn = (activePlayerId == 0);
         CanPass = isMyTurn && (_engine.PendingDecision?.CanPass ?? !_engine.Field.IsEmpty);
-        StatusMessage = isMyTurn ? "あなたのターンです" : $"{GetPlayerVm(activePlayerId).Name} のターン...";
+        bool interrupt = _engine.PendingDecision is { } pd && pd.Kind.IsInterruptChance();
+        StatusMessage = isMyTurn
+            ? (interrupt ? "割り込みのチャンスです（止める / 見送る）" : "あなたのターンです")
+            : (interrupt ? $"{GetPlayerVm(activePlayerId).Name} が割り込むか考えています..." : $"{GetPlayerVm(activePlayerId).Name} のターン...");
     }
 
     private void UpdateAllPlayersInfo()
@@ -513,6 +692,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private void ApplyFieldBadges(FieldState field)
     {
         IsRevolution = field.IsRevolution;
+        ElevenBackBadgeText = field.IsElevenBackPersistent ? StrongElevenBackLabel : NormalElevenBackLabel;
         IsElevenBack = field.IsElevenBack;
         UpdateLockState(field.Lock);
     }
@@ -557,7 +737,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
         CanPlay = !IsCardSelectionMode
             && legalPlays.Any(lp => lp.Play != null && lp.Play.Cards.Count == selected.Count && lp.Play.Cards.All(selected.Contains));
 
-        bool isMyTurn = (_engine.CurrentPlayerId == 0);
+        // 自分が「出すかパスか」を決める番か（手番、または 4止め・砂嵐の割り込み）。出せないカードを暗く表示する
+        bool isMyTurn = _engine.PendingDecision is { } pending && pending.PlayerId == _myPlayerId && pending.Kind.IsPlayDecision();
         foreach (var cardVm in HumanHand)
         {
             cardVm.CanPlay = IsCardSelectionMode || !isMyTurn || legalPlays.Any(lp => lp.Play != null && lp.Play.Cards.Contains(cardVm.Card));
@@ -695,6 +876,11 @@ public sealed partial class GameTableViewModel : ViewModelBase
                     break;
                 case "RoundStarted":
                     NoticeMessage = "";
+                    ResetRoundBadges();
+                    for (int i = 0; i < 4; i++)
+                    {
+                        GetPlayerVm(i).FinishPlace = null;
+                    }
                     _audio.Play(SoundEffect.CardDeal);
                     break;
                 case "CardsPlayed":
@@ -709,7 +895,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                     // ゲストにもホストと同じカットインを出す（12ボンバーは誰が何枚捨てたかも表示）
                     if (notice.PlayerId is { } effectPlayer)
                     {
-                        TriggerCutInForEffect(effect, effectPlayer);
+                        TriggerCutInForEffect(effect, effectPlayer, null);
                     }
                     PlayEffectSound(effect);
                     break;
@@ -717,10 +903,10 @@ public sealed partial class GameTableViewModel : ViewModelBase
                     OnRanksDeclared(declarer, ranks);
                     break;
                 case "CardsDiscarded" when notice.PlayerId is { } discarder:
-                    OnCardsDiscarded(discarder, notice.Count, notice.DiscardReason);
+                    OnCardsDiscarded(discarder, notice.CardIds?.Select(Card.FromId).ToList(), notice.Count, notice.DiscardReason);
                     break;
                 case "PlayerFinished" when notice.PlayerId is { } pid && notice.FinishKind is { } kind:
-                    PlayFinishSound(pid, kind);
+                    OnPlayerFinished(pid, kind, notice.Count);
                     break;
             }
         });
@@ -839,6 +1025,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         // 状態バッジ
         IsRevolution = view.Field.IsRevolution;
+        ElevenBackBadgeText = view.Field.IsElevenBackPersistent ? StrongElevenBackLabel : NormalElevenBackLabel;
         IsElevenBack = view.Field.IsElevenBack;
         
         var lockList = new List<string>();
@@ -897,6 +1084,21 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         StatusMessage = isMyDecision ? "あなたのターンです" : "相手のターンです...";
 
+        // 割り込みの確認（4止め・砂嵐）。同じ確認を出している間は、選び直したカードを上書きしない
+        if (isMyDecision && view.Decision is { } interrupt && interrupt.Kind.IsInterruptChance())
+        {
+            if (!IsInterruptPromptOpen || _interruptPromptKind != interrupt.Kind)
+            {
+                OpenInterruptPrompt(interrupt.Kind, interrupt.Effect, interrupt.TargetPlayerId, legalSet.FirstOrDefault());
+                UpdateGuestCanPlay();
+            }
+            StatusMessage = "割り込みのチャンスです（止める / 見送る）";
+        }
+        else
+        {
+            IsInterruptPromptOpen = false;
+        }
+
         // 判断ダイアログ（革命選択・カード選択）。ホストの判断要求が自分宛てなら開き、解決されたら閉じる
         var dec = view.Decision;
         if (isMyDecision && dec is not null && dec.Kind is DecisionKind.RevolutionChoice or DecisionKind.SelectCards or DecisionKind.DeclareRanks)
@@ -938,6 +1140,15 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         switch (dec.Kind)
         {
+            case DecisionKind.FourStopChance:
+            case DecisionKind.SandstormStopChance:
+                // 1人用・ホスト：手札を最新にしてから、止められる札を選択済みにして確認を出す
+                UpdateHumanHandVisuals();
+                OpenInterruptPrompt(dec.Kind, dec.Effect, dec.TargetPlayerId,
+                    _engine?.GetLegalPlays(_myPlayerId).FirstOrDefault()?.Play?.Cards);
+                UpdateHumanHandVisuals();
+                break;
+
             case DecisionKind.RevolutionChoice:
                 DecisionTitle = "革命の選択";
                 DecisionMessage = "革命を起こしますか？";
@@ -982,12 +1193,15 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
             case DecisionKind.DeclareRanks:
                 DecisionTitle = "12ボンバー：数字の宣言";
+                string jokerNote = _rules.Joker.JokerCount > 0 ? "（JK でジョーカーも消せます）" : "";
                 DecisionMessage = dec.MinCount == dec.MaxCount
-                    ? $"全員の手札から捨てさせる数字を {dec.MaxCount} つ選んでください"
-                    : $"全員の手札から捨てさせる数字を {dec.MinCount}〜{dec.MaxCount} つ選んでください";
+                    ? $"全員の手札から捨てさせる数字を {dec.MaxCount} つ選んでください{jokerNote}"
+                    : $"全員の手札から捨てさせる数字を {dec.MinCount}〜{dec.MaxCount} つ選んでください{jokerNote}";
                 RankOptions.Clear();
                 foreach (var rank in RankOptionViewModel.DeclarationOrder)
                 {
+                    // ジョーカーを使わないルールでは JK ボタンを出さない
+                    if (rank == Rank.Joker && _rules.Joker.JokerCount <= 0) continue;
                     RankOptions.Add(new RankOptionViewModel(rank));
                 }
                 _rankCursor = 0;
@@ -999,6 +1213,41 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 UpdateRankCount();
                 break;
         }
+    }
+
+    // ------------------------------------------------------------------
+    // 割り込みの確認
+    // ------------------------------------------------------------------
+
+    private DecisionKind _interruptPromptKind;
+
+    /// <summary>
+    /// 割り込みの確認を開く。止められる札（<paramref name="stopCards"/>）を選択済みにするので、
+    /// そのまま「止める」（Enter）を押せば出せる。別の組み合わせにしたいときは手札で選び直せる。
+    /// </summary>
+    private void OpenInterruptPrompt(DecisionKind kind, SpecialEffectType? effect, int? flusherId, IReadOnlyList<Card>? stopCards)
+    {
+        string flusher = flusherId is { } id ? GetPlayerVm(id).Name : "相手";
+        if (kind == DecisionKind.SandstormStopChance)
+        {
+            string target = effect == SpecialEffectType.Ambulance ? "99車（救急車）" : "ろくろ首";
+            InterruptTitle = "割り込みチャンス：砂嵐";
+            InterruptMessage = $"{flusher} の{target}を、砂嵐で止められます。止めると場が流れて、あなたが親になります。";
+            InterruptAcceptText = "砂嵐で止める [Enter]";
+        }
+        else
+        {
+            InterruptTitle = "割り込みチャンス：4止め";
+            InterruptMessage = $"{flusher} の8切りを、4で止められます。止めると場は流れず、次の人へ続きます。";
+            InterruptAcceptText = "4で止める [Enter]";
+        }
+
+        foreach (var cardVm in HumanHand)
+        {
+            cardVm.IsSelected = stopCards is not null && stopCards.Contains(cardVm.Card);
+        }
+        _interruptPromptKind = kind;
+        IsInterruptPromptOpen = true;
     }
 
     // ------------------------------------------------------------------
@@ -1201,7 +1450,10 @@ public sealed partial class GameTableViewModel : ViewModelBase
         }
     }
 
-    private void TriggerCutInForEffect(SpecialEffectType effectType, int playerId)
+    /// <param name="effectType">発動した効果。</param>
+    /// <param name="playerId">発動させたプレイヤー。</param>
+    /// <param name="elevenBackOn">11バックの効果のとき、反転が掛かったか（true）解除されたか（false）。分からなければ null。</param>
+    private void TriggerCutInForEffect(SpecialEffectType effectType, int playerId, bool? elevenBackOn)
     {
         var playerName = GetPlayerVm(playerId).Name;
         switch (effectType)
@@ -1239,10 +1491,17 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
             case SpecialEffectType.ElevenBack:
             case SpecialEffectType.StrongElevenBack:
+                bool strong = effectType == SpecialEffectType.StrongElevenBack;
+                string backDetail = elevenBackOn switch
+                {
+                    false => $"{playerName} のJで反転が解除され、元の強弱に戻りました",
+                    _ when strong => $"{playerName} により強弱が反転（場が流れても、次のJが出るまで続きます）",
+                    _ => $"{playerName} により、場が流れるまで強弱が反転します",
+                };
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
-                    "11バック",
-                    "ELEVEN BACK",
-                    $"{playerName} により一時的に強弱が反転しました",
+                    elevenBackOn == false ? "11バック解除" : (strong ? "強化11バック" : "11バック"),
+                    strong ? "STRONG ELEVEN BACK" : "ELEVEN BACK",
+                    backDetail,
                     "#00E5FF",
                     IconGlyphs.RepeatAll));
                 break;
@@ -1296,12 +1555,24 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 string bomberSummary = BuildBomberSummary(playerId);
                 NoticeMessage = bomberSummary;
                 SweepTriggered?.Invoke(this, SweepKind.AuroraSweep);
-                CutInTriggered?.Invoke(this, new CutInEventArgs(
-                    "12ボンバー",
-                    "TWELVE BOMBER",
-                    bomberSummary,
-                    "#FF1493",
-                    IconGlyphs.Warning));
+                if (_bomberRanks.Count > 0)
+                {
+                    // 宣言された数字を、弱い順に1つずつ画面中央で消していく（文字だけのカットインの代わり）
+                    BomberVanishTriggered?.Invoke(this, new BomberVanishEventArgs(
+                        playerName,
+                        _bomberRanks.Select(r => new BomberVanishItem(
+                            r, RankOptionViewModel.LabelOf(r), _bomberRankCounts.TryGetValue(r, out int hit) ? hit : 0)).ToList()));
+                }
+                else
+                {
+                    // 宣言の通知を受け取れなかった場合（途中参加など）は従来のカットインで知らせる
+                    CutInTriggered?.Invoke(this, new CutInEventArgs(
+                        "12ボンバー",
+                        "TWELVE BOMBER",
+                        bomberSummary,
+                        "#FF1493",
+                        IconGlyphs.Warning));
+                }
                 break;
 
             case SpecialEffectType.SevenPass:
@@ -1444,6 +1715,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
     {
         _isShutDown = true;
         IsDecisionDialogOpen = false;
+        IsInterruptPromptOpen = false;
         CanPlay = false;
         CanPass = false;
 
