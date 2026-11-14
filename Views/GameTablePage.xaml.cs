@@ -414,10 +414,10 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
     // 手札の並べ方（重なり幅を表示幅と枚数に合わせて調整）とキーボードカーソル
     // ------------------------------------------------------------------
 
-    private const double HandCardWidth = 70;
+    private const double HandCardWidth = 84;
     private const double HandPaddingX = 20;
-    private const double HandMaxSpacing = -16; // 余裕があるときの重なり
-    private const double HandMinSpacing = -56; // 1枚あたり 14px 見える。これ以上重ねると左上の数字が読めなくなる（はみ出す分はスクロール）
+    private const double HandMaxSpacing = -20; // 余裕があるときの重なり（影の分も重ねる）
+    private const double HandMinSpacing = -62; // 1枚あたり約 22px 見える。左上の数字とスートが読める限界（はみ出す分はスクロール）
     private bool _keyboardCursorVisible;
 
     private void OnHandAreaSizeChanged(object sender, SizeChangedEventArgs e) => UpdateHandSpacing();
@@ -426,23 +426,81 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
     {
         UpdateHandSpacing();
         UpdateKeyboardCursor();
+        // 新しいカードの入れ物は描画後にできるので、その後でもう一度大きさをそろえる
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateHandSpacing);
     }
+
+    /// <summary>手札が収まらないときに縮小できる下限（元の 84×122 に対する倍率）。</summary>
+    private const double HandMinScale = 0.78;
+    private const double HandCardHeight = 122;
+    private double _handScale = 1.0;
 
     private void UpdateHandSpacing()
     {
         if (HumanHandItemsControl.ItemsPanelRoot is not StackPanel panel) return;
         int count = ViewModel.HumanHand.Count;
         double available = HandScrollViewer.ActualWidth - HandPaddingX * 2;
-        double spacing = HandMaxSpacing;
+
+        // まず重なりを深くして収め、それでも足りなければカード自体を縮小する（狭いウィンドウ・コンパクト表示）
+        double scale = 1.0;
         if (count > 1 && available > 0)
         {
-            double fit = (available - count * HandCardWidth) / (count - 1);
-            spacing = Math.Clamp(fit, HandMinSpacing, HandMaxSpacing);
+            // 幅 w・最大の重なり時の必要幅 = count*w + (count-1)*(minSpacing) = w*(count + (count-1)*minSpacing/cardWidth)
+            double ratio = count + (count - 1) * (HandMinSpacing / HandCardWidth);
+            double needed = HandCardWidth * ratio;
+            if (needed > available)
+            {
+                scale = Math.Clamp(available / needed, HandMinScale, 1.0);
+            }
+        }
+        ApplyHandCardScale(scale);
+
+        double width = HandCardWidth * scale;
+        double spacing = HandMaxSpacing * scale;
+        if (count > 1 && available > 0)
+        {
+            double fit = (available - count * width) / (count - 1);
+            spacing = Math.Clamp(fit, HandMinSpacing * scale, HandMaxSpacing * scale);
         }
         if (Math.Abs(panel.Spacing - spacing) > 0.5)
         {
             panel.Spacing = spacing;
         }
+    }
+
+    /// <summary>手札のカードの大きさをそろえて変える（数字・スートの比率はカード側の Viewbox が保つ）。</summary>
+    private void ApplyHandCardScale(double scale)
+    {
+        _handScale = scale;
+        double w = Math.Round(HandCardWidth * scale), h = Math.Round(HandCardHeight * scale);
+        for (int i = 0; i < ViewModel.HumanHand.Count; i++)
+        {
+            if (HumanHandItemsControl.ContainerFromIndex(i) is DependencyObject container
+                && FindChild<CardControl>(container) is { } card
+                && (Math.Abs(card.Width - w) > 0.5 || Math.Abs(card.Height - h) > 0.5))
+            {
+                card.Width = w;
+                card.Height = h;
+            }
+        }
+    }
+
+    private static T? FindChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        int n = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < n; i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T found)
+            {
+                return found;
+            }
+            if (FindChild<T>(child) is { } deeper)
+            {
+                return deeper;
+            }
+        }
+        return null;
     }
 
     private void UpdateKeyboardCursor()

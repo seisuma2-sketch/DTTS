@@ -82,6 +82,7 @@ public sealed partial class CardControl : UserControl
     {
         InitializeComponent();
         UpdateVisuals();
+        ApplyPlayableTone(CanPlay);
     }
 
     /// <summary>
@@ -134,14 +135,28 @@ public sealed partial class CardControl : UserControl
         }
     }
 
+    // カード表面の色（出せるとき：明るいアイボリー／出せないとき：少し落ち着いたグレー。どちらも数字は必ず読める）
+    private static readonly Windows.UI.Color FaceTop = ColorHelper.FromArgb(255, 0xFB, 0xFC, 0xFE);
+    private static readonly Windows.UI.Color FaceBottom = ColorHelper.FromArgb(255, 0xE8, 0xEC, 0xF2);
+    private static readonly Windows.UI.Color DimFaceTop = ColorHelper.FromArgb(255, 0xC8, 0xCF, 0xDA);
+    private static readonly Windows.UI.Color DimFaceBottom = ColorHelper.FromArgb(255, 0xB8, 0xC0, 0xCC);
+
     private static void OnCanPlayChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is CardControl control)
         {
-            bool can = (bool)e.NewValue;
-            control.DisabledOverlay.Visibility = can ? Visibility.Collapsed : Visibility.Visible;
-            CompositionAnimationHelper.AnimateOpacity(control, can ? 1.0f : 0.55f, 150);
+            control.ApplyPlayableTone((bool)e.NewValue);
         }
+    }
+
+    /// <summary>
+    /// 出せないカードは黒く潰さず、表面をわずかにグレー寄りにして不透明度 0.85 に留める（何を持っているかは常に読める）。
+    /// </summary>
+    private void ApplyPlayableTone(bool canPlay)
+    {
+        FaceStopTop.Color = canPlay ? FaceTop : DimFaceTop;
+        FaceStopBottom.Color = canPlay ? FaceBottom : DimFaceBottom;
+        CompositionAnimationHelper.AnimateOpacity(this, canPlay ? 1.0f : 0.85f, 150);
     }
 
     private static void OnIsFacedDownChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -249,11 +264,12 @@ public sealed partial class CardControl : UserControl
         };
     }
 
+    /// <summary>明るいカード表面に映える色：♠♣ は深いチャコール、♥♦ はクリムゾン、ジョーカーはパープル（星はゴールド）。</summary>
     private static Brush GetSuitBrush(Suit suit) => suit switch
     {
-        Suit.Heart or Suit.Diamond => new SolidColorBrush(ColorHelper.FromArgb(255, 245, 85, 95)),
-        Suit.Joker => new SolidColorBrush(ColorHelper.FromArgb(255, 255, 195, 60)),
-        _ => new SolidColorBrush(ColorHelper.FromArgb(255, 230, 235, 245))
+        Suit.Heart or Suit.Diamond => new SolidColorBrush(ColorHelper.FromArgb(255, 0xD9, 0x38, 0x48)),
+        Suit.Joker => new SolidColorBrush(ColorHelper.FromArgb(255, 0x6D, 0x3F, 0xC8)),
+        _ => new SolidColorBrush(ColorHelper.FromArgb(255, 0x1E, 0x22, 0x2B))
     };
 }
 

@@ -91,7 +91,15 @@ internal static class CardFaceRenderer
 
         if (card.IsJoker)
         {
-            AddOutlineIcon(canvas, StarData, suitBrush, 35, 51, 34);
+            // ゴールドの星を、パープルの線で縁取る
+            var gold = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(255, 0xE2, 0xA8, 0x1C));
+            var box = new Viewbox { Width = 38, Height = 38, Stretch = Stretch.Uniform };
+            var star = CreatePath(StarData, suitBrush, filled: false, strokeThickness: 5);
+            star.Fill = gold;
+            box.Child = star;
+            Canvas.SetLeft(box, 35 - 19);
+            Canvas.SetTop(box, 51 - 19);
+            canvas.Children.Add(box);
             return;
         }
 

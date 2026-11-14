@@ -5,115 +5,145 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
-    Width="70"
-    Height="102"
+    Width="84"
+    Height="122"
     PointerPressed="OnPointerPressed"
     PointerEntered="OnPointerEntered"
     PointerExited="OnPointerExited"
     DoubleTapped="OnDoubleTapped">
 
-    <Grid x:Name="RootGrid">
-        <!-- カードベース外枠＆背景 -->
-        <Border
-            x:Name="CardBorder"
-            CornerRadius="8"
-            BorderThickness="1.5"
-            BorderBrush="{StaticResource AppBorderSubtleBrush}"
-            Background="#242730">
+    <!--
+        カードの中身は 70×102 の座標で設計し、Viewbox でコントロールの大きさ（既定 84×122）に合わせて拡大縮小する。
+        Width / Height を変えるだけで、数字・スート・ピップの比率を保ったまま大きさを変えられる。
+    -->
+    <Viewbox Stretch="Uniform">
+        <Grid x:Name="RootGrid" Width="74" Height="106">
+            <!-- 影（柔らかく見えるよう、ずらした半透明の板を2枚重ねる） -->
+            <Border Margin="3,5,1,0" CornerRadius="8" Background="#38000000" />
+            <Border Margin="2,3,2,2" CornerRadius="8" Background="#30000000" />
 
-            <Grid>
-                <!-- 1. スキン画像表示レイヤー -->
-                <Image
-                    x:Name="SkinImage"
-                    Stretch="UniformToFill"
-                    ImageFailed="OnSkinImageFailed"
-                    Visibility="Collapsed" />
+            <!-- カード本体 -->
+            <Border
+                x:Name="CardBorder"
+                Width="70"
+                Height="102"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                CornerRadius="7"
+                BorderThickness="1"
+                BorderBrush="#C3CAD6">
+                <Border.Background>
+                    <!-- 高コントラストなアイボリーの微グラデーション -->
+                    <LinearGradientBrush x:Name="FaceBrush" StartPoint="0,0" EndPoint="0.6,1">
+                        <GradientStop x:Name="FaceStopTop" Color="#FFFBFCFE" Offset="0" />
+                        <GradientStop x:Name="FaceStopBottom" Color="#FFE8ECF2" Offset="1" />
+                    </LinearGradientBrush>
+                </Border.Background>
 
-                <!--
-                    2. ベクター描画表面レイヤー（スキン画像がない場合に表示）。
-                    スート・絵札・ジョーカーはすべて Path（線画）で描く。中身は CardFaceRenderer がカードごとに組み立てる。
-                    手札では左端しか見えないため、左上の数字とスート（インデックス）は重なっても読める位置に置く。
-                -->
-                <Grid x:Name="VectorSurface">
-                    <!-- 中央：ピップ（数字と同じ数のスート）・エース・絵札・ジョーカー -->
-                    <Canvas x:Name="FaceCanvas" Width="70" Height="102" HorizontalAlignment="Left" VerticalAlignment="Top" />
+                <Grid>
+                    <!-- 1. スキン画像表示レイヤー -->
+                    <Image
+                        x:Name="SkinImage"
+                        Stretch="UniformToFill"
+                        ImageFailed="OnSkinImageFailed"
+                        Visibility="Collapsed" />
 
-                    <!-- 左上：数字とスート -->
-                    <StackPanel Margin="4,3,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Spacing="1">
-                        <TextBlock
-                            x:Name="TopRankText"
-                            Width="14"
-                            FontSize="12"
-                            FontWeight="Bold"
-                            TextAlignment="Center"
-                            Text="A" />
-                        <Viewbox x:Name="TopSuitBox" Width="9" Height="9" HorizontalAlignment="Center" />
-                    </StackPanel>
+                    <!--
+                        2. ベクター描画表面レイヤー（スキン画像がない場合に表示）。
+                        スート・絵札・ジョーカーはすべて Path（線画）で描く。中身は CardFaceRenderer がカードごとに組み立てる。
+                        手札では左端しか見えないため、左上の数字とスート（インデックス）は重なっても読める位置に置く。
+                    -->
+                    <Grid x:Name="VectorSurface">
+                        <!-- 中央：ピップ（数字と同じ数のスート）・エース・絵札・ジョーカー -->
+                        <Canvas x:Name="FaceCanvas" Width="70" Height="102" Margin="-1" HorizontalAlignment="Left" VerticalAlignment="Top" />
 
-                    <!-- 右下：回転した数字とスート -->
-                    <StackPanel Margin="0,0,4,3" HorizontalAlignment="Right" VerticalAlignment="Bottom" Spacing="1" RenderTransformOrigin="0.5,0.5">
-                        <StackPanel.RenderTransform>
-                            <RotateTransform Angle="180" />
-                        </StackPanel.RenderTransform>
-                        <TextBlock
-                            x:Name="BottomRankText"
-                            Width="14"
-                            FontSize="12"
-                            FontWeight="Bold"
-                            TextAlignment="Center"
-                            Text="A" />
-                        <Viewbox x:Name="BottomSuitBox" Width="9" Height="9" HorizontalAlignment="Center" />
-                    </StackPanel>
-                </Grid>
-
-                <!-- 3. 裏面レイヤー（IsFacedDown=true時） -->
-                <Border
-                    x:Name="BackSurface"
-                    CornerRadius="8"
-                    Background="#1A1C23"
-                    BorderBrush="#3D4455"
-                    BorderThickness="1"
-                    Visibility="Collapsed">
-                    <Grid>
-                        <Image x:Name="BackSkinImage" Stretch="UniformToFill" Visibility="Collapsed" />
-                        <!-- ベクター幾何学模様の裏面 -->
-                        <Border Margin="4" CornerRadius="5" BorderBrush="#2F3545" BorderThickness="1" Background="#222530">
+                        <!-- 左上：数字とスート -->
+                        <StackPanel Margin="3,2,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Spacing="0">
                             <TextBlock
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                FontSize="18"
-                                FontWeight="Bold"
-                                Foreground="{StaticResource AppAccentBrush}"
-                                Text="DTTS" />
-                        </Border>
+                                x:Name="TopRankText"
+                                Width="15"
+                                FontSize="14"
+                                FontWeight="Black"
+                                TextAlignment="Center"
+                                Text="A" />
+                            <Viewbox x:Name="TopSuitBox" Width="10" Height="10" HorizontalAlignment="Center" />
+                        </StackPanel>
+
+                        <!-- 右下：回転した数字とスート -->
+                        <StackPanel Margin="0,0,3,2" HorizontalAlignment="Right" VerticalAlignment="Bottom" Spacing="0" RenderTransformOrigin="0.5,0.5">
+                            <StackPanel.RenderTransform>
+                                <RotateTransform Angle="180" />
+                            </StackPanel.RenderTransform>
+                            <TextBlock
+                                x:Name="BottomRankText"
+                                Width="15"
+                                FontSize="14"
+                                FontWeight="Black"
+                                TextAlignment="Center"
+                                Text="A" />
+                            <Viewbox x:Name="BottomSuitBox" Width="10" Height="10" HorizontalAlignment="Center" />
+                        </StackPanel>
                     </Grid>
-                </Border>
 
-                <!-- 4. 選択中ハイライトオーバーレイ -->
-                <Border
-                    x:Name="SelectionOverlay"
-                    CornerRadius="8"
-                    BorderThickness="2"
-                    BorderBrush="{StaticResource AppAccentBrush}"
-                    Background="{StaticResource AppAccentSubtleBrush}"
-                    Visibility="Collapsed" />
+                    <!-- 3. 裏面レイヤー（IsFacedDown=true時） -->
+                    <Border
+                        x:Name="BackSurface"
+                        CornerRadius="6"
+                        Visibility="Collapsed">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Color="#FF24324A" Offset="0" />
+                                <GradientStop Color="#FF151C2B" Offset="1" />
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <Grid>
+                            <Image x:Name="BackSkinImage" Stretch="UniformToFill" Visibility="Collapsed" />
+                            <!-- ベクターの裏面：二重の枠と、テーマカラーのひし形 -->
+                            <Border x:Name="BackPattern" Margin="4" CornerRadius="4" BorderBrush="#55FFFFFF" BorderThickness="0.8">
+                                <Grid>
+                                    <Border Margin="3" CornerRadius="3" BorderBrush="#33FFFFFF" BorderThickness="0.6" />
+                                    <Path
+                                        Data="M18,0 L36,26 L18,52 L0,26 Z"
+                                        Width="36"
+                                        Height="52"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Stroke="{StaticResource AppAccentBrush}"
+                                        StrokeThickness="1.4"
+                                        Fill="#22FFFFFF" />
+                                    <Path
+                                        Data="M9,0 L18,13 L9,26 L0,13 Z"
+                                        Width="18"
+                                        Height="26"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Fill="{StaticResource AppAccentBrush}"
+                                        Opacity="0.85" />
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </Border>
 
-                <!-- 5. プレイ不可時の半透明カバー -->
-                <Border
-                    x:Name="DisabledOverlay"
-                    CornerRadius="8"
-                    Background="#80000000"
-                    Visibility="Collapsed" />
+                    <!-- 4. 選択中ハイライト（テーマカラーの太枠と、ごく薄い色） -->
+                    <Border
+                        x:Name="SelectionOverlay"
+                        Margin="-1"
+                        CornerRadius="7"
+                        BorderThickness="2.5"
+                        BorderBrush="{StaticResource AppAccentBrush}"
+                        Background="{StaticResource AppAccentSubtleBrush}"
+                        Visibility="Collapsed" />
 
-                <!-- 6. キーボード操作中のカーソル枠（←/→ で移動、Space で選択） -->
-                <Border
-                    x:Name="KeyboardCursorOverlay"
-                    CornerRadius="8"
-                    BorderThickness="3"
-                    BorderBrush="#FFF2C94C"
-                    Visibility="Collapsed" />
-            </Grid>
-        </Border>
-    </Grid>
+                    <!-- 5. キーボード操作中のカーソル枠（←/→ で移動、Space で選択） -->
+                    <Border
+                        x:Name="KeyboardCursorOverlay"
+                        Margin="-1"
+                        CornerRadius="7"
+                        BorderThickness="3"
+                        BorderBrush="#FFF2C94C"
+                        Visibility="Collapsed" />
+                </Grid>
+            </Border>
+        </Grid>
+    </Viewbox>
 </UserControl>
-

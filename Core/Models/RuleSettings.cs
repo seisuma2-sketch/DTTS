@@ -629,6 +629,13 @@ public sealed class ProgressRules
     /// </summary>
     public bool PassLocksUntilFlush { get; set; } = false;
 
+    /// <summary>
+    /// あがった人のカードが残る：誰かがあがったとき、その人が出したカードを場に残し、
+    /// 次のプレイヤーはそれを上回るカードを出せる（全員パスなら、あがった人の次のプレイヤーが親）。
+    /// 無効（あがり流し）にすると、あがった瞬間に場が流れ、次のプレイヤーが親として出す。
+    /// </summary>
+    public bool KeepFieldOnPlayerFinish { get; set; } = true;
+
     /// <summary>2ラウンド目以降（延長戦を含む）の親の決め方。</summary>
     public RoundLeaderRule LaterRoundLeader { get; set; } = RoundLeaderRule.Daihinmin;
 

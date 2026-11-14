@@ -90,6 +90,42 @@ public sealed partial class GameTableViewModel : ViewModelBase
     [ObservableProperty]
     public partial string ElevenBackBadgeText { get; set; } = NormalElevenBackLabel;
 
+    /// <summary>強さが反転しているか（革命 XOR 11バック）。HUD の強弱方向に使う。</summary>
+    [ObservableProperty]
+    public partial bool IsStrengthReversed { get; set; }
+
+    /// <summary>手番が反時計回りか（リバース中）。</summary>
+    [ObservableProperty]
+    public partial bool IsCounterClockwise { get; set; }
+
+    /// <summary>HUD：強弱の向き（弱い → 強い）。</summary>
+    public string StrengthWeakText => IsStrengthReversed ? "2" : "3";
+
+    /// <summary>HUD：強弱の向きの強い側。</summary>
+    public string StrengthStrongText => IsStrengthReversed ? "3" : "2";
+
+    /// <summary>HUD：強弱の説明。</summary>
+    public string StrengthCaption => IsStrengthReversed ? "逆転中" : "通常";
+
+    /// <summary>HUD：手番の回り方向。</summary>
+    public string DirectionText => IsCounterClockwise ? "反時計回り" : "時計回り";
+
+    /// <summary>HUD：手番の回り方向のアイコン（Segoe Fluent Icons）。</summary>
+    public string DirectionGlyph => IsCounterClockwise ? "\uE7A7" : "\uE7A6";
+
+    partial void OnIsStrengthReversedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(StrengthWeakText));
+        OnPropertyChanged(nameof(StrengthStrongText));
+        OnPropertyChanged(nameof(StrengthCaption));
+    }
+
+    partial void OnIsCounterClockwiseChanged(bool value)
+    {
+        OnPropertyChanged(nameof(DirectionText));
+        OnPropertyChanged(nameof(DirectionGlyph));
+    }
+
     private const string NormalElevenBackLabel = "11バック";
     private const string StrongElevenBackLabel = "強化11バック（永続）";
 
@@ -533,6 +569,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
     {
         IsRevolution = false;
         IsElevenBack = false;
+        IsStrengthReversed = false;
+        IsCounterClockwise = false;
         ElevenBackBadgeText = NormalElevenBackLabel;
         LockDescription = "";
         IsInterruptPromptOpen = false;
@@ -694,6 +732,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
         IsRevolution = field.IsRevolution;
         ElevenBackBadgeText = field.IsElevenBackPersistent ? StrongElevenBackLabel : NormalElevenBackLabel;
         IsElevenBack = field.IsElevenBack;
+        IsStrengthReversed = field.IsStrengthReversed;
+        IsCounterClockwise = field.Direction == PlayDirection.CounterClockwise;
         UpdateLockState(field.Lock);
     }
 
@@ -1027,6 +1067,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
         IsRevolution = view.Field.IsRevolution;
         ElevenBackBadgeText = view.Field.IsElevenBackPersistent ? StrongElevenBackLabel : NormalElevenBackLabel;
         IsElevenBack = view.Field.IsElevenBack;
+        IsStrengthReversed = view.Field.IsStrengthReversed;
+        IsCounterClockwise = view.Field.Direction == PlayDirection.CounterClockwise;
         
         var lockList = new List<string>();
         if (view.Field.LockedSuits != null && view.Field.LockedSuits.Length > 0) lockList.Add("スート縛り");

@@ -631,6 +631,64 @@ internal static class EngineTests
             Check(round.Sequence.MinLength == 2 && round.Lock.TriggerCount == 2, "seq2 / lock3 survive a JSON round-trip");
         }
 
+        // ---- あがった人のカードが残る（ON）／あがり流し（OFF） ----
+        foreach (bool keep in new[] { true, false })
+        {
+            var r = RuleSettings.CreateDefault();
+            r.Lock.SuitLockEnabled = false;
+            r.Progress.KeepFieldOnPlayerFinish = keep;
+            var (e, l, a, b, c) = Start(r);
+            var flushes = new List<FieldFlushedEvent>();
+            e.EventOccurred += (_, ev) => { if (ev is FieldFlushedEvent ff) flushes.Add(ff); };
+            string label = keep ? "keep-field" : "flush-on-finish";
+            e.GetPlayer(l).SetHand(C("D3 S5"));
+            e.GetPlayer(a).SetHand(C("H9"));          // 9 を出してあがる
+            e.GetPlayer(b).SetHand(C("SK S4"));
+            e.GetPlayer(c).SetHand(C("DQ C4"));
+            Play(e, l, "D3", label);
+            Play(e, a, "H9", label);
+            Check(e.GetPlayer(a).IsFinished, label + ": a finished");
+            if (keep)
+            {
+                Check(!e.Field.IsEmpty && e.Field.CurrentPlay!.Cards[0] == Card.Parse("H9") && flushes.Count == 0, "keep: finished player's card stays on the field");
+                Check(e.PendingDecision!.PlayerId == b && e.PendingDecision.Kind == DecisionKind.PlayOrPass && e.PendingDecision.CanPass, "keep: next player must beat the card");
+                Check(e.SubmitPlay(b, C("S4")).Error == CommandError.IllegalPlay, "keep: weaker card rejected");
+                Pass(e, b, label); Pass(e, c, label); Pass(e, l, label);
+                Check(e.Field.IsEmpty && flushes.Count == 1 && flushes[0].NextLeaderId == b && e.PendingDecision!.PlayerId == b,
+                    "keep: all pass -> the player after the finished one leads");
+            }
+            else
+            {
+                Check(e.Field.IsEmpty && flushes.Count == 1 && flushes[0].Cause is null && flushes[0].NextLeaderId == b,
+                    "flush: field is flushed the moment a player finishes");
+                Check(e.PendingDecision!.PlayerId == b && !e.PendingDecision.CanPass, "flush: the next player leads (cannot pass)");
+                Play(e, b, "S4", label); // 9 より弱いカードでも親として出せる
+            }
+        }
+        {
+            // あがり流し：8切り・7渡し・10捨てであがっても、次の生存プレイヤーが親
+            var r = RuleSettings.CreateDefault();
+            r.Progress.KeepFieldOnPlayerFinish = false;
+            r.ForbiddenFinish.Enabled = false;
+            r.Special.TenDiscardEnabled = true;
+            var (e, l, a, b, c) = Start(r);
+            e.GetPlayer(l).SetHand(C("D3 S5"));
+            e.GetPlayer(a).SetHand(C("H10 C6"));
+            e.GetPlayer(b).SetHand(C("SK S4"));
+            e.GetPlayer(c).SetHand(C("DQ C4"));
+            Play(e, l, "D3", "flush-tendiscard");
+            Play(e, a, "H10", "flush-tendiscard");
+            Check(e.SubmitCardSelection(a, C("C6")).IsAccepted && e.GetPlayer(a).IsFinished, "flush: finished by 10-discard");
+            Check(e.Field.IsEmpty && e.PendingDecision!.PlayerId == b, "flush: next player leads after a 10-discard finish");
+        }
+        {
+            // 既定は「残る」（従来どおり）。JSON に項目がない古い設定も「残る」になる
+            Check(RuleSettings.CreateDefault().Progress.KeepFieldOnPlayerFinish, "keep-field is the default");
+            Check(RuleSettings.FromJson("{\"progress\":{\"roundCount\":3}}").Progress.KeepFieldOnPlayerFinish, "older settings keep the field");
+            var off = new RuleSettings { Progress = { KeepFieldOnPlayerFinish = false } };
+            Check(!RuleSettings.FromJson(off.ToJson()).Progress.KeepFieldOnPlayerFinish, "flush-on-finish survives a JSON round-trip");
+        }
+
         // ---- あがりの順位がイベントに載る ----
         {
             var r = RuleSettings.CreateDefault();
@@ -694,6 +752,10 @@ internal static class EngineTests
             ("seq2-lock3-specials", r => { AllSpecials(r); r.Sequence.MinLength = 2; r.Lock.TriggerCount = 2; }, 4),
             // 通常の11バックのみ（強化なし）で全部盛り：場が流れたら必ず解除されること
             ("specials-normal-11back", r => { AllSpecials(r); r.ElevenBack.StrongElevenBackEnabled = false; }, 4),
+            // あがり流し（あがった瞬間に場が流れる）
+            ("flush-on-finish", r => r.Progress.KeepFieldOnPlayerFinish = false, 4),
+            ("flush-on-finish-specials", r => { AllSpecials(r); r.Progress.KeepFieldOnPlayerFinish = false; }, 4),
+            ("flush-on-finish-3p", r => { AllSpecials(r); r.Progress.KeepFieldOnPlayerFinish = false; r.Progress.PassLocksUntilFlush = true; }, 3),
             // 砂嵐の割り込みが起きやすい構成（ろくろ首・99車・砂嵐を2枚で成立させる）
             ("sandstorm-stop", r =>
             {
@@ -741,7 +803,7 @@ internal static class EngineTests
         foreach (var must in new[] { "Revolution", "EightCut", "FourStop", "SevenPass", "TenDiscard", "TwelveBomber", "ranks-declared",
                      "FiveSkip", "NineReverse", "SpadeThreeReturn", "SuitLock", "finish:Foul", "finish:MiyakoOchi",
                      "finish:Gekokujo", "transfer:TenpenChii", "transfer:Exchange", "skipped", "extra-round", "deferred",
-                     "bomber-joker", "sandstorm-chance", "sandstorm-stop", "eleven-back", "eleven-back-persistent" })
+                     "bomber-joker", "sandstorm-chance", "flush-on-finish", "sandstorm-stop", "eleven-back", "eleven-back-persistent" })
         {
             Check(Coverage.ContainsKey(must), "coverage " + must);
         }
@@ -803,6 +865,7 @@ internal static class EngineTests
         // 不変条件：パスした人には、場が流れるかカードが出されるまで手番が回ってこない
         // （「パスしたのに自分の手番のまま」にならないこと）
         int? lastPasser = null;
+        int? finishedAwaitingFlush = null;
         HashSet<Rank>? declaredRanks = null;
 
         engine.EventOccurred += (_, e) =>
@@ -897,12 +960,23 @@ internal static class EngineTests
                     break;
                 case PlayerFinishedEvent pf:
                     Cover("finish:" + pf.Kind);
+                    if (pf.Kind == FinishKind.Normal && !engine.Rules.Progress.KeepFieldOnPlayerFinish) finishedAwaitingFlush = pf.PlayerId;
                     if (pf.Place < 1 || pf.Place > engine.Players.Count) Fail("finish place out of range " + pf.Place);
                     break;
                 case CommandRejectedEvent cr:
                     Fail("rejected " + cr.Result);
                     break;
                 case DecisionRequestedEvent dr:
+                    // あがり流し：あがった人のカードの上に、次の人が「出すかパス」を求められてはいけない
+                    if (finishedAwaitingFlush is { } fin && dr.Decision.Kind == DecisionKind.PlayOrPass)
+                    {
+                        if (engine.Field.LastPlayerId == fin && !engine.Field.IsEmpty)
+                        {
+                            Fail("flush-on-finish: the finished player's cards are still on the field");
+                        }
+                        Cover("flush-on-finish");
+                        finishedAwaitingFlush = null;
+                    }
                     if (dr.Decision.Kind == DecisionKind.SandstormStopChance) Cover("sandstorm-chance");
                     if (dr.Decision.Kind == DecisionKind.PlayOrPass && dr.Decision.PlayerId == lastPasser)
                     {

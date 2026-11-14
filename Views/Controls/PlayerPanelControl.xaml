@@ -5,81 +5,122 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
-    MinWidth="160"
-    MaxHeight="120">
+    MinWidth="176">
 
-    <Border
-        x:Name="RootBorder"
-        CornerRadius="{StaticResource PanelCornerRadius}"
-        Background="{StaticResource AppBackgroundElevatedBrush}"
-        BorderBrush="{StaticResource AppBorderSubtleBrush}"
-        BorderThickness="1.5"
-        Padding="12,8">
+    <Grid>
+        <!-- 手番の発光（テーマカラーの柔らかい光の輪）。手番のときだけ表示する -->
+        <Border
+            x:Name="TurnGlowOuter"
+            Margin="-7"
+            CornerRadius="19"
+            BorderThickness="7"
+            Opacity="0"
+            IsHitTestVisible="False" />
+        <Border
+            x:Name="TurnGlowInner"
+            Margin="-3"
+            CornerRadius="15"
+            BorderThickness="3"
+            Opacity="0"
+            IsHitTestVisible="False" />
 
-        <Grid RowSpacing="4">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
+        <Border
+            x:Name="RootBorder"
+            CornerRadius="12"
+            BorderBrush="#2E3646"
+            BorderThickness="1.5"
+            Padding="12,9,12,10">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                    <GradientStop Color="#F2262E3D" Offset="0" />
+                    <GradientStop Color="#F21A202C" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
 
-            <!-- 1行目: 階級バッジ & プレイヤー名 -->
-            <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                <Border
-                    x:Name="RankBadge"
-                    CornerRadius="4"
-                    Padding="6,2"
-                    Background="{StaticResource AppAccentBrush}">
+            <Grid RowSpacing="6">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- 1行目: 階級バッジ & プレイヤー名 & 手番バッジ -->
+                <Grid Grid.Row="0" ColumnSpacing="7">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border
+                        x:Name="RankBadge"
+                        CornerRadius="10"
+                        Padding="8,2"
+                        VerticalAlignment="Center"
+                        BorderThickness="1">
+                        <TextBlock
+                            x:Name="RankText"
+                            FontSize="11"
+                            FontWeight="Bold"
+                            Text="平民" />
+                    </Border>
                     <TextBlock
-                        x:Name="RankText"
-                        FontSize="11"
-                        FontWeight="Bold"
-                        Foreground="{StaticResource AppOnAccentBrush}"
-                        Text="平民" />
-                </Border>
-                <TextBlock
-                    x:Name="PlayerNameText"
-                    FontSize="14"
-                    FontWeight="SemiBold"
-                    Foreground="{StaticResource AppTextPrimaryBrush}"
-                    Text="Player 1"
-                    TextTrimming="CharacterEllipsis" />
-            </StackPanel>
+                        x:Name="PlayerNameText"
+                        Grid.Column="1"
+                        FontSize="15"
+                        FontWeight="SemiBold"
+                        VerticalAlignment="Center"
+                        Foreground="{StaticResource AppTextPrimaryBrush}"
+                        Text="Player 1"
+                        TextTrimming="CharacterEllipsis" />
+                    <Border
+                        x:Name="TurnBadge"
+                        Grid.Column="2"
+                        CornerRadius="10"
+                        Padding="8,2"
+                        VerticalAlignment="Center"
+                        Visibility="Collapsed">
+                        <TextBlock x:Name="TurnBadgeText" FontSize="11" FontWeight="Bold" Text="手番" />
+                    </Border>
+                </Grid>
 
-            <!-- 2行目: 手札枚数 & スコア -->
-            <Grid Grid.Row="1">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
+                <!-- 2行目: 手札（裏向きミニカード束と枚数） & スコア -->
+                <Grid Grid.Row="1" ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
 
-                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                    <TextBlock FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" Text="手札:" />
-                    <TextBlock x:Name="HandCountText" FontSize="14" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" Text="13枚" />
-                </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <!-- 残り枚数に応じた裏向きカードの束（相手が出すと減っていく） -->
+                        <StackPanel x:Name="MiniBackStack" Orientation="Horizontal" Spacing="-10" VerticalAlignment="Center" Height="24" />
+                        <TextBlock x:Name="HandCountText" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" Foreground="{StaticResource AppTextPrimaryBrush}" Text="13枚" />
+                    </StackPanel>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                    <TextBlock FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" Text="得点:" />
-                    <TextBlock x:Name="ScoreText" FontSize="14" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" Text="+0pt" />
-                </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <TextBlock FontSize="11" VerticalAlignment="Center" Foreground="{StaticResource AppTextSecondaryBrush}" Text="得点" />
+                        <TextBlock x:Name="ScoreText" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" Foreground="{StaticResource AppAccentBrush}" Text="+0pt" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- 3行目: 状態ステータス (ターン中 / 考え中 / パス / あがり) -->
+                <Grid Grid.Row="2" MinHeight="22">
+                    <Border
+                        x:Name="StatusBadge"
+                        CornerRadius="10"
+                        Padding="8,2"
+                        HorizontalAlignment="Left"
+                        Background="#2A3040">
+                        <StackPanel Orientation="Horizontal" Spacing="5">
+                            <Ellipse x:Name="StatusDot" Width="6" Height="6" VerticalAlignment="Center" Fill="#7A8293" />
+                            <TextBlock
+                                x:Name="StatusText"
+                                FontSize="11"
+                                Foreground="{StaticResource AppTextSecondaryBrush}"
+                                Text="待機中" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
             </Grid>
-
-            <!-- 3行目: 状態ステータス (ターン中 / 考え中 / パス / あがり) -->
-            <Grid Grid.Row="2" MinHeight="22">
-                <Border
-                    x:Name="StatusBadge"
-                    CornerRadius="4"
-                    Padding="6,2"
-                    HorizontalAlignment="Left"
-                    Background="#2A3040">
-                    <TextBlock
-                        x:Name="StatusText"
-                        FontSize="11"
-                        Foreground="{StaticResource AppTextSecondaryBrush}"
-                        Text="待機中" />
-                </Border>
-            </Grid>
-        </Grid>
-    </Border>
+        </Border>
+    </Grid>
 </UserControl>
-

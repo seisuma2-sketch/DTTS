@@ -1089,6 +1089,14 @@ public sealed class GameEngine
             return;
         }
 
+        // あがり流し：あがった人のカードは残さず、次のプレイヤーが親になる
+        // （出した札・7渡し・10捨てであがった場合。8切り等の流し役は上で処理済み）
+        if (GetPlayer(playerId).IsFinished && !_rules.Progress.KeepFieldOnPlayerFinish)
+        {
+            FlushAndLead(null);
+            return;
+        }
+
         if (skipCount > 0)
         {
             var skipped = ActivePlayersAfter(playerId)
