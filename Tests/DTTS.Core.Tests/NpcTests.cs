@@ -391,6 +391,11 @@ internal static class NpcTests
             ("all-specials+2jk+poorChoose", r => { EngineTests.AllSpecials(r); r.Joker.JokerCount = 2; r.Exchange.PoorCanChooseCards = true; }),
             ("all-specials+passlock+limit", r => { EngineTests.AllSpecials(r); r.Progress.PassLocksUntilFlush = true; r.Progress.PassLimitPerRound = 3; }),
             ("all-specials+reject-forbidden", r => { EngineTests.AllSpecials(r); r.ForbiddenFinish.Penalty = ForbiddenFinishPenalty.RejectPlay; r.Joker.JokerCount = 2; }),
+            ("all-specials+one-turn-11back+limit", r =>
+            {
+                EngineTests.AllSpecials(r); r.ElevenBack.Duration = ElevenBackDuration.NextTurnOnly;
+                r.Progress.PassLimitPerRound = 3; r.Progress.LaterRoundLeader = RoundLeaderRule.Random;
+            }),
         };
         foreach (var (name, apply) in sweeps)
         {
