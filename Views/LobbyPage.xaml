@@ -6,187 +6,387 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:net="using:DTTS.Services.Network"
     xmlns:vm="using:DTTS.ViewModels"
+    xmlns:views="using:DTTS.Views"
     mc:Ignorable="d"
     Background="{StaticResource AppBackgroundDeepBrush}"
     Loaded="OnPageLoaded">
 
-    <Grid Padding="24">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+    <Page.Resources>
+        <!-- パネル見出しの丸いアイコン -->
+        <Style x:Key="LobbyIconBadgeStyle" TargetType="Border">
+            <Setter Property="Width" Value="40" />
+            <Setter Property="Height" Value="40" />
+            <Setter Property="CornerRadius" Value="20" />
+            <Setter Property="Background" Value="{StaticResource AppAccentSubtleBrush}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+    </Page.Resources>
 
-        <!-- ヘッダー -->
-        <Grid Grid.Row="0" Margin="0,0,0,16">
-            <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
-                <Button Command="{x:Bind ViewModel.GoBackCommand}" Background="Transparent" BorderThickness="0" Padding="8,4">
-                    <TextBlock Text="← タイトルへ戻る" Foreground="{StaticResource AppTextSecondaryBrush}" FontSize="14" />
-                </Button>
-                <TextBlock Text="通信対戦ロビー（ローカル LAN 対戦）" FontSize="22" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
-            </StackPanel>
+    <Grid>
+        <!-- 広い画面：「部屋を作る」と「部屋を探す」を左右に。狭い画面：上下に並べる -->
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup>
+                <VisualState x:Name="WideLobby">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="900" />
+                    </VisualState.StateTriggers>
+                </VisualState>
+                <VisualState x:Name="NarrowLobby">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="0" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="JoinColumnDef.Width" Value="0" />
+                        <Setter Target="EntryGrid.ColumnSpacing" Value="0" />
+                        <Setter Target="JoinPanel.(Grid.Column)" Value="0" />
+                        <Setter Target="JoinPanel.(Grid.Row)" Value="1" />
+                        <Setter Target="JoinPanel.Margin" Value="0,20,0,0" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+
+        <Grid Background="{StaticResource AppPageBackgroundBrush}" IsHitTestVisible="False">
+            <Ellipse Width="460" Height="460" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-120,-140,0,0" Fill="{StaticResource AppAccentBrush}" Opacity="0.06" />
         </Grid>
 
-        <!-- メイン領域 -->
-        <Grid Grid.Row="1">
-            <StackPanel Spacing="16" MaxWidth="800" HorizontalAlignment="Left">
+        <Grid Padding="32,24,32,20">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
 
-                <!-- 案内ステータスメッセージ -->
-                <TextBlock
-                    Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
-                    Foreground="{StaticResource AppAccentBrush}"
-                    FontSize="14"
-                    FontWeight="Medium"
-                    Visibility="{x:Bind ViewModel.StatusMessage, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}" />
+            <!-- ヘッダー：戻る / 見出し -->
+            <Grid Grid.Row="0" Margin="0,0,0,18" ColumnSpacing="18">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
 
-                <!-- 状態1: 部屋未入室時（部屋作成 ＆ 部屋検索） -->
-                <Grid ColumnSpacing="20" Visibility="{x:Bind ViewModel.IsInRoom, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
+                <Button Style="{StaticResource AppBackButtonStyle}" Command="{x:Bind ViewModel.GoBackCommand}" VerticalAlignment="Center" ToolTipService.ToolTip="タイトルへ戻る（Esc）">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE72B;" FontSize="12" />
+                        <TextBlock Text="タイトル" FontSize="13" />
+                    </StackPanel>
+                </Button>
 
-                    <!-- 左側: 部屋を作る (ホスト) -->
-                    <Border Grid.Column="0" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
-                        <StackPanel Spacing="16">
-                            <TextBlock Text="部屋を作ってホストする" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
-                            <TextBlock Text="部屋を立ち上げて同一ネットワーク内の他のプレイヤーやNPCと対戦します。" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" TextWrapping="Wrap" />
-
-                            <TextBox Header="部屋の名前" Text="{x:Bind ViewModel.HostRoomName, Mode=TwoWay}" />
-
-                            <Button
-                                Command="{x:Bind ViewModel.HostRoomCommand}"
-                                HorizontalAlignment="Stretch"
-                                Height="44"
-                                Background="{StaticResource AppAccentBrush}"
-                                Foreground="{StaticResource AppOnAccentBrush}"
-                                CornerRadius="{StaticResource ButtonCornerRadius}">
-                                <TextBlock Text="部屋を作成する" FontWeight="Bold" FontSize="14" />
-                            </Button>
-                        </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <Border Style="{StaticResource LobbyIconBadgeStyle}">
+                        <FontIcon Glyph="&#xE968;" FontSize="18" Foreground="{StaticResource AppAccentBrush}" />
                     </Border>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="通信対戦ロビー" FontSize="22" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                        <TextBlock Text="同じネットワーク（LAN）にいる人と、4人までで対戦できます。足りない席は NPC が入ります" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
 
-                    <!-- 右側: 部屋を探す / 直接参加 (クライアント) -->
-                    <Border Grid.Column="1" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
-                        <StackPanel Spacing="16">
-                            <Grid>
-                                <TextBlock Text="部屋を探す" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" VerticalAlignment="Center" />
-                                <Button Command="{x:Bind ViewModel.SearchRoomsCommand}" HorizontalAlignment="Right" Padding="8,4" Background="Transparent" BorderThickness="0">
-                                    <TextBlock Text="再検索" FontSize="12" Foreground="{StaticResource AppAccentBrush}" />
+            <!-- 案内メッセージ（検索中・接続中・エラーなど） -->
+            <Border
+                Grid.Row="1"
+                Margin="0,0,12,16"
+                MaxWidth="1100"
+                HorizontalAlignment="Stretch"
+                CornerRadius="12"
+                Padding="14,10"
+                Background="{StaticResource AppAccentSubtleBrush}"
+                BorderBrush="{StaticResource AppAccentBrush}"
+                BorderThickness="1"
+                Visibility="{x:Bind ViewModel.StatusMessage, Mode=OneWay, Converter={StaticResource StringToVisibilityConverter}}">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <ProgressRing Width="16" Height="16" IsActive="{x:Bind ViewModel.IsSearching, Mode=OneWay}" Visibility="{x:Bind ViewModel.IsSearching, Mode=OneWay}" Foreground="{StaticResource AppAccentBrush}" />
+                    <FontIcon Glyph="&#xE946;" FontSize="14" Foreground="{StaticResource AppAccentBrush}" Visibility="{x:Bind ViewModel.IsSearching, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}" />
+                    <TextBlock Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                </StackPanel>
+            </Border>
+
+            <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="0,0,12,0">
+                <Grid MaxWidth="1100" HorizontalAlignment="Stretch">
+
+                    <!-- ===================== 状態1：部屋に入る前（作る／探す） ===================== -->
+                    <Grid
+                        x:Name="EntryGrid"
+                        ColumnSpacing="20"
+                        Visibility="{x:Bind ViewModel.IsInRoom, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition x:Name="JoinColumnDef" Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <!-- 左：部屋を作る（ホスト） -->
+                        <Border Style="{StaticResource AppPanelStyle}" Padding="22,20" VerticalAlignment="Top">
+                            <StackPanel Spacing="16">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <Border Style="{StaticResource LobbyIconBadgeStyle}">
+                                        <FontIcon Glyph="&#xE80F;" FontSize="17" Foreground="{StaticResource AppAccentBrush}" />
+                                    </Border>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="部屋を作る" FontSize="17" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                        <TextBlock Text="あなたがホストになって、参加者を待ちます" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <TextBox Header="部屋の名前" Text="{x:Bind ViewModel.HostRoomName, Mode=TwoWay}" CornerRadius="10" />
+
+                                <!-- ホストの流れ（3ステップ） -->
+                                <Border CornerRadius="12" Padding="14,12" Background="{StaticResource AppInsetBrush}">
+                                    <StackPanel Spacing="8">
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <Border Width="20" Height="20" CornerRadius="10" Background="{StaticResource AppAccentSubtleBrush}">
+                                                <TextBlock Text="1" FontSize="11" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <TextBlock Text="部屋を作ると、同じ LAN の人の一覧に表示されます" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <Border Width="20" Height="20" CornerRadius="10" Background="{StaticResource AppAccentSubtleBrush}">
+                                                <TextBlock Text="2" FontSize="11" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <TextBlock Text="参加者がそろったら「対戦を開始」" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <Border Width="20" Height="20" CornerRadius="10" Background="{StaticResource AppAccentSubtleBrush}">
+                                                <TextBlock Text="3" FontSize="11" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <TextBlock Text="ルールはホストの設定で遊びます" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <Button
+                                    Command="{x:Bind ViewModel.HostRoomCommand}"
+                                    HorizontalAlignment="Stretch"
+                                    Height="50"
+                                    CornerRadius="25"
+                                    Background="{StaticResource AppAccentBrush}"
+                                    Foreground="{StaticResource AppOnAccentBrush}"
+                                    BorderBrush="#66FFFFFF"
+                                    BorderThickness="1">
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <FontIcon Glyph="&#xE710;" FontSize="15" />
+                                        <TextBlock Text="部屋を作成する" FontWeight="Bold" FontSize="15" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 右：部屋を探す／IP で参加（クライアント） -->
+                        <Border x:Name="JoinPanel" Grid.Column="1" Style="{StaticResource AppPanelStyle}" Padding="22,20" VerticalAlignment="Top">
+                            <StackPanel Spacing="16">
+                                <Grid>
+                                    <StackPanel Orientation="Horizontal" Spacing="12">
+                                        <Border Style="{StaticResource LobbyIconBadgeStyle}">
+                                            <FontIcon Glyph="&#xE721;" FontSize="17" Foreground="{StaticResource AppAccentBrush}" />
+                                        </Border>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="部屋を探して参加" FontSize="17" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                            <TextBlock Text="見つかった部屋をクリックすると参加します" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <Button
+                                        Command="{x:Bind ViewModel.SearchRoomsCommand}"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"
+                                        CornerRadius="16"
+                                        Padding="12,6"
+                                        Background="#1FFFFFFF"
+                                        BorderBrush="#26FFFFFF"
+                                        BorderThickness="1"
+                                        ToolTipService.ToolTip="もう一度 LAN 内を探します">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon Glyph="&#xE72C;" FontSize="12" Foreground="{StaticResource AppAccentBrush}" />
+                                            <TextBlock Text="再検索" FontSize="12" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+
+                                <!-- 見つかった部屋の一覧 -->
+                                <Border MinHeight="120" MaxHeight="220" CornerRadius="12" Background="{StaticResource AppInsetBrush}" BorderBrush="#1AFFFFFF" BorderThickness="1" Padding="8">
+                                    <Grid>
+                                        <StackPanel
+                                            Spacing="6"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Visibility="{x:Bind ViewModel.DiscoveredRooms.Count, Mode=OneWay, Converter={StaticResource ZeroToVisibleConverter}}">
+                                            <FontIcon Glyph="&#xE701;" FontSize="22" Foreground="{StaticResource AppTextMutedBrush}" />
+                                            <TextBlock Text="まだ部屋が見つかっていません" FontSize="13" Foreground="{StaticResource AppTextSecondaryBrush}" HorizontalAlignment="Center" />
+                                            <TextBlock Text="相手が部屋を作ってから「再検索」を押してください" FontSize="11" Foreground="{StaticResource AppTextMutedBrush}" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" />
+                                        </StackPanel>
+
+                                        <ScrollViewer>
+                                            <ItemsControl ItemsSource="{x:Bind ViewModel.DiscoveredRooms}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="net:RoomInfo">
+                                                        <Button
+                                                            Tag="{x:Bind}"
+                                                            Click="OnJoinRoomClicked"
+                                                            HorizontalAlignment="Stretch"
+                                                            HorizontalContentAlignment="Stretch"
+                                                            Margin="0,3"
+                                                            Padding="12,10"
+                                                            CornerRadius="10"
+                                                            Background="#CC1E2533"
+                                                            BorderBrush="#2EFFFFFF"
+                                                            BorderThickness="1">
+                                                            <Grid ColumnSpacing="12">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <FontIcon Glyph="&#xE80F;" FontSize="16" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
+                                                                <StackPanel Grid.Column="1" Spacing="2">
+                                                                    <TextBlock Text="{x:Bind RoomName}" FontWeight="SemiBold" FontSize="14" Foreground="{StaticResource AppTextPrimaryBrush}" TextTrimming="CharacterEllipsis" />
+                                                                    <TextBlock Text="{x:Bind views:LobbyPage.RoomCaption(HostName, OpenSeats, IsPlaying)}" FontSize="11" Foreground="{StaticResource AppTextSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                                                                </StackPanel>
+                                                                <Border Grid.Column="2" CornerRadius="12" Padding="10,3" Background="{StaticResource AppAccentBrush}" VerticalAlignment="Center">
+                                                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                                                        <TextBlock Text="参加" FontSize="12" FontWeight="Bold" Foreground="{StaticResource AppOnAccentBrush}" />
+                                                                        <FontIcon Glyph="&#xE72A;" FontSize="10" Foreground="{StaticResource AppOnAccentBrush}" />
+                                                                    </StackPanel>
+                                                                </Border>
+                                                            </Grid>
+                                                        </Button>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </Grid>
+                                </Border>
+
+                                <!-- IP アドレスを指定して参加 -->
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="IP アドレスを指定して参加" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                    <Grid ColumnSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox PlaceholderText="192.168.1.xxx" Text="{x:Bind ViewModel.DirectJoinHost, Mode=TwoWay}" CornerRadius="10" />
+                                        <Button
+                                            Grid.Column="1"
+                                            Command="{x:Bind ViewModel.DirectJoinCommand}"
+                                            MinWidth="96"
+                                            CornerRadius="10"
+                                            Background="{StaticResource AppAccentBrush}"
+                                            Foreground="{StaticResource AppOnAccentBrush}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <FontIcon Glyph="&#xE8AD;" FontSize="12" />
+                                                <TextBlock Text="参加" FontWeight="Bold" />
+                                            </StackPanel>
+                                        </Button>
+                                    </Grid>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- ===================== 状態2：待合室（席の状況・開始） ===================== -->
+                    <Border Style="{StaticResource AppPanelStyle}" Padding="24,22" VerticalAlignment="Top" Visibility="{x:Bind ViewModel.IsInRoom, Mode=OneWay}">
+                        <StackPanel Spacing="20">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Border Style="{StaticResource LobbyIconBadgeStyle}">
+                                    <FontIcon Glyph="&#xE80F;" FontSize="17" Foreground="{StaticResource AppAccentBrush}" />
+                                </Border>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="{x:Bind ViewModel.RoomTitle, Mode=OneWay}" FontSize="19" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{x:Bind views:LobbyPage.RoomRoleText(ViewModel.IsHost), Mode=OneWay}" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                </StackPanel>
+                                <Button
+                                    Grid.Column="2"
+                                    Command="{x:Bind ViewModel.LeaveRoomCommand}"
+                                    VerticalAlignment="Center"
+                                    CornerRadius="16"
+                                    Padding="12,6"
+                                    Background="#1FFFFFFF"
+                                    BorderBrush="#26FFFFFF"
+                                    BorderThickness="1">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE89B;" FontSize="12" Foreground="#E07A84" />
+                                        <TextBlock Text="部屋から退出" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                    </StackPanel>
                                 </Button>
                             </Grid>
 
-                            <!-- 部屋一覧リスト -->
-                            <Border MinHeight="100" MaxHeight="140" CornerRadius="8" Background="#161820" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="8">
-                                <ScrollViewer>
-                                    <ItemsControl ItemsSource="{x:Bind ViewModel.DiscoveredRooms}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="net:RoomInfo">
-                                                <Button
-                                                    Click="OnJoinRoomClicked"
-                                                    HorizontalAlignment="Stretch"
-                                                    Margin="0,2"
-                                                    Padding="8,6"
-                                                    Background="#222530"
-                                                    BorderBrush="{StaticResource AppBorderSubtleBrush}"
-                                                    BorderThickness="1"
-                                                    CornerRadius="6">
-                                                    <Grid>
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="*" />
-                                                            <ColumnDefinition Width="Auto" />
-                                                        </Grid.ColumnDefinitions>
-                                                        <StackPanel Grid.Column="0">
-                                                            <TextBlock Text="{x:Bind RoomName}" FontWeight="SemiBold" FontSize="13" Foreground="{StaticResource AppTextPrimaryBrush}" />
-                                                            <TextBlock Text="{x:Bind HostName}" FontSize="11" Foreground="{StaticResource AppTextSecondaryBrush}" />
-                                                        </StackPanel>
-                                                        <TextBlock Grid.Column="1" Text="参加" Foreground="{StaticResource AppAccentBrush}" FontWeight="Bold" FontSize="12" VerticalAlignment="Center" />
-                                                    </Grid>
-                                                </Button>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </ScrollViewer>
-                            </Border>
-
-                            <!-- 直接IP指定参加 -->
-                            <StackPanel Spacing="8">
-                                <TextBlock Text="IPアドレスを指定して参加" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AppTextSecondaryBrush}" />
-                                <Grid ColumnSpacing="8">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox Grid.Column="0" PlaceholderText="192.168.1.xxx" Text="{x:Bind ViewModel.DirectJoinHost, Mode=TwoWay}" />
-                                    <Button
-                                        Grid.Column="1"
-                                        Command="{x:Bind ViewModel.DirectJoinCommand}"
-                                        Background="{StaticResource AppAccentBrush}"
-                                        Foreground="{StaticResource AppOnAccentBrush}"
-                                        CornerRadius="{StaticResource ButtonCornerRadius}">
-                                        <TextBlock Text="参加" FontWeight="Bold" />
-                                    </Button>
-                                </Grid>
-                            </StackPanel>
-                        </StackPanel>
-                    </Border>
-                </Grid>
-
-                <!-- 状態2: 待合室入室時（席の状況 ＆ ゲーム開始） -->
-                <Border CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20" Visibility="{x:Bind ViewModel.IsInRoom, Mode=OneWay}">
-                    <StackPanel Spacing="20">
-                        <Grid>
-                            <TextBlock Text="{x:Bind ViewModel.RoomTitle, Mode=OneWay}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
-                            <Button Command="{x:Bind ViewModel.LeaveRoomCommand}" HorizontalAlignment="Right" Background="Transparent" BorderThickness="0">
-                                <TextBlock Text="部屋から退出" Foreground="{StaticResource AppTextMutedBrush}" FontSize="13" />
-                            </Button>
-                        </Grid>
-
-                        <!-- 4つの席の状況一覧 -->
-                        <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-
-                            <ItemsControl Grid.ColumnSpan="4" ItemsSource="{x:Bind ViewModel.Seats}">
+                            <!-- 4つの席：人は人のアイコン、NPC はロボットのアイコン。ホストの席には印を付ける -->
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.Seats}" HorizontalAlignment="Center">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
-                                        <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center" />
+                                        <VariableSizedWrapGrid Orientation="Horizontal" ItemWidth="196" ItemHeight="150" />
                                     </ItemsPanelTemplate>
                                 </ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate x:DataType="net:SeatInfo">
-                                        <Border Width="160" Margin="4" CornerRadius="10" Padding="14" Background="#1A1D25" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1">
-                                            <StackPanel Spacing="6" HorizontalAlignment="Center">
-                                                <Border CornerRadius="4" Padding="6,2" Background="{StaticResource AppAccentBrush}" HorizontalAlignment="Center">
-                                                    <TextBlock Text="{x:Bind SeatId}" FontSize="11" FontWeight="Bold" Foreground="{StaticResource AppOnAccentBrush}" />
+                                        <Border Margin="6" CornerRadius="14" Padding="14,12" Background="{StaticResource AppInsetBrush}" BorderBrush="{x:Bind views:LobbyPage.SeatBorder(Kind)}" BorderThickness="1.5">
+                                            <Grid RowSpacing="6">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <Grid>
+                                                    <Border CornerRadius="10" Padding="8,2" Background="#1FFFFFFF" HorizontalAlignment="Left">
+                                                        <TextBlock Text="{x:Bind views:LobbyPage.SeatLabel(SeatId)}" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                                    </Border>
+                                                    <Border CornerRadius="10" Padding="8,2" Background="#E9B93A" HorizontalAlignment="Right" Visibility="{x:Bind IsHost}">
+                                                        <TextBlock Text="ホスト" FontSize="11" FontWeight="Bold" Foreground="#2B1E00" />
+                                                    </Border>
+                                                </Grid>
+                                                <Border Grid.Row="1" Width="44" Height="44" CornerRadius="22" HorizontalAlignment="Center" Background="{x:Bind views:LobbyPage.SeatIconBackground(Kind)}">
+                                                    <FontIcon Glyph="{x:Bind views:LobbyPage.SeatGlyph(Kind)}" FontSize="20" Foreground="{StaticResource AppTextPrimaryBrush}" />
                                                 </Border>
-                                                <TextBlock Text="{x:Bind Name}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                                <TextBlock Text="{x:Bind Kind}" FontSize="11" Foreground="{StaticResource AppTextSecondaryBrush}" HorizontalAlignment="Center" />
-                                            </StackPanel>
+                                                <StackPanel Grid.Row="2" Spacing="1">
+                                                    <TextBlock Text="{x:Bind Name}" FontSize="14" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{x:Bind views:LobbyPage.SeatKindText(Kind, IsConnected)}" FontSize="11" Foreground="{StaticResource AppTextSecondaryBrush}" HorizontalAlignment="Center" />
+                                                </StackPanel>
+                                            </Grid>
                                         </Border>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                        </Grid>
 
-                        <!-- ホスト用ゲーム開始ボタン -->
-                        <Button
-                            Command="{x:Bind ViewModel.StartGameAsHostCommand}"
-                            Visibility="{x:Bind ViewModel.IsHost, Mode=OneWay}"
-                            HorizontalAlignment="Stretch"
-                            Height="50"
-                            CornerRadius="{StaticResource ButtonCornerRadius}"
-                            Background="{StaticResource AppAccentBrush}"
-                            Foreground="{StaticResource AppOnAccentBrush}">
-                            <TextBlock Text="対戦を開始する（不足枠は自動でNPCが補充）" FontSize="16" FontWeight="Bold" />
-                        </Button>
-                    </StackPanel>
-                </Border>
-
-            </StackPanel>
+                            <!-- ホストだけが開始できる。参加者には待機中の案内を出す -->
+                            <Grid Visibility="{x:Bind ViewModel.IsHost, Mode=OneWay}">
+                                <Border CornerRadius="30" Margin="-4" Background="{StaticResource AppAccentSubtleBrush}" IsHitTestVisible="False" />
+                                <Button
+                                    Command="{x:Bind ViewModel.StartGameAsHostCommand}"
+                                    HorizontalAlignment="Stretch"
+                                    Height="56"
+                                    CornerRadius="28"
+                                    Background="{StaticResource AppAccentBrush}"
+                                    Foreground="{StaticResource AppOnAccentBrush}"
+                                    BorderBrush="#66FFFFFF"
+                                    BorderThickness="1">
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <FontIcon Glyph="&#xE768;" FontSize="16" />
+                                        <TextBlock Text="対戦を開始する" FontSize="17" FontWeight="Bold" />
+                                        <TextBlock Text="（空いている席には NPC が入ります）" FontSize="12" Opacity="0.85" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                            <Border
+                                CornerRadius="12"
+                                Padding="14,12"
+                                Background="{StaticResource AppInsetBrush}"
+                                Visibility="{x:Bind ViewModel.IsHost, Mode=OneWay, Converter={StaticResource InverseBoolToVisibilityConverter}}">
+                                <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+                                    <ProgressRing Width="16" Height="16" IsActive="True" Foreground="{StaticResource AppAccentBrush}" />
+                                    <TextBlock Text="ホストが対戦を開始するのを待っています" FontSize="13" Foreground="{StaticResource AppTextSecondaryBrush}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </ScrollViewer>
         </Grid>
     </Grid>
 </Page>

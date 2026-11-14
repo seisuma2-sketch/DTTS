@@ -35,6 +35,39 @@
     <SolidColorBrush x:Key="AppOnAccentBrush" Color="#FFFFFF" />
     <SolidColorBrush x:Key="AppAccentSubtleBrush" Color="#303E8EF7" />
 
+    <!--
+        画面共通の面（タイトル・戦績・ロビーでそろえる）：
+        左上からほんのり明るい奥行きのある背景と、半透明のガラス調パネル
+    -->
+    <RadialGradientBrush x:Key="AppPageBackgroundBrush" Center="0.28,0.30" GradientOrigin="0.28,0.30" RadiusX="0.85" RadiusY="1.0">
+        <GradientStop Color="#FF1D2738" Offset="0" />
+        <GradientStop Color="#FF131925" Offset="0.55" />
+        <GradientStop Color="#FF0C0F15" Offset="1" />
+    </RadialGradientBrush>
+    <SolidColorBrush x:Key="AppPanelBrush" Color="#B31A2130" />
+    <SolidColorBrush x:Key="AppPanelBorderBrush" Color="#26FFFFFF" />
+    <SolidColorBrush x:Key="AppInsetBrush" Color="#80101520" />
+    <CornerRadius x:Key="AppPanelCornerRadius">16</CornerRadius>
+
+    <!-- 半透明のパネル（見出し・中身をまとめる大きな面） -->
+    <Style x:Key="AppPanelStyle" TargetType="Border">
+        <Setter Property="CornerRadius" Value="16" />
+        <Setter Property="Padding" Value="20,18" />
+        <Setter Property="Background" Value="#B31A2130" />
+        <Setter Property="BorderBrush" Value="#26FFFFFF" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+
+    <!-- 画面左上の「タイトルへ戻る」 -->
+    <Style x:Key="AppBackButtonStyle" TargetType="Button">
+        <Setter Property="Background" Value="#1FFFFFFF" />
+        <Setter Property="BorderBrush" Value="#26FFFFFF" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="18" />
+        <Setter Property="Padding" Value="12,6" />
+        <Setter Property="Foreground" Value="#A2A8B6" />
+    </Style>
+
     <!-- カード用スタイル -->
     <CornerRadius x:Key="CardCornerRadius">10</CornerRadius>
     <CornerRadius x:Key="PanelCornerRadius">12</CornerRadius>

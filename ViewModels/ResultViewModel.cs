@@ -14,7 +14,11 @@ public sealed record MatchHistoryItemViewModel(
     string PlayedAtText,
     string RoundsText,
     string ScoreText
-);
+)
+{
+    /// <summary>順位の表示（記録がないときは「-」）。</summary>
+    public string PlaceText => Place > 0 ? $"{Place}位" : "-";
+}
 
 public sealed partial class ResultViewModel : ViewModelBase
 {
@@ -48,6 +52,10 @@ public sealed partial class ResultViewModel : ViewModelBase
     [ObservableProperty]
     public partial int DaihinminCount { get; set; }
 
+    /// <summary>階級の獲得回数の最大値（分布の棒グラフの長さの基準。0 回のときも割り算できるよう 1 以上）。</summary>
+    [ObservableProperty]
+    public partial int RankMax { get; set; } = 1;
+
     public ObservableCollection<MatchHistoryItemViewModel> RecentMatches { get; } = new();
 
     public ResultViewModel(INavigationService navigation, MatchHistoryRepository historyRepo)
@@ -69,6 +77,7 @@ public sealed partial class ResultViewModel : ViewModelBase
         FugoCount = stats.RankCounts.TryGetValue(PlayerRank.Fugo, out int fg) ? fg : 0;
         HinminCount = stats.RankCounts.TryGetValue(PlayerRank.Hinmin, out int hm) ? hm : 0;
         DaihinminCount = stats.RankCounts.TryGetValue(PlayerRank.Daihinmin, out int dh) ? dh : 0;
+        RankMax = Math.Max(1, Math.Max(Math.Max(DaifugoCount, FugoCount), Math.Max(HinminCount, DaihinminCount)));
 
         RecentMatches.Clear();
         var recent = await _historyRepo.GetRecentAsync(15);

@@ -46,6 +46,17 @@
                         <!-- 左右の相手パネルを出さないので、横の列は中身（ヘッダー）の幅だけにする -->
                         <Setter Target="LeftColumn.Width" Value="Auto" />
                         <Setter Target="RightColumn.Width" Value="Auto" />
+                        <!-- 自分の欄とボタンを手札の上の段にまとめ、手札は最下段の全幅にする -->
+                        <Setter Target="Player0Panel.(Grid.Row)" Value="0" />
+                        <Setter Target="ActionButtons.(Grid.Row)" Value="0" />
+                        <Setter Target="ActionButtons.Orientation" Value="Horizontal" />
+                        <Setter Target="ActionButtons.VerticalAlignment" Value="Center" />
+                        <Setter Target="ActionButtons.Margin" Value="10,0,0,0" />
+                        <Setter Target="HandScrollViewer.(Grid.Column)" Value="0" />
+                        <Setter Target="HandScrollViewer.(Grid.ColumnSpan)" Value="3" />
+                        <!-- 下の段が高くなる分、手札の上に浮かせる操作バーも持ち上げる -->
+                        <Setter Target="CardSelectionBar.Margin" Value="16,0,16,300" />
+                        <Setter Target="InterruptBar.Margin" Value="16,0,16,300" />
                     </VisualState.Setters>
                 </VisualState>
             </VisualStateGroup>
@@ -287,7 +298,15 @@
             </Grid>
 
             <!-- 南 (Seat 0: 自分) & 手札 & アクション操作 -->
-            <Grid Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,12,0,0">
+            <!--
+                横フル画面：[自分の欄][手札][ボタン] を1段に並べる。
+                コンパクト：上の段に [自分の欄 … ボタン（横並び）]、最下段に手札を全幅で置く（狭い幅でも手札が収まる）
+            -->
+            <Grid x:Name="BottomArea" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,12,0,0" RowSpacing="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -297,6 +316,7 @@
                 <!-- 自プレイヤーパネル -->
                 <ctrl:PlayerPanelControl
                     x:Name="Player0Panel"
+                    Grid.Row="1"
                     Grid.Column="0"
                     ShowCardBacks="False"
                     VerticalAlignment="Bottom" />
@@ -304,6 +324,7 @@
                 <!-- 手札カード一覧 (クリックで選択トグル)。重なり幅は表示幅と枚数に応じてコードで調整する -->
                 <ScrollViewer
                     x:Name="HandScrollViewer"
+                    Grid.Row="1"
                     Grid.Column="1"
                     HorizontalScrollBarVisibility="Auto"
                     VerticalScrollBarVisibility="Disabled"
@@ -331,7 +352,7 @@
                 </ScrollViewer>
 
                 <!-- 操作ボタン群 (パス / 出す) & ショートカット案内 -->
-                <StackPanel Grid.Column="2" Spacing="10" VerticalAlignment="Bottom" Margin="14,0,0,4">
+                <StackPanel x:Name="ActionButtons" Grid.Row="1" Grid.Column="2" Spacing="10" VerticalAlignment="Bottom" Margin="14,0,0,4">
                     <Button
                         Command="{x:Bind ViewModel.PassCommand}"
                         IsEnabled="{x:Bind ViewModel.CanPass, Mode=OneWay}"

@@ -138,8 +138,8 @@ public sealed partial class CardControl : UserControl
     // カード表面の色（出せるとき：明るいアイボリー／出せないとき：少し落ち着いたグレー。どちらも数字は必ず読める）
     private static readonly Windows.UI.Color FaceTop = ColorHelper.FromArgb(255, 0xFB, 0xFC, 0xFE);
     private static readonly Windows.UI.Color FaceBottom = ColorHelper.FromArgb(255, 0xE8, 0xEC, 0xF2);
-    private static readonly Windows.UI.Color DimFaceTop = ColorHelper.FromArgb(255, 0xC8, 0xCF, 0xDA);
-    private static readonly Windows.UI.Color DimFaceBottom = ColorHelper.FromArgb(255, 0xB8, 0xC0, 0xCC);
+    private static readonly Windows.UI.Color DimFaceTop = ColorHelper.FromArgb(255, 0xCC, 0xD3, 0xDE);
+    private static readonly Windows.UI.Color DimFaceBottom = ColorHelper.FromArgb(255, 0xC4, 0xCC, 0xD8);
 
     private static void OnCanPlayChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
@@ -150,13 +150,13 @@ public sealed partial class CardControl : UserControl
     }
 
     /// <summary>
-    /// 出せないカードは黒く潰さず、表面をわずかにグレー寄りにして不透明度 0.85 に留める（何を持っているかは常に読める）。
+    /// 出せないカードは表面の地色だけを落ち着いたグレーに変える。不透明度は 1.0 のままにして、
+    /// 重なった下のカードが透けないようにする（数字・スートの色は変えないので常に読める）。
     /// </summary>
     private void ApplyPlayableTone(bool canPlay)
     {
         FaceStopTop.Color = canPlay ? FaceTop : DimFaceTop;
         FaceStopBottom.Color = canPlay ? FaceBottom : DimFaceBottom;
-        CompositionAnimationHelper.AnimateOpacity(this, canPlay ? 1.0f : 0.85f, 150);
     }
 
     private static void OnIsFacedDownChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
