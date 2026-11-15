@@ -13,7 +13,7 @@
         <MicaBackdrop />
     </Window.SystemBackdrop>
 
-    <Grid x:Name="RootGrid" Background="{StaticResource AppBackgroundDeepBrush}" KeyDown="OnRootKeyDown">
+    <Grid x:Name="RootGrid" Background="{StaticResource AppBackgroundDeepBrush}" KeyDown="OnRootKeyDown" KeyboardAcceleratorPlacementMode="Hidden">
         <!-- 戻る操作：Alt+←（Alt の組み合わせは KeyDown に届かないためアクセラレータで受ける）。
              キーボードの「戻る」キーは XAML で VirtualKey 名を解釈できないため、OnRootKeyDown で判定する -->
         <Grid.KeyboardAccelerators>

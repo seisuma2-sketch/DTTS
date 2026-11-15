@@ -109,6 +109,15 @@ public sealed partial class SoundToggleButton : Button
             MaxWidth = 260,
         });
 
+        // ポップアップ内のキーは、ここで止める（対戦画面の Enter＝出す・BS＝パス・Esc＝中断確認・S＝スキップに漏らさない）。
+        // スライダーの ←/→ やボタンの Enter/Space は各部品が先に処理済み。Esc はポップアップを閉じるだけにする
+        panel.KeyDown += (_, e) =>
+        {
+            if (e.Key == Windows.System.VirtualKey.Tab) return; // フォーカス移動はそのまま
+            if (e.Key == Windows.System.VirtualKey.Escape) _flyout?.Hide();
+            e.Handled = true;
+        };
+
         _flyout = new Flyout { Content = panel, Placement = FlyoutPlacementMode.BottomEdgeAlignedLeft };
         _flyout.Opening += (_, _) => SyncFromAudio();
         _flyout.Closed += (_, _) => FlushSave();

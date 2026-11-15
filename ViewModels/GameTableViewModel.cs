@@ -1014,7 +1014,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
                     _guestResultRound = notice.Count;
                     RoundResultText = string.Join("\n", standings
                         .OrderBy(s => s.Position)
-                        .Select(s => $"{s.Position}位: {GetPlayerVm(s.PlayerId).Name} ({s.Rank}) -> 得点: {SignedPoints(s.Points)}（合計 {SignedPoints(s.TotalScore)}）"));
+                        .Select(s => $"{s.Position}位: {GetPlayerVm(s.PlayerId).Name} ({s.Rank}) -> 得点: {SignedPoints(s.Points)}"));
+                    // ※ ラウンド終了の通知には合計点が入っていない（常に 0）ため、ゲストでは合計を出さない
                     IsGameOver = notice.Applied;
                     IsRoundResultOpen = true;
                     UpdateRoundResultActions();
