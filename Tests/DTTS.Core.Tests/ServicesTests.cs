@@ -150,6 +150,21 @@ internal static class ServicesTests
         await settings.SetAsync(SettingsRepository.AppearanceKey, "{\"seVolume\":40,\"soundEnabled\":false}");
         Check((await settings.LoadAppearanceAsync()).GameSpeed == GameSpeed.Normal, "older settings without game speed -> normal");
 
+        // 操作ガイド・確認レベル（既定は中級者用。持っていないのに確認が出ることはない）
+        Check((await settings.LoadAppearanceAsync()).GuideLevel == GuideLevel.Intermediate, "guide level: older settings -> intermediate");
+        Check(!GuideLevel.Intermediate.AlwaysAsksInterrupt() && !GuideLevel.Expert.AlwaysAsksInterrupt() && GuideLevel.Beginner.AlwaysAsksInterrupt(),
+            "guide level: only beginner asks without a stopper");
+        foreach (var level in GuideLevelInfo.All)
+        {
+            await settings.UpdateAppearanceAsync(a => a.GuideLevel = level);
+            Check((await settings.LoadAppearanceAsync()).GuideLevel == level, "guide level roundtrip: " + level);
+        }
+        await settings.SetAsync(SettingsRepository.AppearanceKey, "{\"guideLevel\":\"Tutorial\"}");
+        Check((await settings.LoadAppearanceAsync()).GuideLevel == GuideLevel.Intermediate, "guide level: unknown value -> intermediate");
+        var badGuide = await settings.UpdateAppearanceAsync(a => a.GuideLevel = (GuideLevel)77);
+        Check(badGuide.GuideLevel == GuideLevel.Intermediate, "guide level: out-of-range value normalized");
+        await settings.DeleteAsync(SettingsRepository.AppearanceKey);
+
         // 一部だけの更新：サウンドと進行スピードを同時に切り替えても互いの変更を消さない
         await settings.SaveAppearanceAsync(new AppearanceSettings { ThemeColor = ThemeColor.HotPink, SoundEnabled = true, GameSpeed = GameSpeed.Normal });
         var updates = new List<Task<AppearanceSettings>>();
@@ -538,6 +553,7 @@ internal static class ServicesTests
             fe.EventOccurred += (_, ev) => { if (ClientViewBuilder.ToNotice(ev, 0) is { } n) notices.Add(n); };
             fe.StartGame();
             int l = fe.PendingDecision!.PlayerId, a = (l + 1) % 4, b = (l + 2) % 4, c = (l + 3) % 4;
+            fe.AlwaysAskInterruptPlayerIds.Add(a); // a は操作ガイド「初心者用」のゲスト
             fe.GetPlayer(l).SetHand(Card.ParseMany("D3 SJ S6 H6 SK"));
             fe.GetPlayer(a).SetHand(Card.ParseMany("C8 C9"));
             fe.GetPlayer(b).SetHand(Card.ParseMany("S3 H3 C3 D7"));
@@ -552,7 +568,8 @@ internal static class ServicesTests
             fe.SubmitPass(a); fe.SubmitPass(b); fe.SubmitPass(c);
             // 強化11バックは場が流れても続く。l が親のまま、ろくろ首を出す
             fe.SubmitPlay(l, Card.ParseMany("S6 H6"));
-            // 砂嵐を持たないゲスト（a）にも、先に確認が届く（出せる手はなく、パス（流す）だけ）
+            // 「初心者用」のゲスト（a）には、砂嵐を持っていなくても先に確認が届く（出せる手はなく、パス（流す）だけ）。
+            // 「初心者用」でない c は持っていないので聞かれない
             var av = ClientViewBuilder.Build(fe, a, 6);
             Check(av.Decision is { Kind: DecisionKind.SandstormStopChance, CanPass: true } ad && ad.PlayerId == a
                 && (av.LegalPlays is null || av.LegalPlays.Length == 0), "view: a guest without a sandstorm is asked too, with nothing to play");
@@ -871,6 +888,32 @@ internal static class ServicesTests
             var finished = await Task.WhenAny(ended.Task, Task.Delay(TimeSpan.FromSeconds(60)));
             Check(finished == ended.Task, "rejoin game finished");
             await again.DisposeAsync();
+            await host.DisposeAsync();
+            await queue.DisposeAsync();
+        }
+
+        // --- 操作ガイド「初心者用」のゲストだけ、止められなくても割り込みの確認を受ける。切断で NPC が引き継ぐと外れる ---
+        {
+            GateScheduler? gate = null;
+            var (host, queue, _) = await CreateHostAsync(70, false, q => gate = new GateScheduler(q));
+            var beginner = await RemoteGameClient.JoinAsync("127.0.0.1", host.Port, "初心者", "dev-G1", alwaysAskInterrupt: true);
+            var normal = await RemoteGameClient.JoinAsync("127.0.0.1", host.Port, "標準", "dev-G2");
+            gate!.Close(); // NPC は動かさない（このテストは席の設定だけを見る）
+            host.StartGame(RuleSettings.CreateDefault(), new SystemRandomSource(70));
+            await WaitUntilAsync(queue, () => host.Engine is not null);
+            await queue.FlushAsync();
+            var ids = host.Engine!.AlwaysAskInterruptPlayerIds;
+            Check(ids.Contains(beginner.SeatId) && !ids.Contains(normal.SeatId) && !ids.Contains(0),
+                "guide: only the beginner guest is always asked (host option off)");
+            await beginner.DisposeAsync();
+            await WaitUntilAsync(queue, () => host.Seats.First(s => s.SeatId == 1).Kind == PlayerKind.Npc);
+            Check(!host.Engine.AlwaysAskInterruptPlayerIds.Contains(beginner.SeatId), "guide: an NPC taking over the seat is asked only when it can stop");
+            var legacyJoin = NetProtocol.Deserialize(Encoding.UTF8.GetBytes("{\"$type\":\"join\",\"protocolVersion\":1,\"playerName\":\"old\",\"clientId\":\"x\"}"));
+            Check(legacyJoin is JoinRequest { AlwaysAskInterrupt: false }, "guide: a join request from an older app defaults to holders-only");
+            var roundTrip = NetProtocol.Deserialize(NetProtocol.Serialize(new JoinRequest(1, "n", "id", true)));
+            Check(roundTrip is JoinRequest { AlwaysAskInterrupt: true }, "guide: the flag survives JSON");
+            gate.Open();
+            await normal.DisposeAsync();
             await host.DisposeAsync();
             await queue.DisposeAsync();
         }

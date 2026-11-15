@@ -33,7 +33,8 @@ public abstract record NetMessage;
 /// <param name="ProtocolVersion">プロトコルバージョン。</param>
 /// <param name="PlayerName">表示名。</param>
 /// <param name="ClientId">端末ごとのランダムID（再接続時に同じ席へ戻すため）。</param>
-public sealed record JoinRequest(int ProtocolVersion, string PlayerName, string ClientId) : NetMessage;
+/// <param name="AlwaysAskInterrupt">止められる手がなくても割り込み（4止め・砂嵐）の確認を受けたい（操作ガイド「初心者用」）。旧版は送らない＝false。</param>
+public sealed record JoinRequest(int ProtocolVersion, string PlayerName, string ClientId, bool AlwaysAskInterrupt = false) : NetMessage;
 
 /// <summary>参加承認（ホスト → クライアント）。</summary>
 public sealed record JoinAccepted(int SeatId, string RoomName, bool IsRejoin) : NetMessage;

@@ -35,6 +35,12 @@ internal static class EngineTests
         Check(r.IsAccepted, $"{label}: P{pid} pass -> {r}");
     }
 
+    /// <summary>指定したプレイヤーを操作ガイド「初心者用」扱いにする（止められる手がなくても割り込みの確認を受ける）。</summary>
+    private static void AskAll(GameEngine e, params int[] ids)
+    {
+        foreach (int id in ids) e.AlwaysAskInterruptPlayerIds.Add(id);
+    }
+
     /// <summary>
     /// 第1ラウンドを手札仕込みで即終了させる。座席順は 0,1,2,3 固定（席替えなし）。
     /// 結果：L=大富豪, L+1=富豪, L+2=貧民, L+3=大貧民。
@@ -594,8 +600,10 @@ internal static class EngineTests
             }
 
             // (1) 止める：砂嵐で場が流れ、止めた人が親になる。ろくろ首・99車の効果は発動しない
+            //     （全員が操作ガイド「初心者用」＝持っていなくても確認を受ける設定）
             {
                 var (e, l, a, b, c) = Start(Rules());
+                AskAll(e, a, b, c);
                 var effects = new List<SpecialEffectType>();
                 var flushes = new List<FieldFlushedEvent>();
                 e.EventOccurred += (_, ev) =>
@@ -609,7 +617,7 @@ internal static class EngineTests
                 flushes.Clear();
                 Play(e, l, pair, kind);
                 var d = e.PendingDecision!;
-                // 砂嵐を持っていない a にも確認が出る（持っている人にだけ聞くと手札が透けるため）
+                // 「初心者用」なら、砂嵐を持っていない a にも確認が出る
                 Check(d.Kind == DecisionKind.SandstormStopChance && d.PlayerId == a && d.CanPass, kind + ": a non-holder is asked too (in turn order)");
                 Check(e.GetLegalPlays(a).Count == 0, kind + ": the non-holder can only pass");
                 Check(e.SubmitPlay(a, C("C5")).Error == CommandError.IllegalPlay, kind + ": the non-holder cannot play over the window");
@@ -633,9 +641,10 @@ internal static class EngineTests
                 Check(e.Field.IsEmpty && !e.Field.IsSandstormStopPending && !e.Field.Lock.IsAnyLocked, kind + ": field clean after the stop");
                 Check(e.PendingDecision!.Kind == DecisionKind.PlayOrPass && e.PendingDecision.PlayerId == b, kind + ": stopper is the new leader");
             }
-            // (2) 見送る：ろくろ首・99車が成立して、出した人が親になる
+            // (2) 見送る：ろくろ首・99車が成立して、出した人が親になる（全員「初心者用」）
             {
                 var (e, l, a, b, c) = Start(Rules());
+                AskAll(e, a, b, c);
                 var effects = new List<SpecialEffectType>();
                 var passes = new List<PlayerPassedEvent>();
                 e.EventOccurred += (_, ev) =>
@@ -660,9 +669,10 @@ internal static class EngineTests
                 Check(e.Field.IsEmpty && !e.Field.IsSandstormStopPending && e.PendingDecision!.PlayerId == l
                     && e.PendingDecision.Kind == DecisionKind.PlayOrPass, kind + ": original player leads after the decline");
             }
-            // (3) 誰も砂嵐を持っていない：それでも全員に順に確認し、全員がパス（流す）したら流れる
+            // (3) 誰も砂嵐を持っていない：「初心者用」なら全員に順に確認し、全員がパス（流す）したら流れる
             {
                 var (e, l, a, b, c) = Start(Rules());
+                AskAll(e, a, b, c);
                 var asked = new List<int>();
                 e.EventOccurred += (_, ev) =>
                 {
@@ -679,6 +689,83 @@ internal static class EngineTests
                 Pass(e, c, kind);
                 Check(e.Field.IsEmpty && e.PendingDecision!.Kind == DecisionKind.PlayOrPass && e.PendingDecision.PlayerId == l,
                     kind + ": no holder -> flush after everyone passes");
+            }
+            // (1') 標準（中級者・上級者用）：砂嵐を持つ b にだけ確認が出る。持たない a・c は聞かれない
+            {
+                var (e, l, a, b, c) = Start(Rules());
+                var asked = new List<int>();
+                var flushes = new List<FieldFlushedEvent>();
+                e.EventOccurred += (_, ev) =>
+                {
+                    if (ev is DecisionRequestedEvent dr && dr.Decision.Kind.IsInterruptChance()) asked.Add(dr.Decision.PlayerId);
+                    if (ev is FieldFlushedEvent ff) flushes.Add(ff);
+                };
+                Deal(e, l, a, b, c);
+                Play(e, l, "D3", kind);
+                Pass(e, a, kind); Pass(e, b, kind); Pass(e, c, kind);
+                flushes.Clear();
+                Play(e, l, pair, kind);
+                Check(asked.SequenceEqual(new[] { b }) && e.PendingDecision!.Kind == DecisionKind.SandstormStopChance
+                    && e.PendingDecision.PlayerId == b && e.Field.IsSandstormStopPending && flushes.Count == 0,
+                    kind + " holders-only: only the sandstorm holder is asked");
+                Play(e, b, "S3 H3 C3", kind + " holders-only stop");
+                Check(flushes.Count == 1 && flushes[0].Cause == SpecialEffectType.Sandstorm && e.PendingDecision!.PlayerId == b,
+                    kind + " holders-only: the stop flushes and the stopper leads");
+            }
+            // (2') 標準：持っている人が見送ると、ほかの人には聞かずに流れる
+            {
+                var (e, l, a, b, c) = Start(Rules());
+                var asked = new List<int>();
+                e.EventOccurred += (_, ev) =>
+                {
+                    if (ev is DecisionRequestedEvent dr && dr.Decision.Kind.IsInterruptChance()) asked.Add(dr.Decision.PlayerId);
+                };
+                Deal(e, l, a, b, c);
+                Play(e, l, "D3", kind);
+                Pass(e, a, kind); Pass(e, b, kind); Pass(e, c, kind);
+                Play(e, l, pair, kind);
+                Pass(e, b, kind + " holders-only decline");
+                Check(asked.SequenceEqual(new[] { b }) && e.Field.IsEmpty && e.PendingDecision!.Kind == DecisionKind.PlayOrPass
+                    && e.PendingDecision.PlayerId == l, kind + " holders-only: decline -> flush, the player who flushed leads");
+            }
+            // (3') 標準：誰も砂嵐を持っていなければ、確認なしですぐに流れる
+            {
+                var (e, l, a, b, c) = Start(Rules());
+                var asked = new List<int>();
+                var effects = new List<SpecialEffectType>();
+                e.EventOccurred += (_, ev) =>
+                {
+                    if (ev is DecisionRequestedEvent dr && dr.Decision.Kind.IsInterruptChance()) asked.Add(dr.Decision.PlayerId);
+                    if (ev is EffectAppliedEvent ea && ea.Applied) effects.Add(ea.Effect.Type);
+                };
+                Deal(e, l, a, b, c);
+                e.GetPlayer(b).SetHand(C("S3 H3 D7 D8")); // 3 は2枚だけ
+                Play(e, l, "D3", kind);
+                Pass(e, a, kind); Pass(e, b, kind); Pass(e, c, kind);
+                Play(e, l, pair, kind);
+                Check(asked.Count == 0 && effects.Contains(rank) && e.Field.IsEmpty && !e.Field.IsSandstormStopPending
+                    && e.PendingDecision!.Kind == DecisionKind.PlayOrPass && e.PendingDecision.PlayerId == l,
+                    kind + " holders-only: nobody can stop -> no prompt, immediate flush");
+            }
+            // (3'') 初心者用の人（a）だけは持っていなくても聞かれ、ほかの持っていない人（c）は聞かれない
+            {
+                var (e, l, a, b, c) = Start(Rules());
+                e.AlwaysAskInterruptPlayerIds.Add(a);
+                var asked = new List<int>();
+                e.EventOccurred += (_, ev) =>
+                {
+                    if (ev is DecisionRequestedEvent dr && dr.Decision.Kind.IsInterruptChance()) asked.Add(dr.Decision.PlayerId);
+                };
+                Deal(e, l, a, b, c);
+                Play(e, l, "D3", kind);
+                Pass(e, a, kind); Pass(e, b, kind); Pass(e, c, kind);
+                Play(e, l, pair, kind);
+                Check(e.PendingDecision!.PlayerId == a && e.GetLegalPlays(a).Count == 0 && e.PendingDecision.CanPass,
+                    kind + " mixed: the beginner without a sandstorm is asked (pass only)");
+                Pass(e, a, kind + " mixed");
+                Pass(e, b, kind + " mixed");
+                Check(asked.SequenceEqual(new[] { a, b }) && e.Field.IsEmpty && e.PendingDecision!.PlayerId == l,
+                    kind + " mixed: the non-beginner without a sandstorm is not asked");
             }
             // (4) 砂嵐ルールが無効：3を3枚持っていても確認しない
             {
@@ -702,6 +789,7 @@ internal static class EngineTests
             r.Joker.JokerTriggersEffects = true;
             r.Joker.JokerCount = 2;
             var (e, l, a, b, c) = Start(r);
+            AskAll(e, a, b, c); // 全員「初心者用」：持っていない人にも順に聞く
             e.GetPlayer(l).SetHand(C("D3 S6 H6 SK"));
             e.GetPlayer(a).SetHand(C("S3 H3 JK0 C8"));   // ジョーカー代用の砂嵐（ジョーカー効果発動が有効）
             e.GetPlayer(b).SetHand(C("C5 C9"));
@@ -1000,6 +1088,20 @@ internal static class EngineTests
                 r.Progress.PointsDaifugo = 2; r.Progress.PointsFugo = 1; r.Progress.PointsHeimin = 0;
                 r.Progress.PointsHinmin = -1; r.Progress.PointsDaihinmin = -2;
             }, 5),
+            // エンペラー：場を流さない（標準）／流す＋砂嵐・4止めで止められる（8切り・ろくろ首・99車も砂嵐で止められる）
+            ("emperor-no-flush", r => { AllSpecials(r); r.Sequence.EmperorEnabled = true; r.Sequence.EmperorFlushesField = false; }, 4),
+            ("emperor-flush-sandstorm", r =>
+            {
+                AllSpecials(r); r.Sequence.EmperorEnabled = true; r.Sequence.EmperorFlushesField = true; r.Sequence.EmperorCausesRevolution = true;
+                r.Flow.SandstormEnabled = true; r.Flow.SandstormCount = 2; r.Flow.FourStopEnabled = true;
+                r.Flow.AmbulanceEnabled = true; r.Flow.RokurokubiEnabled = true;
+            }, 4),
+            ("emperor-flush-sandstorm-3p", r =>
+            {
+                AllSpecials(r); r.Sequence.EmperorEnabled = true; r.Sequence.EmperorFlushesField = true;
+                r.Flow.SandstormEnabled = true; r.Flow.SandstormCount = 2; r.Flow.FourStopEnabled = true;
+                r.Flow.FourStopCount = FourStopCountRule.SameAsEight; r.Progress.PassLocksUntilFlush = true;
+            }, 3),
         };
 
         foreach (var (name, apply, count) in configs)
@@ -1160,6 +1262,24 @@ internal static class EngineTests
         int? finishedAwaitingFlush = null;
         HashSet<Rank>? declaredRanks = null;
         int? oneTurnHolder = null;
+
+        // 不変条件：割り込み（4止め・砂嵐）の確認は、実際に止められる手を持つ人にだけ出る（初心者用の人はいない）。
+        // 砂嵐は最上位の流し役なので、砂嵐への割り込みは起きない
+        engine.EventOccurred += (_, e) =>
+        {
+            if (e is DecisionRequestedEvent { Decision: { } d } && d.Kind.IsInterruptChance())
+            {
+                Cover("interrupt-" + (d.Effect?.ToString() ?? "none"));
+                if (engine.GetLegalPlays(d.PlayerId).Count == 0)
+                {
+                    Fail($"interrupt chance for P{d.PlayerId} without a stopper ({d.Effect})");
+                }
+                if (d.Effect is SpecialEffectType.Sandstorm or SpecialEffectType.SpadeThreeReturn || d.Effect is null)
+                {
+                    Fail($"interrupt window opened for {d.Effect}");
+                }
+            }
+        };
 
         engine.EventOccurred += (_, e) =>
         {

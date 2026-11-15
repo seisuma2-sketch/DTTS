@@ -414,6 +414,8 @@ internal static class TurnOrderTests
         {
             e.SetPlayerKind(id, PlayerKind.Npc);
             npc.Assign(id, NpcProfile.Default, new SystemRandomSource(id));
+            // 持っていない人にも聞く設定（操作ガイド「初心者用」相当）で、聞かれたときの待ち時間がそろっているかを見る
+            e.AlwaysAskInterruptPlayerIds.Add(id);
         }
 
         var delays = new List<TimeSpan>();

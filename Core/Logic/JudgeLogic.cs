@@ -335,26 +335,21 @@ public sealed class JudgeLogic : IJudgeLogic
         var current = field.CurrentPlay;
         bool reversed = field.IsStrengthReversed;
 
-        // --- 8切り直後の4止め受付中 ---
-        if (field.IsEightCutPending)
+        // --- 場流しの割り込み受付中（8切りへの4止め・流し役への砂嵐） ---
+        // 8切りは4止めと砂嵐の両方を受け付けることがある。砂嵐は枚数・種別・縛りを問わない
+        if (field.IsEightCutPending || field.IsSandstormStopPending)
         {
-            if (current is not null && IsFourStop(play, current))
+            if (current is not null && field.IsEightCutPending && IsFourStop(play, current))
             {
                 method = BeatMethod.FourStop;
                 return PlayRejectReason.None;
             }
-            return PlayRejectReason.FourStopOnly;
-        }
-
-        // --- ろくろ首・99車の直後の砂嵐受付中（枚数・種別・縛りは問わず、砂嵐だけが出せる） ---
-        if (field.IsSandstormStopPending)
-        {
-            if (current is not null && IsSandstorm(play))
+            if (current is not null && field.IsSandstormStopPending && IsSandstorm(play))
             {
                 method = BeatMethod.SandstormStop;
                 return PlayRejectReason.None;
             }
-            return PlayRejectReason.SandstormStopOnly;
+            return field.IsEightCutPending ? PlayRejectReason.FourStopOnly : PlayRejectReason.SandstormStopOnly;
         }
 
         // --- 親出し ---
@@ -764,7 +759,8 @@ public sealed class JudgeLogic : IJudgeLogic
         }
         if (play.Type == HandType.Emperor)
         {
-            effects.Add(new TriggeredEffect(SpecialEffectType.Emperor));
+            // 場を流すかはルール設定次第（流さない設定でも、エンペラーが出たことは通知する）
+            effects.Add(new TriggeredEffect(SpecialEffectType.Emperor) { SuppressFlush = !_rules.Sequence.EmperorFlushesField });
         }
         if (method == BeatMethod.SpadeThreeReturn)
         {
@@ -906,7 +902,7 @@ public sealed class JudgeLogic : IJudgeLogic
         {
             reasons |= ForbiddenFinishReason.ElevenBack;
         }
-        if (f.ForbidOtherFlushEffects && effects.Any(e => e.Type is
+        if (f.ForbidOtherFlushEffects && effects.Any(e => e.FlushesField && e.Type is
                 SpecialEffectType.Sandstorm or SpecialEffectType.Ambulance or
                 SpecialEffectType.Rokurokubi or SpecialEffectType.Emperor))
         {

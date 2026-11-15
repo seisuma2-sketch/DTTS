@@ -299,12 +299,19 @@ public sealed class SequenceRules
 
     /// <summary>
     /// エンペラー：4種のスートを1枚ずつ使った4枚の連番。
-    /// 場が空のときに出せ、場が4枚階段のときは強さに関係なく勝つ。出すと場が流れる。
+    /// 場が空のときに出せ、場が4枚階段のときは強さに関係なく勝つ。
+    /// 場が流れるかは <see cref="EmperorFlushesField"/> で決める。
     /// </summary>
     public bool EmperorEnabled { get; set; } = false;
 
     /// <summary>エンペラーで革命も発生させる。</summary>
     public bool EmperorCausesRevolution { get; set; } = false;
+
+    /// <summary>
+    /// エンペラーで場を流す。オフ（既定）のときは通常の4枚の階段と同じく、全員がパスするまで場が続く。
+    /// オンのときも、砂嵐ルールが有効なら他のプレイヤーが砂嵐で止める機会を経てから流れる。
+    /// </summary>
+    public bool EmperorFlushesField { get; set; } = false;
 }
 
 // ======================================================================

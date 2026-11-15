@@ -47,8 +47,13 @@ internal static class Program
         Console.WriteLine($"TurnOrder: pass={tp}, fail={tf}");
         totalFail += tf;
 
+        Console.WriteLine("--- 6. InterruptTests ---");
+        var (ip, iff) = InterruptTests.Run();
+        Console.WriteLine($"Interrupt: pass={ip}, fail={iff}");
+        totalFail += iff;
+
         Console.WriteLine("========================================");
-        int totalPass = jp + ep + np + sp + tp;
+        int totalPass = jp + ep + np + sp + tp + ip;
         Console.WriteLine($"TOTAL: pass={totalPass}, fail={totalFail}");
         Console.WriteLine(totalFail == 0 ? "ALL TESTS PASSED!" : "SOME TESTS FAILED!");
         Console.WriteLine("========================================");

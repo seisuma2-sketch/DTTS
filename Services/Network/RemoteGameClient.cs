@@ -91,6 +91,7 @@ public sealed class RemoteGameClient : IAsyncDisposable
     /// <param name="dispatcher">イベントを発行するディスパッチャ（null なら通信スレッドで発行）。</param>
     /// <param name="timeout">参加応答の待ち時間。</param>
     /// <param name="cancellationToken">キャンセル。</param>
+    /// <param name="alwaysAskInterrupt">止められる手がなくても割り込みの確認を受けたい（操作ガイド「初心者用」）。</param>
     /// <exception cref="JoinFailedException">接続できない・参加を拒否された場合。</exception>
     public static async Task<RemoteGameClient> JoinAsync(
         string host,
@@ -99,7 +100,8 @@ public sealed class RemoteGameClient : IAsyncDisposable
         string clientId,
         ISerialDispatcher? dispatcher = null,
         TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool alwaysAskInterrupt = false)
     {
         var tcp = new TcpClient();
         try
@@ -116,7 +118,7 @@ public sealed class RemoteGameClient : IAsyncDisposable
 
         var client = new RemoteGameClient(new MessageConnection(tcp, "host"), dispatcher);
         client._connection.Start();
-        client._connection.Send(new JoinRequest(NetProtocol.Version, playerName, clientId));
+        client._connection.Send(new JoinRequest(NetProtocol.Version, playerName, clientId, alwaysAskInterrupt));
 
         NetMessage joinResult;
         try

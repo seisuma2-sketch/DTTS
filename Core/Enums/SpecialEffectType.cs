@@ -19,7 +19,7 @@ public enum SpecialEffectType : byte
     Nanasan,
 
     // ---- 2. 階段系 ----
-    /// <summary>エンペラー（4スート4枚連番）。場を流す。</summary>
+    /// <summary>エンペラー（4スート4枚連番）。「エンペラーで場を流す」設定のときだけ場を流す。</summary>
     Emperor,
 
     // ---- 3. 縛り系 ----

@@ -52,6 +52,43 @@ public sealed record ThemeColorInfo(ThemeColor Color, string DisplayName, string
     public static ThemeColorInfo Get(ThemeColor color) => All.FirstOrDefault(t => t.Color == color) ?? All[1];
 }
 
+/// <summary>操作ガイド・割り込み確認の表示レベル。</summary>
+public enum GuideLevel : byte
+{
+    /// <summary>初心者用：ルールや操作のヒントを出し、4止め・砂嵐を持っていなくても割り込みの確認を出す。</summary>
+    Beginner = 0,
+    /// <summary>中級者用（標準）：止められる手を持つときだけ確認。革命や特殊効果の初回など重要な場面だけ控えめなヒント。</summary>
+    Intermediate,
+    /// <summary>上級者用：ヒントなし。止められる手を持つときだけ確認。</summary>
+    Expert,
+}
+
+/// <summary>操作ガイドのレベルの表示名と補助判定。</summary>
+public static class GuideLevelInfo
+{
+    /// <summary>設定画面に並べる順。</summary>
+    public static IReadOnlyList<GuideLevel> All { get; } = new[] { GuideLevel.Beginner, GuideLevel.Intermediate, GuideLevel.Expert };
+
+    /// <summary>表示名。</summary>
+    public static string DisplayName(this GuideLevel level) => level switch
+    {
+        GuideLevel.Beginner => "初心者用（チュートリアルあり）",
+        GuideLevel.Expert => "上級者用（ガイドなし）",
+        _ => "中級者用（標準・ときどきヒント）",
+    };
+
+    /// <summary>説明文。</summary>
+    public static string Description(this GuideLevel level) => level switch
+    {
+        GuideLevel.Beginner => "ルールや操作のヒントを表示します。4止め・砂嵐を持っていなくても、8切りやろくろ首などが出るたびに「止める／パス（流す）」を確認します。",
+        GuideLevel.Expert => "ヒントは表示しません。4止め・砂嵐を実際に持っているときだけ、割り込みの確認を出します。",
+        _ => "4止め・砂嵐を実際に持っているときだけ、割り込みの確認を出します。革命や特殊効果の初回など、重要な場面でだけ控えめなヒントを表示します。",
+    };
+
+    /// <summary>止められる手を持っていなくても割り込みの確認を出すか。</summary>
+    public static bool AlwaysAsksInterrupt(this GuideLevel level) => level == GuideLevel.Beginner;
+}
+
 /// <summary>外見設定。</summary>
 public sealed class AppearanceSettings
 {
@@ -76,6 +113,9 @@ public sealed class AppearanceSettings
     /// <summary>ゲームの進行スピード（NPCが考える時間）。設定画面と対戦画面のどちらからでも変えられる。</summary>
     public GameSpeed GameSpeed { get; set; } = GameSpeed.Normal;
 
+    /// <summary>操作ガイド・割り込み確認の表示レベル（既定は中級者用：止められる手を持つときだけ確認）。</summary>
+    public GuideLevel GuideLevel { get; set; } = GuideLevel.Intermediate;
+
     /// <summary>効果音の既定音量。</summary>
     public const int DefaultSeVolume = 80;
 
@@ -92,6 +132,10 @@ public sealed class AppearanceSettings
         if (!Enum.IsDefined(GameSpeed))
         {
             GameSpeed = GameSpeed.Normal;
+        }
+        if (!Enum.IsDefined(GuideLevel))
+        {
+            GuideLevel = GuideLevel.Intermediate;
         }
         SeVolume = Math.Clamp(SeVolume, 0, 100);
         BgmVolume = Math.Clamp(BgmVolume, 0, 100);

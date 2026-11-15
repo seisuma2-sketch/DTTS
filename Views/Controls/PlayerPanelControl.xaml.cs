@@ -10,8 +10,26 @@ namespace DTTS.Views.Controls;
 
 public sealed partial class PlayerPanelControl : UserControl
 {
-    /// <summary>裏向きミニカードを最大何枚まで並べるか（それ以上は枚数の数字で示す）。</summary>
-    private const int MaxMiniBacks = 14;
+    /// <summary>裏向きミニカードを最大何枚まで並べるか（それ以上は枚数の数字で示す）。2段×10枚。</summary>
+    private const int MaxMiniBacks = 20;
+
+    /// <summary>1段に並べる枚数（5枚ずつのまとまり2つ）。</summary>
+    private const int BacksPerRow = 10;
+
+    /// <summary>まとまり1つの枚数。まとまりの間に隙間を空けて、ぱっと数えやすくする。</summary>
+    private const int BacksPerGroup = 5;
+
+    private const double BackWidth = 14;
+    private const double BackHeight = 20;
+
+    /// <summary>重なり（隣のカードがどれだけ見えるか＝8px）。</summary>
+    private const double BackOverlap = -6;
+
+    /// <summary>5枚のまとまりの間の隙間。</summary>
+    private const double GroupGap = 4;
+
+    /// <summary>残りがこの枚数以下になったら、枚数の表示を目立たせる（あがりが近い）。</summary>
+    private const int FewCardsThreshold = 3;
 
     private int _shownBacks = -1;
 
@@ -55,7 +73,8 @@ public sealed partial class PlayerPanelControl : UserControl
         int? finishPlace)
     {
         PlayerNameText.Text = name;
-        HandCountText.Text = $"{handCount}枚";
+        HandCountText.Text = handCount.ToString();
+        UpdateHandCountLook(finishPlace.HasValue ? 0 : handCount, finishPlace.HasValue);
         ScoreText.Text = (score >= 0 ? $"+{score}" : score.ToString()) + "pt";
         UpdateMiniBacks(finishPlace.HasValue ? 0 : handCount);
 
@@ -146,50 +165,74 @@ public sealed partial class PlayerPanelControl : UserControl
         RootBorder.BorderThickness = new Thickness(on ? 2 : 1.5);
     }
 
-    /// <summary>残り枚数に応じて、裏向きミニカードを重ねて並べる。</summary>
+    /// <summary>残り枚数の表示（あがりが近いときは目立たせる）と、読み上げ用の名前。</summary>
+    private void UpdateHandCountLook(int count, bool finished)
+    {
+        bool few = ShowCardBacks && !finished && count > 0 && count <= FewCardsThreshold;
+        HandCountPill.Background = few ? Solid(70, 0xFF, 0xB0, 0x3A) : Solid(46, 0xFF, 0xFF, 0xFF);
+        HandCountPill.BorderBrush = few ? Solid(200, 0xFF, 0xC4, 0x5A) : Solid(64, 0xFF, 0xFF, 0xFF);
+        HandCountText.Foreground = few ? Solid(255, 0xFF, 0xD5, 0x80) : Res("AppTextPrimaryBrush");
+        string label = $"残り {count} 枚";
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(HandCountPill, label);
+        ToolTipService.SetToolTip(HandCountPill, label);
+    }
+
+    /// <summary>
+    /// 残り枚数に応じて、裏向きミニカードを並べる。1枚ずつの形が見えるよう少しずつ重ね、
+    /// 5枚ごとに隙間を空ける（10枚を超えたら2段目へ）。白い縁取りで重なっていても枚数を数えられる。
+    /// </summary>
     private void UpdateMiniBacks(int count)
     {
         int n = ShowCardBacks ? Math.Clamp(count, 0, MaxMiniBacks) : 0;
-        MiniBackStack.Visibility = n > 0 ? Visibility.Visible : Visibility.Collapsed;
+        MiniBackRows.Visibility = n > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (n == _shownBacks)
         {
             return;
         }
         _shownBacks = n;
-        MiniBackStack.Children.Clear();
+        MiniBackRows.Children.Clear();
         var accent = AccentColor();
+        StackPanel? row = null;
         for (int i = 0; i < n; i++)
         {
-            var back = new Border
+            int inRow = i % BacksPerRow;
+            if (inRow == 0)
             {
-                Width = 15,
-                Height = 22,
-                CornerRadius = new CornerRadius(2.5),
-                BorderThickness = new Thickness(1),
-                BorderBrush = Solid(255, 0x8A, 0x9A, 0xB8),
-                Background = new LinearGradientBrush
-                {
-                    StartPoint = new Windows.Foundation.Point(0, 0),
-                    EndPoint = new Windows.Foundation.Point(1, 1),
-                    GradientStops =
-                    {
-                        new GradientStop { Color = ColorHelper.FromArgb(255, 0x2C, 0x3C, 0x58), Offset = 0 },
-                        new GradientStop { Color = ColorHelper.FromArgb(255, 0x17, 0x1F, 0x2E), Offset = 1 },
-                    },
-                },
-                // 裏面の模様：テーマカラーの細い帯（重なっても見える右端寄り）
-                Child = new Border
-                {
-                    Width = 3,
-                    Margin = new Thickness(0, 4, 3, 4),
-                    HorizontalAlignment = HorizontalAlignment.Right,
-                    CornerRadius = new CornerRadius(1),
-                    Background = new SolidColorBrush(Color.FromArgb(150, accent.R, accent.G, accent.B)),
-                },
-                // 束の手前ほど少し上にずらし、厚みのある束に見せる
-                Margin = new Thickness(0, Math.Max(0, 2 - (i % 3)), 0, 0),
-            };
-            MiniBackStack.Children.Add(back);
+                row = new StackPanel { Orientation = Orientation.Horizontal };
+                MiniBackRows.Children.Add(row);
+            }
+            double left = inRow == 0 ? 0 : inRow % BacksPerGroup == 0 ? GroupGap : BackOverlap;
+            row!.Children.Add(CreateBack(accent, left));
         }
     }
+
+    private static Border CreateBack(Color accent, double leftMargin) => new()
+    {
+        Width = BackWidth,
+        Height = BackHeight,
+        Margin = new Thickness(leftMargin, 0, 0, 0),
+        CornerRadius = new CornerRadius(2.5),
+        // 白い縁取り：重なった隣のカードとの境目がはっきり見える
+        BorderThickness = new Thickness(1.2),
+        BorderBrush = Solid(255, 0xEE, 0xF2, 0xF8),
+        Background = new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0),
+            EndPoint = new Windows.Foundation.Point(1, 1),
+            GradientStops =
+            {
+                new GradientStop { Color = ColorHelper.FromArgb(255, 0x34, 0x4A, 0x70), Offset = 0 },
+                new GradientStop { Color = ColorHelper.FromArgb(255, 0x1A, 0x24, 0x38), Offset = 1 },
+            },
+        },
+        // 裏面の模様：テーマカラーの内枠（トランプの裏らしく見せる）
+        Child = new Border
+        {
+            Margin = new Thickness(1.5),
+            CornerRadius = new CornerRadius(1.2),
+            BorderThickness = new Thickness(1),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(190, accent.R, accent.G, accent.B)),
+            Background = new SolidColorBrush(Color.FromArgb(40, accent.R, accent.G, accent.B)),
+        },
+    };
 }

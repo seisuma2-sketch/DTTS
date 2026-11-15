@@ -14,8 +14,14 @@ namespace DTTS.Core.Logic;
 /// <param name="IsOptional">プレイヤーが発動を選択できる効果か（革命選択ルール等）。</param>
 public sealed record TriggeredEffect(SpecialEffectType Type, int Magnitude = 1, bool IsOptional = false)
 {
+    /// <summary>
+    /// 種類としては場を流す効果だが、ルール設定で流さないことになっているか
+    /// （エンペラーの場流しがオフのとき。通知・演出だけ行う）。
+    /// </summary>
+    public bool SuppressFlush { get; init; }
+
     /// <summary>この効果が場を流すか。</summary>
-    public bool FlushesField => Type.FlushesField();
+    public bool FlushesField => !SuppressFlush && Type.FlushesField();
 
     /// <summary>この効果が革命（強さ反転）を引き起こすか。</summary>
     public bool IsRevolutionTrigger => Type.IsRevolutionTrigger();

@@ -93,6 +93,43 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
     }
 
     // ------------------------------------------------------------------
+    // 操作ガイド・確認レベル（変更は即座に保存。次の対戦から反映）
+    // ------------------------------------------------------------------
+
+    /// <summary>操作ガイドのレベルの選択肢（初心者用・中級者用・上級者用）。</summary>
+    public IReadOnlyList<string> GuideLevelOptions { get; } = GuideLevelInfo.All.Select(l => l.DisplayName()).ToArray();
+
+    /// <summary>選んでいる操作ガイドのレベルの番号。</summary>
+    public int GuideLevelIndex
+    {
+        get => Math.Max(0, IndexOfGuideLevel(Appearance.GuideLevel));
+        set
+        {
+            // コンボボックスは項目の読み込み中に -1 を書き戻すことがある。範囲外の値は無視する
+            if (value < 0 || value >= GuideLevelInfo.All.Count) return;
+            var level = GuideLevelInfo.All[value];
+            if (Appearance.GuideLevel == level) return;
+            Appearance.GuideLevel = level;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(GuideLevelDescription));
+            StatusMessage = $"操作ガイドを「{level.DisplayName()}」にしました（次の対戦から反映）";
+            _ = SaveAppearanceAsync();
+        }
+    }
+
+    /// <summary>選んでいる操作ガイドのレベルの説明。</summary>
+    public string GuideLevelDescription => Appearance.GuideLevel.Description();
+
+    private static int IndexOfGuideLevel(GuideLevel level)
+    {
+        for (int i = 0; i < GuideLevelInfo.All.Count; i++)
+        {
+            if (GuideLevelInfo.All[i] == level) return i;
+        }
+        return -1;
+    }
+
+    // ------------------------------------------------------------------
     // マイプリセット（現在のルール構成に名前を付けて保存・読み込み・削除）
     // ------------------------------------------------------------------
 
@@ -341,6 +378,8 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
         OnPropertyChanged(nameof(SeVolume));
         OnPropertyChanged(nameof(BgmVolume));
         OnPropertyChanged(nameof(SpeedIndex));
+        OnPropertyChanged(nameof(GuideLevelIndex));
+        OnPropertyChanged(nameof(GuideLevelDescription));
         try
         {
             _presetStore = await _settingsRepo.LoadRulePresetsAsync();

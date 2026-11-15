@@ -96,6 +96,7 @@ public static class RulePresets
         seq.EffectsInSequence = true;
         seq.EmperorEnabled = true;
         seq.EmperorCausesRevolution = true;
+        seq.EmperorFlushesField = true;
 
         var lk = r.Lock;
         lk.SuitLockEnabled = true;

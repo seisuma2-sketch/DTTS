@@ -9,6 +9,7 @@ using DTTS.Common;
 using DTTS.Core.Models;
 using DTTS.Services.Database;
 using DTTS.Services.Network;
+using DTTS.Services.Settings;
 using Microsoft.UI.Dispatching;
 
 namespace DTTS.ViewModels;
@@ -112,11 +113,13 @@ public sealed partial class LobbyViewModel : ViewModelBase
         StatusMessage = "部屋を立ち上げています...";
         try
         {
+            var appearance = await _settingsRepo.LoadAppearanceAsync();
             var options = new HostOptions
             {
                 RoomName = HostRoomName,
                 HostPlayerName = PlayerName,
-                Port = NetProtocol.DefaultTcpPort
+                Port = NetProtocol.DefaultTcpPort,
+                HostAlwaysAskInterrupt = appearance.GuideLevel.AlwaysAsksInterrupt(),
             };
 
             _hostSession = await _networkService.HostAsync(options);
@@ -154,7 +157,8 @@ public sealed partial class LobbyViewModel : ViewModelBase
         StatusMessage = $"{host}:{port} に接続中...";
         try
         {
-            _client = await _networkService.JoinAsync(host, port, PlayerName);
+            var appearance = await _settingsRepo.LoadAppearanceAsync();
+            _client = await _networkService.JoinAsync(host, port, PlayerName, appearance.GuideLevel.AlwaysAsksInterrupt());
             IsHost = false;
             IsInRoom = true;
             RoomTitle = $"対戦部屋 ({host}:{port})";

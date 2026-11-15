@@ -40,6 +40,12 @@ public sealed record HostOptions
 
     /// <summary>NPCの思考時間。</summary>
     public NpcTimingOptions NpcTiming { get; init; } = new();
+
+    /// <summary>
+    /// ホスト（座席0）には、止められる手を持っていなくても割り込み（4止め・砂嵐）の確認を出す
+    /// （操作ガイド「初心者用」）。false なら止められる手を持つときだけ確認する。
+    /// </summary>
+    public bool HostAlwaysAskInterrupt { get; init; }
 }
 
 /// <summary>
@@ -69,6 +75,8 @@ public sealed class GameHostSession : IAsyncDisposable
         public required PlayerKind Kind { get; set; }
         public MessageConnection? Connection { get; set; }
         public string? ClientId { get; set; }
+        /// <summary>止められる手がなくても割り込みの確認を受けたい（参加者の操作ガイドが「初心者用」）。</summary>
+        public bool AlwaysAskInterrupt { get; set; }
         public required NpcProfile NpcProfile { get; init; }
         public required string NpcName { get; init; }
     }
@@ -172,6 +180,10 @@ public sealed class GameHostSession : IAsyncDisposable
             {
                 npc.Assign(seat.Id, seat.NpcProfile); // 切断時の引き継ぎに備えて全席に割り当てておく（Npc 席のみ動作）
             }
+            foreach (var seat in _seats)
+            {
+                SyncAlwaysAsk(engine, seat);
+            }
             engine.EventOccurred += OnEngineEvent;
             Engine = engine;
             Npc = npc;
@@ -263,6 +275,7 @@ public sealed class GameHostSession : IAsyncDisposable
         seat.Connection = connection;
         seat.ClientId = join.ClientId;
         seat.Kind = PlayerKind.Remote;
+        seat.AlwaysAskInterrupt = join.AlwaysAskInterrupt;
         if (!inGame)
         {
             seat.Name = SanitizeName(join.PlayerName, seat.Id);
@@ -273,6 +286,7 @@ public sealed class GameHostSession : IAsyncDisposable
         {
             connection.Send(new GameStarted(Engine!.Rules.ToJson()));
             Engine.SetPlayerKind(seat.Id, PlayerKind.Remote); // NPC から操作を取り戻す
+            SyncAlwaysAsk(Engine, seat);
             SendView(seat);
         }
         NotifyLobby();
@@ -325,6 +339,7 @@ public sealed class GameHostSession : IAsyncDisposable
             // 対戦中の切断：NPC が即座に引き継ぐ（席の ClientId は残し、再接続で戻れるようにする）
             seat.Kind = PlayerKind.Npc;
             Engine.SetPlayerKind(seat.Id, PlayerKind.Npc);
+            SyncAlwaysAsk(Engine, seat); // NPC が引き継いだ席は、止められるときだけ聞く
         }
         else
         {
@@ -334,6 +349,22 @@ public sealed class GameHostSession : IAsyncDisposable
             seat.Name = seat.NpcName;
         }
         NotifyLobby();
+    }
+
+    /// <summary>その席に「止められなくても割り込みの確認を出す」かをエンジンへ反映する（人が操作している席だけ）。</summary>
+    private void SyncAlwaysAsk(GameEngine engine, Seat seat)
+    {
+        bool ask = seat.Id == 0
+            ? _options.HostAlwaysAskInterrupt
+            : seat.Kind == PlayerKind.Remote && seat.AlwaysAskInterrupt;
+        if (ask)
+        {
+            engine.AlwaysAskInterruptPlayerIds.Add(seat.Id);
+        }
+        else
+        {
+            engine.AlwaysAskInterruptPlayerIds.Remove(seat.Id);
+        }
     }
 
     private static void Reject(MessageConnection connection, string reason)

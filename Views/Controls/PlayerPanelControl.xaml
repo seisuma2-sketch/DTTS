@@ -83,32 +83,51 @@
                     </Border>
                 </Grid>
 
-                <!-- 2行目: 手札（裏向きミニカード束と枚数） & スコア -->
+                <!-- 2行目: 手札（裏向きミニカード）と残り枚数。カードは5枚ずつのまとまりで並べ、10枚を超えたら2段にする -->
                 <Grid Grid.Row="1" ColumnSpacing="10">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                        <!-- 残り枚数に応じた裏向きカードの束（相手が出すと減っていく） -->
-                        <StackPanel x:Name="MiniBackStack" Orientation="Horizontal" Spacing="-10" VerticalAlignment="Center" Height="24" />
-                        <TextBlock x:Name="HandCountText" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" Foreground="{StaticResource AppTextPrimaryBrush}" Text="13枚" />
-                    </StackPanel>
+                    <!-- 残り枚数に応じた裏向きカード（相手が出すと減っていく）。中身はコードで並べる -->
+                    <StackPanel
+                        x:Name="MiniBackRows"
+                        Orientation="Vertical"
+                        Spacing="3"
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Left" />
 
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                        <TextBlock FontSize="11" VerticalAlignment="Center" Foreground="{StaticResource AppTextSecondaryBrush}" Text="得点" />
-                        <TextBlock x:Name="ScoreText" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" Foreground="{StaticResource AppAccentBrush}" Text="+0pt" />
-                    </StackPanel>
+                    <!-- 残り枚数（数字を大きく） -->
+                    <Border
+                        x:Name="HandCountPill"
+                        Grid.Column="1"
+                        CornerRadius="9"
+                        Padding="8,1,8,2"
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Right"
+                        Background="#2EFFFFFF"
+                        BorderBrush="#40FFFFFF"
+                        BorderThickness="1">
+                        <StackPanel Orientation="Horizontal" Spacing="2">
+                            <TextBlock x:Name="HandCountText" FontSize="19" FontWeight="Bold" VerticalAlignment="Bottom" Foreground="{StaticResource AppTextPrimaryBrush}" Text="13" />
+                            <TextBlock x:Name="HandCountUnit" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Bottom" Margin="0,0,0,3" Foreground="{StaticResource AppTextSecondaryBrush}" Text="枚" />
+                        </StackPanel>
+                    </Border>
                 </Grid>
 
-                <!-- 3行目: 状態ステータス (ターン中 / 考え中 / パス / あがり) -->
-                <Grid Grid.Row="2" MinHeight="22">
+                <!-- 3行目: 状態ステータス (ターン中 / 考え中 / パス / あがり) & スコア -->
+                <Grid Grid.Row="2" MinHeight="22" ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
                     <Border
                         x:Name="StatusBadge"
                         CornerRadius="10"
                         Padding="8,2"
                         HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
                         Background="#2A3040">
                         <StackPanel Orientation="Horizontal" Spacing="5">
                             <Ellipse x:Name="StatusDot" Width="6" Height="6" VerticalAlignment="Center" Fill="#7A8293" />
@@ -119,6 +138,11 @@
                                 Text="待機中" />
                         </StackPanel>
                     </Border>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <TextBlock FontSize="11" VerticalAlignment="Center" Foreground="{StaticResource AppTextSecondaryBrush}" Text="得点" />
+                        <TextBlock x:Name="ScoreText" FontSize="14" FontWeight="Bold" VerticalAlignment="Center" Foreground="{StaticResource AppAccentBrush}" Text="+0pt" />
+                    </StackPanel>
                 </Grid>
             </Grid>
         </Border>

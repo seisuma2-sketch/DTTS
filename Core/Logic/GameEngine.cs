@@ -1111,15 +1111,9 @@ public sealed class GameEngine
 
         if (flushEffect is not null)
         {
-            if (flushEffect.Type == SpecialEffectType.EightCut && _rules.Flow.FourStopEnabled)
+            // 砂嵐・スペ3返し以外の流し役は、止められる人に割り込みの機会を与えてから流す
+            if (TryOpenInterruptWindow(playerId, flushEffect))
             {
-                OpenInterruptWindow(playerId, flushEffect, DecisionKind.FourStopChance);
-                return;
-            }
-            if (flushEffect.Type is SpecialEffectType.Rokurokubi or SpecialEffectType.Ambulance && _rules.Flow.SandstormEnabled)
-            {
-                // ろくろ首・99車は、砂嵐を持つ他のプレイヤーが割り込んで止められる
-                OpenInterruptWindow(playerId, flushEffect, DecisionKind.SandstormStopChance);
                 return;
             }
             Emit(new EffectAppliedEvent(playerId, flushEffect, true, Field));
@@ -1171,32 +1165,58 @@ public sealed class GameEngine
     // ======================================================================
 
     /// <summary>
-    /// 場を流す効果の発動を保留し、他のプレイヤーへ進行方向順に割り込みの機会を与える
-    /// （4止めは止められる手を持つ人だけ、砂嵐は残っている全員）。
+    /// 止められる手を持っていなくても、割り込み（4止め・砂嵐）の確認を出すプレイヤー
+    /// （操作ガイドが「初心者用」の人間プレイヤー）。ここにいない人は、実際に止められる手を持つときだけ聞かれる。
+    /// </summary>
+    public ISet<int> AlwaysAskInterruptPlayerIds { get; } = new HashSet<int>();
+
+    /// <summary>
+    /// 場を流す効果に割り込める手段を返す（4止め・砂嵐）。
+    /// 砂嵐そのものは誰にも止められない最上位の流し役なので、割り込みは受け付けない。スペ3返しも即座に流れる。
+    /// </summary>
+    private (bool FourStop, bool Sandstorm) InterruptMeansFor(TriggeredEffect effect)
+    {
+        var flow = _rules.Flow;
+        // 階段の8切りは4止めでは止められない（砂嵐なら止められる）
+        bool fourStop = effect.Type == SpecialEffectType.EightCut
+            && flow.FourStopEnabled
+            && Field.CurrentPlay is { IsSequenceLike: false };
+        bool sandstorm = flow.SandstormEnabled && effect.Type is
+            SpecialEffectType.EightCut or SpecialEffectType.Rokurokubi or
+            SpecialEffectType.Ambulance or SpecialEffectType.Emperor;
+        return (fourStop, sandstorm);
+    }
+
+    /// <summary>
+    /// 場を流す効果の発動を保留し、他のプレイヤーへ進行方向順に割り込みの機会を与える。
+    /// 機会を与えるのは、実際に止められる手（4止め・砂嵐）を持つ人と <see cref="AlwaysAskInterruptPlayerIds"/> の人。
+    /// 誰もいなければ割り込みは起きず、すぐに効果が成立して場が流れる。
     /// </summary>
     /// <param name="flusherId">場を流そうとしているプレイヤー。</param>
-    /// <param name="effect">保留する効果（8切り・ろくろ首・99車）。</param>
-    /// <param name="kind">割り込みの種類（4止め・砂嵐）。</param>
-    private void OpenInterruptWindow(int flusherId, TriggeredEffect effect, DecisionKind kind)
+    /// <param name="effect">保留する効果（8切り・ろくろ首・99車・エンペラー）。</param>
+    /// <returns>割り込みの受付を始めたら true（このルールでは止められない効果なら false）。</returns>
+    private bool TryOpenInterruptWindow(int flusherId, TriggeredEffect effect)
     {
-        Field = kind == DecisionKind.SandstormStopChance
-            ? Field.WithSandstormStopPending(true)
-            : Field.WithEightCutPending(true);
+        var (fourStop, sandstorm) = InterruptMeansFor(effect);
+        if (!fourStop && !sandstorm)
+        {
+            return false;
+        }
+        Field = Field.WithEightCutPending(fourStop).WithSandstormStopPending(sandstorm);
         _interruptedPlayerId = flusherId;
         _interruptedEffect = effect;
-        _interruptKind = kind;
+        // 8切りは「4止めの機会」（砂嵐も受け付ける）、それ以外は「砂嵐の機会」として聞く
+        _interruptKind = fourStop ? DecisionKind.FourStopChance : DecisionKind.SandstormStopChance;
         _interruptQueue.Clear();
         foreach (int id in ActivePlayersAfter(flusherId).Where(id => id != flusherId))
         {
-            // 砂嵐（ろくろ首・99車への割り込み）は、持っているかどうかに関わらず全員に「止める／パス（流す）」を確認する。
-            // 持っている人にだけ聞くと、確認が出た・出ない（NPCが考え込んだ）ことで手札が他の人に透けてしまうため。
-            // 4止めは従来どおり、止められる手を持つプレイヤーにのみ機会を与える
-            if (kind == DecisionKind.SandstormStopChance || _judge.GetLegalPlays(GetPlayer(id).Hand, Field).Count > 0)
+            if (AlwaysAskInterruptPlayerIds.Contains(id) || _judge.GetLegalPlays(GetPlayer(id).Hand, Field).Count > 0)
             {
                 _interruptQueue.Enqueue(id);
             }
         }
         AskNextInterrupt();
+        return true;
     }
 
     private void AskNextInterrupt()

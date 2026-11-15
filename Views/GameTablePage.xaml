@@ -30,6 +30,11 @@
                         <Setter Target="RightSeatPanel.Visibility" Value="Visible" />
                         <Setter Target="LeftColumn.Width" Value="240" />
                         <Setter Target="RightColumn.Width" Value="240" />
+                        <!-- 操作ガイドは右の席の下の空き（出す・パスのボタンの上）に出し、場や状況表示に重ねない -->
+                        <Setter Target="GuideHintBanner.(Grid.Column)" Value="2" />
+                        <Setter Target="GuideHintBanner.HorizontalAlignment" Value="Stretch" />
+                        <Setter Target="GuideHintBanner.MaxWidth" Value="236" />
+                        <Setter Target="GuideHintBanner.Margin" Value="4,0,0,4" />
                     </VisualState.Setters>
                 </VisualState>
 
@@ -302,6 +307,57 @@
                         Foreground="{StaticResource AppAccentBrush}" />
                 </StackPanel>
             </Grid>
+
+            <!-- 操作ガイド（ヒント）。量は設定の「操作ガイド・確認レベル」で決まり、しばらくすると自動で消える。
+                 場の表示がずれないよう重ねて出す（横フル画面では右の席の下、コンパクトでは中央の列の下端） -->
+            <Border
+                x:Name="GuideHintBanner"
+                Grid.Row="1"
+                Grid.Column="1"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Bottom"
+                Margin="0,0,0,2"
+                MaxWidth="520"
+                Visibility="{x:Bind ViewModel.HasGuideHint, Mode=OneWay}"
+                CornerRadius="10"
+                Padding="12,7,6,7"
+                Background="#E614202E"
+                BorderBrush="#5579A8D8"
+                BorderThickness="1"
+                AutomationProperties.Name="操作ガイド"
+                AutomationProperties.LiveSetting="Polite">
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xEA80;" FontSize="14" Foreground="#FFE7C15A" VerticalAlignment="Top" Margin="0,2,0,0" />
+                    <TextBlock
+                        x:Name="GuideHintText"
+                        Grid.Column="1"
+                        Text="{x:Bind ViewModel.GuideHint, Mode=OneWay}"
+                        TextWrapping="Wrap"
+                        FontSize="12.5"
+                        LineHeight="18"
+                        Foreground="#FFDCE6F2"
+                        VerticalAlignment="Center" />
+                    <Button
+                        Grid.Column="2"
+                        Command="{x:Bind ViewModel.DismissGuideHintCommand}"
+                        Width="24"
+                        Height="24"
+                        Padding="0"
+                        VerticalAlignment="Top"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        IsTabStop="False"
+                        AutomationProperties.Name="ヒントを閉じる"
+                        ToolTipService.ToolTip="ヒントを閉じる（設定の「操作ガイド」で出す量を変えられます）">
+                        <FontIcon Glyph="&#xE711;" FontSize="10" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                    </Button>
+                </Grid>
+            </Border>
 
             <!-- 下（自分） & 手札 & アクション操作 -->
             <!--

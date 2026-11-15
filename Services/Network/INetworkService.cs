@@ -19,7 +19,8 @@ public interface INetworkService
     Task<GameHostSession> HostAsync(HostOptions options, CancellationToken cancellationToken = default);
 
     /// <summary>部屋に参加する。</summary>
-    Task<RemoteGameClient> JoinAsync(string host, int port, string playerName, CancellationToken cancellationToken = default);
+    /// <param name="alwaysAskInterrupt">止められる手がなくても割り込みの確認を受けたい（操作ガイド「初心者用」）。</param>
+    Task<RemoteGameClient> JoinAsync(string host, int port, string playerName, bool alwaysAskInterrupt = false, CancellationToken cancellationToken = default);
 }
 
 /// <summary>LAN（UDP探索＋TCP）による <see cref="INetworkService"/> 実装。</summary>
@@ -55,6 +56,6 @@ public sealed class LanNetworkService : INetworkService
     }
 
     /// <inheritdoc />
-    public Task<RemoteGameClient> JoinAsync(string host, int port, string playerName, CancellationToken cancellationToken = default)
-        => RemoteGameClient.JoinAsync(host, port, playerName, _clientId, _dispatcher, cancellationToken: cancellationToken);
+    public Task<RemoteGameClient> JoinAsync(string host, int port, string playerName, bool alwaysAskInterrupt = false, CancellationToken cancellationToken = default)
+        => RemoteGameClient.JoinAsync(host, port, playerName, _clientId, _dispatcher, cancellationToken: cancellationToken, alwaysAskInterrupt: alwaysAskInterrupt);
 }

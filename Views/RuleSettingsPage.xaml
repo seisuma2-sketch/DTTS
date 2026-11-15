@@ -181,6 +181,28 @@
                                 </StackPanel>
                             </StackPanel>
 
+                            <!-- 操作ガイド・確認レベル（ヒントの量と、4止め・砂嵐の割り込み確認の出し方）。変更は即座に保存 -->
+                            <StackPanel Spacing="4">
+                                <StackPanel Orientation="Horizontal" Spacing="12">
+                                    <TextBlock Text="操作ガイド・確認レベル" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                    <ComboBox
+                                        x:Name="GuideLevelCombo"
+                                        ItemsSource="{x:Bind ViewModel.GuideLevelOptions}"
+                                        SelectedIndex="{x:Bind ViewModel.GuideLevelIndex, Mode=TwoWay}"
+                                        MinWidth="240"
+                                        VerticalAlignment="Center"
+                                        ToolTipService.ToolTip="対戦中のヒントの量と、4止め・砂嵐の確認をいつ出すかを選びます"
+                                        AutomationProperties.Name="操作ガイド・確認レベル" />
+                                </StackPanel>
+                                <TextBlock
+                                    Text="{x:Bind ViewModel.GuideLevelDescription, Mode=OneWay}"
+                                    FontSize="12"
+                                    TextWrapping="Wrap"
+                                    MaxWidth="640"
+                                    HorizontalAlignment="Left"
+                                    Foreground="{StaticResource AppTextSecondaryBrush}" />
+                            </StackPanel>
+
                             <!-- カテゴリごとの折りたたみカード -->
                             <ItemsControl ItemsSource="{x:Bind ViewModel.RuleCategories, Mode=OneWay}">
                                 <ItemsControl.ItemsPanel>

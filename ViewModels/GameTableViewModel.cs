@@ -385,7 +385,9 @@ public sealed partial class GameTableViewModel : ViewModelBase
         // 進行スピード（設定画面・前回の対戦で選んだもの）
         try
         {
-            Speed = (await _settingsRepo.LoadAppearanceAsync()).GameSpeed;
+            var appearance = await _settingsRepo.LoadAppearanceAsync();
+            Speed = appearance.GameSpeed;
+            _guide = new GuideHints(appearance.GuideLevel); // 操作ガイドのレベル（ヒントの量・割り込み確認の出し方）
         }
         catch (Exception ex)
         {
@@ -469,6 +471,11 @@ public sealed partial class GameTableViewModel : ViewModelBase
         };
 
         _engine = new GameEngine(_rules, setups);
+        if (_guide.Level.AlwaysAsksInterrupt())
+        {
+            // 初心者用：4止め・砂嵐を持っていなくても「止める／パス（流す）」を確認する
+            _engine.AlwaysAskInterruptPlayerIds.Add(0);
+        }
 
         // NPCコントローラー初期化（UIのワンショットタイマーを渡す）
         _npcScheduler = new DispatcherQueueNpcScheduler(_dispatcherQueue);
@@ -506,6 +513,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
             case RoundStartedEvent rs:
                 // 新しいラウンドは、革命・11バック・縛りが一切残っていない状態から始める
                 ResetRoundBadges();
+                if (rs.RoundNumber == 1) _guide.Reset(); // 再戦：中級者用の「初めての効果」ヒントをまた出す
                 // 席替え：画面の左・上・右の席も新しい座席順に並べ直す（手番の回り方と画面を一致させる）
                 ApplySeatOrder(rs.SeatOrder);
                 break;
@@ -547,6 +555,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 {
                     TriggerCutInForEffect(ea.Effect.Type, ea.PlayerId, ea.Field.IsElevenBack);
                     PlayEffectSound(ea.Effect.Type);
+                    ShowGuideHint(_guide.ForEffect(ea.Effect.Type));
                 }
                 break;
 
@@ -669,6 +678,52 @@ public sealed partial class GameTableViewModel : ViewModelBase
     /// <summary>直近の出来事（捨て札・12ボンバーの結果など）。手番の表示で上書きされないよう、状況表示とは別に出す。</summary>
     [ObservableProperty]
     public partial string NoticeMessage { get; set; } = "";
+
+    // ------------------------------------------------------------------
+    // 操作ガイド（ヒント）。量は設定の「操作ガイド・確認レベル」で決まる
+    // ------------------------------------------------------------------
+
+    /// <summary>ヒントを出してから自動で消すまでの時間。</summary>
+    private static readonly TimeSpan GuideHintDuration = TimeSpan.FromSeconds(9);
+
+    private GuideHints _guide = new(GuideLevel.Intermediate);
+    private DispatcherQueueTimer? _guideHintTimer;
+    private bool _guestWasMyTurn;
+
+    /// <summary>今出している操作ガイド（なければ空）。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasGuideHint))]
+    public partial string GuideHint { get; set; } = "";
+
+    /// <summary>操作ガイドを出しているか。</summary>
+    public bool HasGuideHint => GuideHint.Length > 0;
+
+    /// <summary>操作ガイドを出す（null なら何もしない）。しばらくすると自動で消える。残りをスキップ中は出さない。</summary>
+    private void ShowGuideHint(string? text)
+    {
+        if (string.IsNullOrEmpty(text) || _isFastForwarding || _isShutDown)
+        {
+            return;
+        }
+        GuideHint = text;
+        if (_guideHintTimer is null)
+        {
+            _guideHintTimer = _dispatcherQueue.CreateTimer();
+            _guideHintTimer.Interval = GuideHintDuration;
+            _guideHintTimer.IsRepeating = false;
+            _guideHintTimer.Tick += (_, _) => GuideHint = "";
+        }
+        _guideHintTimer.Stop();
+        _guideHintTimer.Start();
+    }
+
+    /// <summary>操作ガイドを消す（×ボタン）。</summary>
+    [RelayCommand]
+    private void DismissGuideHint()
+    {
+        _guideHintTimer?.Stop();
+        GuideHint = "";
+    }
 
     private int? _bomberDeclarer;
     private List<Rank> _bomberRanks = new();
@@ -1050,6 +1105,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                         TriggerCutInForEffect(effect, effectPlayer, null);
                     }
                     PlayEffectSound(effect);
+                    ShowGuideHint(_guide.ForEffect(effect));
                     break;
                 case "PlayersSkipped" when notice.PlayerId is { } skipper:
                     NoticeMessage = $"{GetPlayerVm(skipper).Name} のスキップで {notice.Count}人 の手番が飛ばされました";
@@ -1247,6 +1303,16 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         StatusMessage = isMyDecision ? "あなたのターンです" : "相手のターンです...";
 
+        // 初心者用：自分の手番になったときだけヒントを出す（同じ手番の画面更新では出し直さない）
+        bool myTurnNow = isMyDecision && view.Decision?.Kind == DecisionKind.PlayOrPass;
+        if (myTurnNow && !_guestWasMyTurn)
+        {
+            var fv = view.Field;
+            ShowGuideHint(_guide.ForTurn(fv.CurrentCardIds is not { Length: > 0 }, legalSet.Count > 0,
+                fv.IsStrengthReversed, fv.LockedSuits is { Length: > 0 }, fv.IsNumberLocked));
+        }
+        _guestWasMyTurn = myTurnNow;
+
         // 割り込みの確認（4止め・砂嵐）。同じ確認を出している間は、選び直したカードを上書きしない
         if (isMyDecision && view.Decision is { } interrupt && interrupt.Kind.IsInterruptChance())
         {
@@ -1303,6 +1369,13 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         switch (dec.Kind)
         {
+            case DecisionKind.PlayOrPass when _engine is not null:
+                // 初心者用：自分の手番ごとに、今できることのヒントを出す（ゲストは画面の更新時に出す）
+                var f = _engine.Field;
+                ShowGuideHint(_guide.ForTurn(f.IsEmpty, _engine.GetLegalPlays(_myPlayerId).Count > 0,
+                    f.IsStrengthReversed, f.Lock.IsSuitLocked, f.Lock.IsNumberLocked));
+                break;
+
             case DecisionKind.FourStopChance:
             case DecisionKind.SandstormStopChance:
                 // 1人用・ホスト：手札を最新にしてから、止められる札を選択済みにして確認を出す
@@ -1339,6 +1412,10 @@ public sealed partial class GameTableViewModel : ViewModelBase
                     _ => "カードを手札から選んでください",
                 };
                 DecisionMessage = reason;
+                if (dec.Purpose is { } purpose)
+                {
+                    ShowGuideHint(_guide.ForCardSelection(purpose));
+                }
                 // 出す操作で選んでいたカードが残っていると数え間違えるため、選択を空にして始める
                 foreach (var cardVm in HumanHand)
                 {
@@ -1386,7 +1463,16 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
     private static string InterruptStatus(DecisionKind kind) => kind == DecisionKind.SandstormStopChance
         ? "砂嵐で止めるか、パス（流す）かを選んでください"
-        : "割り込みのチャンスです（止める / 見送る）";
+        : "4止め（または砂嵐）で止めるか、パス（流す）かを選んでください";
+
+    private static string FlushEffectLabel(SpecialEffectType? effect) => effect switch
+    {
+        SpecialEffectType.EightCut => "8切り",
+        SpecialEffectType.Ambulance => "99車（救急車）",
+        SpecialEffectType.Rokurokubi => "ろくろ首",
+        SpecialEffectType.Emperor => "エンペラー",
+        _ => "場流し",
+    };
 
     /// <summary>
     /// 割り込みの確認を開く。止められる札（<paramref name="stopCards"/>）を選択済みにするので、
@@ -1396,25 +1482,40 @@ public sealed partial class GameTableViewModel : ViewModelBase
     {
         string flusher = flusherId is { } id ? GetPlayerVm(id).Name : "相手";
         bool canStop = stopCards is { Count: > 0 };
-        if (kind == DecisionKind.SandstormStopChance)
+        string target = FlushEffectLabel(effect);
+        var flow = _rules.Flow;
+
+        // この確認で使える止め方：8切りへの4止め（「4止めの機会」のときだけ）と、流し役への砂嵐
+        bool fourStopOpen = kind == DecisionKind.FourStopChance;
+        bool sandstormOpen = flow.SandstormEnabled && effect is
+            SpecialEffectType.EightCut or SpecialEffectType.Rokurokubi or SpecialEffectType.Ambulance or SpecialEffectType.Emperor;
+        int eightCount = Math.Max(1, FieldCards.Count);
+        int fourCount = flow.FourStopCount == FourStopCountRule.SameAsEight ? eightCount : eightCount * 2;
+        string fourStop = $"4止め（{RankOptionViewModel.LabelOf(flow.FourStopRank)}を{fourCount}枚）";
+        string sandstorm = $"砂嵐（{RankOptionViewModel.LabelOf(flow.SandstormRank)}を{flow.SandstormCount}枚）";
+        string means = fourStopOpen && sandstormOpen ? $"{fourStop}か{sandstorm}" : fourStopOpen ? fourStop : sandstorm;
+
+        // 選んである止め札が4止めか砂嵐か（4止めは場を流さず続き、砂嵐は場を流して自分が親になる）
+        bool stopIsFour = canStop && fourStopOpen && stopCards!.Any(c => c.Rank == flow.FourStopRank);
+
+        InterruptTitle = $"{flusher} の{target}：止める？";
+        if (!canStop)
         {
-            // 砂嵐の確認は、持っていなくても全員に出る（手札の有無が他の人に透けないように）
-            string target = effect == SpecialEffectType.Ambulance ? "99車（救急車）" : "ろくろ首";
-            string sandstorm = $"砂嵐（{RankOptionViewModel.LabelOf(_rules.Flow.SandstormRank)}を{_rules.Flow.SandstormCount}枚）";
-            InterruptTitle = $"{flusher} の{target}：砂嵐で止める？";
-            InterruptMessage = canStop
-                ? $"{sandstorm}で止められます。止めると場が流れて、あなたが親になります。止めなければ「パス（流す）」。"
-                : $"{sandstorm}を持っていないので止められません。「パス（流す）」を押すと{target}で場が流れます。";
-            InterruptAcceptText = "砂嵐で止める [Enter]";
-            InterruptDeclineText = "パス（流す） [BS]";
+            // 止められる手がないのに確認が出るのは、操作ガイド「初心者用」のときだけ
+            InterruptMessage = $"{means}を持っていないので止められません。「パス（流す）」を押すと{target}で場が流れます。";
+            InterruptAcceptText = "止める [Enter]";
+        }
+        else if (stopIsFour)
+        {
+            InterruptMessage = $"{fourStop}で止められます。止めると場は流れず、次の人へ続きます。止めなければ「パス（流す）」。";
+            InterruptAcceptText = "4で止める [Enter]";
         }
         else
         {
-            InterruptTitle = "割り込みチャンス：4止め";
-            InterruptMessage = $"{flusher} の8切りを、4で止められます。止めると場は流れず、次の人へ続きます。";
-            InterruptAcceptText = "4で止める [Enter]";
-            InterruptDeclineText = "見送る [BS]";
+            InterruptMessage = $"{sandstorm}で止められます。止めると場が流れて、あなたが親になります。止めなければ「パス（流す）」。";
+            InterruptAcceptText = "砂嵐で止める [Enter]";
         }
+        InterruptDeclineText = "パス（流す） [BS]";
 
         foreach (var cardVm in HumanHand)
         {
@@ -1894,6 +1995,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private async Task ShutdownCoreAsync()
     {
         _isShutDown = true;
+        _guideHintTimer?.Stop();
+        GuideHint = "";
         IsDecisionDialogOpen = false;
         IsInterruptPromptOpen = false;
         CanPlay = false;
