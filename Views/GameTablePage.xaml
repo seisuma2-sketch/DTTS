@@ -25,9 +25,9 @@
                     </VisualState.StateTriggers>
                     <VisualState.Setters>
                         <Setter Target="OpponentRow.Visibility" Value="Collapsed" />
-                        <Setter Target="Player2Panel.Visibility" Value="Visible" />
-                        <Setter Target="Player3Panel.Visibility" Value="Visible" />
-                        <Setter Target="Player1Panel.Visibility" Value="Visible" />
+                        <Setter Target="TopSeatPanel.Visibility" Value="Visible" />
+                        <Setter Target="LeftSeatPanel.Visibility" Value="Visible" />
+                        <Setter Target="RightSeatPanel.Visibility" Value="Visible" />
                         <Setter Target="LeftColumn.Width" Value="240" />
                         <Setter Target="RightColumn.Width" Value="240" />
                     </VisualState.Setters>
@@ -40,9 +40,9 @@
                     </VisualState.StateTriggers>
                     <VisualState.Setters>
                         <Setter Target="OpponentRow.Visibility" Value="Visible" />
-                        <Setter Target="Player2Panel.Visibility" Value="Collapsed" />
-                        <Setter Target="Player3Panel.Visibility" Value="Collapsed" />
-                        <Setter Target="Player1Panel.Visibility" Value="Collapsed" />
+                        <Setter Target="TopSeatPanel.Visibility" Value="Collapsed" />
+                        <Setter Target="LeftSeatPanel.Visibility" Value="Collapsed" />
+                        <Setter Target="RightSeatPanel.Visibility" Value="Collapsed" />
                         <!-- 左右の相手パネルを出さないので、横の列は中身（ヘッダー）の幅だけにする -->
                         <Setter Target="LeftColumn.Width" Value="Auto" />
                         <Setter Target="RightColumn.Width" Value="Auto" />
@@ -57,6 +57,7 @@
                         <!-- 下の段が高くなる分、手札の上に浮かせる操作バーも持ち上げる -->
                         <Setter Target="CardSelectionBar.Margin" Value="16,0,16,300" />
                         <Setter Target="InterruptBar.Margin" Value="16,0,16,300" />
+                        <Setter Target="SkipToResultButton.Margin" Value="16,0,16,300" />
                     </VisualState.Setters>
                 </VisualState>
             </VisualStateGroup>
@@ -141,37 +142,42 @@
                 </StackPanel>
             </StackPanel>
 
-            <!-- コンパクトモード用：上部3人並びパネル (幅800px未満で表示) -->
+            <!--
+                相手の席は、座席順で自分の次の人から 左 → 上 → 右 の順に並べる（誰を出すかはコードで決める）。
+                手番は画面上の時計回り（自分 → 左 → 上 → 右 → 自分）に進み、席替えのときも座席順に合わせて並べ直す。
+            -->
+
+            <!-- コンパクトモード用：上部3人並びパネル (幅800px未満で表示)。左から 左の席・向かい・右の席 -->
             <Grid x:Name="OpponentRow" Grid.Row="0" Grid.Column="1" HorizontalAlignment="Center" Visibility="Collapsed">
                 <!-- 幅が足りないときは3人分をまとめて縮小して収める（はみ出して見切れないように） -->
                 <Viewbox StretchDirection="DownOnly" HorizontalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                        <ctrl:PlayerPanelControl x:Name="Player3SlimPanel" MinWidth="130" />
-                        <ctrl:PlayerPanelControl x:Name="Player2SlimPanel" MinWidth="130" />
-                        <ctrl:PlayerPanelControl x:Name="Player1SlimPanel" MinWidth="130" />
+                        <ctrl:PlayerPanelControl x:Name="LeftSeatSlimPanel" MinWidth="130" />
+                        <ctrl:PlayerPanelControl x:Name="TopSeatSlimPanel" MinWidth="130" />
+                        <ctrl:PlayerPanelControl x:Name="RightSeatSlimPanel" MinWidth="130" />
                     </StackPanel>
                 </Viewbox>
             </Grid>
 
-            <!-- 北 (Seat 2: WideLayout時) -->
+            <!-- 上（向かい：自分から2つ先の席。WideLayout時） -->
             <ctrl:PlayerPanelControl
-                x:Name="Player2Panel"
+                x:Name="TopSeatPanel"
                 Grid.Row="0"
                 Grid.Column="1"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Top" />
 
-            <!-- 西 (Seat 3: WideLayout時) -->
+            <!-- 左（自分の次に手番が来る席。WideLayout時） -->
             <ctrl:PlayerPanelControl
-                x:Name="Player3Panel"
+                x:Name="LeftSeatPanel"
                 Grid.Row="1"
                 Grid.Column="0"
                 HorizontalAlignment="Left"
                 VerticalAlignment="Center" />
 
-            <!-- 東 (Seat 1: WideLayout時) -->
+            <!-- 右（自分の前に手番が来る席。WideLayout時） -->
             <ctrl:PlayerPanelControl
-                x:Name="Player1Panel"
+                x:Name="RightSeatPanel"
                 Grid.Row="1"
                 Grid.Column="2"
                 HorizontalAlignment="Right"
@@ -297,7 +303,7 @@
                 </StackPanel>
             </Grid>
 
-            <!-- 南 (Seat 0: 自分) & 手札 & アクション操作 -->
+            <!-- 下（自分） & 手札 & アクション操作 -->
             <!--
                 横フル画面：[自分の欄][手札][ボタン] を1段に並べる。
                 コンパクト：上の段に [自分の欄 … ボタン（横並び）]、最下段に手札を全幅で置く（狭い幅でも手札が収まる）
@@ -561,7 +567,7 @@
                 </StackPanel>
                 <Button
                     Grid.Column="2"
-                    Content="見送る [BS]"
+                    Content="{x:Bind ViewModel.InterruptDeclineText, Mode=OneWay}"
                     MinWidth="104"
                     Height="40"
                     IsTabStop="False"
@@ -579,6 +585,33 @@
                     Foreground="{StaticResource AppOnAccentBrush}" />
             </Grid>
         </Border>
+
+        <!--
+            自分があがった後、残りが NPC だけのとき：観戦をスキップして（待ち時間・演出なしで）ラウンド結果へ進む
+        -->
+        <Button
+            x:Name="SkipToResultButton"
+            Visibility="{x:Bind ViewModel.CanSkipToResult, Mode=OneWay}"
+            Command="{x:Bind ViewModel.SkipToResultCommand}"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            Margin="16,0,16,206"
+            Height="44"
+            Padding="20,0"
+            CornerRadius="22"
+            IsTabStop="False"
+            Background="{StaticResource AppAccentBrush}"
+            Foreground="{StaticResource AppOnAccentBrush}"
+            BorderBrush="#66FFFFFF"
+            BorderThickness="1"
+            ToolTipService.ToolTip="残りの NPC どうしの対戦を待たずに進めて、ラウンド結果を表示します（S）"
+            AutomationProperties.Name="残りをスキップして結果へ">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <FontIcon Glyph="&#xEB9D;" FontSize="14" VerticalAlignment="Center" />
+                <TextBlock Text="残りをスキップして結果へ" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" />
+                <TextBlock Text="S" FontSize="10" Opacity="0.8" VerticalAlignment="Center" />
+            </StackPanel>
+        </Button>
 
         <!--
             12ボンバーで消えた数字を、画面中央で弱い順に1つずつ見せる演出。

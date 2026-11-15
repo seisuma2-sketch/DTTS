@@ -58,10 +58,11 @@ internal static class ServicesTests
     // Database
     // ==================================================================
 
-    private static GameEngine PlayQuickGame(int seed, out GameResult result)
+    private static GameEngine PlayQuickGame(int seed, out GameResult result, Action<RuleSettings>? configure = null)
     {
         var rules = RuleSettings.CreateDefault();
         rules.Progress.RoundCount = 2;
+        configure?.Invoke(rules);
         var engine = new GameEngine(rules, Enumerable.Range(0, 4).Select(i => new PlayerSetup("P" + i, PlayerKind.Npc)).ToList(), new SystemRandomSource(seed));
         using var npc = new NpcController(engine);
         for (int i = 0; i < 4; i++) npc.Assign(i, NpcProfile.Default, new SystemRandomSource(seed + i));
@@ -175,7 +176,7 @@ internal static class ServicesTests
         mine.Special.TwelveBomberEnabled = true;
         var t0 = new DateTimeOffset(2026, 11, 14, 9, 0, 0, TimeSpan.Zero);
         Check(presets.Upsert("  うちのルール  ", mine, t0)?.Name == "うちのルール", "preset name is trimmed");
-        Check(presets.Upsert("全部盛り改", RulePresets.Create(RulePreset.Chaos), t0.AddMinutes(1)) is not null, "second preset");
+        Check(presets.Upsert("全部盛り改", RulePresets.Create(RulePreset.Expert), t0.AddMinutes(1)) is not null, "second preset");
         Check(presets.Upsert("   ", mine, t0) is null && presets.Upsert(null, mine, t0) is null, "blank preset name rejected");
         Check(presets.Presets.Select(x => x.Name).SequenceEqual(new[] { "全部盛り改", "うちのルール" }), "newest preset first");
         await settings.SaveRulePresetsAsync(presets);
@@ -246,6 +247,35 @@ internal static class ServicesTests
         Check(stats.AveragePlace >= 1 && stats.AveragePlace <= 4, "avg place");
         await history.ClearAsync();
         Check((await history.GetRecentAsync()).Count == 0, "cleared (cascade)");
+
+        // 得点配分「2・1・-1・-2」：マイナスの点数・合計点もそのまま保存・集計される
+        var humanTotals = new List<int>();
+        bool sawNegativeRound = false;
+        for (int g = 0; g < 6; g++)
+        {
+            var engine = PlayQuickGame(100 + g, out var result, r =>
+            {
+                r.Progress.RoundCount = 3;
+                r.Progress.PointsDaifugo = 2; r.Progress.PointsFugo = 1; r.Progress.PointsHeimin = 0;
+                r.Progress.PointsHinmin = -1; r.Progress.PointsDaihinmin = -2;
+            });
+            Check(result.Rounds.All(rr => rr.Standings.Select(s => s.Points).OrderByDescending(p => p).SequenceEqual(new[] { 2, 1, -1, -2 })),
+                "minus points: each round awards 2/1/-1/-2");
+            Check(result.Standings.All(s => s.TotalScore == result.Rounds.Sum(rr => rr.Standings.First(x => x.PlayerId == s.PlayerId).Points)),
+                "minus points: totals are the sum of round points");
+            sawNegativeRound |= result.Standings.Any(s => s.TotalScore < 0);
+            humanTotals.Add(result.Standings.First(s => s.PlayerId == 0).TotalScore);
+            await history.SaveAsync(MatchRecord.FromGame(engine, result, localHumanPlayerId: 0,
+                npcProfiles: new Dictionary<int, NpcProfile>()));
+        }
+        Check(sawNegativeRound, "minus points: some player finished below zero");
+        var minusRecent = await history.GetRecentAsync(10);
+        Check(minusRecent.Count == 6 && minusRecent.SelectMany(m => m.Rounds).Any(r => r.Points < 0)
+            && minusRecent.Select(m => m.LocalHuman!.TotalScore).OrderBy(x => x).SequenceEqual(humanTotals.OrderBy(x => x)),
+            "minus points: negative round points and totals round-trip through the database");
+        var minusStats = await history.GetLocalHumanStatisticsAsync();
+        Check(minusStats.TotalGames == 6 && minusStats.BestScore == humanTotals.Max(), $"minus points: best score {minusStats.BestScore} == {humanTotals.Max()}");
+        await history.ClearAsync();
 
         SqliteCleanup();
         TryDelete(dir);
@@ -522,6 +552,11 @@ internal static class ServicesTests
             fe.SubmitPass(a); fe.SubmitPass(b); fe.SubmitPass(c);
             // 強化11バックは場が流れても続く。l が親のまま、ろくろ首を出す
             fe.SubmitPlay(l, Card.ParseMany("S6 H6"));
+            // 砂嵐を持たないゲスト（a）にも、先に確認が届く（出せる手はなく、パス（流す）だけ）
+            var av = ClientViewBuilder.Build(fe, a, 6);
+            Check(av.Decision is { Kind: DecisionKind.SandstormStopChance, CanPass: true } ad && ad.PlayerId == a
+                && (av.LegalPlays is null || av.LegalPlays.Length == 0), "view: a guest without a sandstorm is asked too, with nothing to play");
+            Check(fe.SubmitPass(a).IsAccepted, "view: the guest without a sandstorm passes");
             var sv = ClientViewBuilder.Build(fe, b, 6);
             Check(sv.Decision is { Kind: DecisionKind.SandstormStopChance, CanPass: true } sd && sd.PlayerId == b
                 && sd.Effect == SpecialEffectType.Rokurokubi && sd.TargetPlayerId == l, "view carries the sandstorm chance");

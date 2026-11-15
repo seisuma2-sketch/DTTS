@@ -48,10 +48,42 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private List<List<Card>> _guestLegalPlays = new();
 
     // --- プレイヤー ---
+    // 表示欄はプレイヤーごと（Player0 が自分）。画面のどの席（左・上・右）に出すかは座席順で決める（SeatSlotPlayer）
     public PlayerViewModel Player0 { get; } = new(0, "あなた", true);
-    public PlayerViewModel Player1 { get; } = new(1, "NPC 東", false);
-    public PlayerViewModel Player2 { get; } = new(2, "NPC 北", false);
-    public PlayerViewModel Player3 { get; } = new(3, "NPC 西", false);
+    public PlayerViewModel Player1 { get; } = new(1, "NPC 1", false);
+    public PlayerViewModel Player2 { get; } = new(2, "NPC 2", false);
+    public PlayerViewModel Player3 { get; } = new(3, "NPC 3", false);
+
+    /// <summary>現在の座席順（プレイヤーIDの並び。エンジンの時計回りはこの順）。</summary>
+    private int[] _seatOrder = { 0, 1, 2, 3 };
+
+    /// <summary>
+    /// 席の並びが変わるたびに増える値（表示側はこの変更通知で左・上・右の席を並べ直す）。
+    /// </summary>
+    [ObservableProperty]
+    public partial int SeatLayoutVersion { get; set; }
+
+    /// <summary>
+    /// 画面の席（<see cref="SeatLayout.Bottom"/>・<see cref="SeatLayout.Left"/>・<see cref="SeatLayout.Top"/>・
+    /// <see cref="SeatLayout.Right"/>）に表示するプレイヤー。自分の次に手番が来る人が左、向かいが上、その次が右になり、
+    /// 手番は画面上の時計回り（下 → 左 → 上 → 右）に進む。
+    /// </summary>
+    public PlayerViewModel SeatSlotPlayer(int slot)
+    {
+        int id = SeatLayout.PlayerAt(_seatOrder, _myPlayerId, slot);
+        return id < 0 ? Player0 : GetPlayerVm(id);
+    }
+
+    /// <summary>座席順を反映する（ラウンド開始・席替え・画面の初期化時）。変わったときだけ並べ直しを通知する。</summary>
+    private void ApplySeatOrder(IReadOnlyList<int>? seatOrder)
+    {
+        if (seatOrder is null || seatOrder.Count != 4 || seatOrder.SequenceEqual(_seatOrder))
+        {
+            return;
+        }
+        _seatOrder = seatOrder.ToArray();
+        SeatLayoutVersion++;
+    }
 
     /// <summary>
     /// プレイヤーID（エンジンの席番号）に対応する表示欄。Player0（画面下）が常に自分になるよう、
@@ -198,6 +230,10 @@ public sealed partial class GameTableViewModel : ViewModelBase
     [ObservableProperty]
     public partial string InterruptAcceptText { get; set; } = "止める";
 
+    /// <summary>「見送る」ボタンの文言（砂嵐の確認では「パス（流す）」）。</summary>
+    [ObservableProperty]
+    public partial string InterruptDeclineText { get; set; } = "見送る [BS]";
+
     // ------------------------------------------------------------------
     // 進行スピード（NPCが考える時間）
     // ------------------------------------------------------------------
@@ -227,6 +263,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
     /// <summary>NPCの思考時間へ進行スピードを反映する（次の判断から効く）。</summary>
     private void ApplySpeed()
     {
+        if (_isFastForwarding) return; // 残りをスキップ中は待ち時間なしのまま（ラウンド終了で元に戻す）
         var timing = NpcTimingOptions.ForSpeed(Speed);
         if (_npcController is not null)
         {
@@ -388,6 +425,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
             _engineHandler = (sender, ev) => OnEngineEvent(ev);
             _engine.EventOccurred += _engineHandler;
+            // 第1ラウンドの RoundStartedEvent はロビーで発行済みなので、座席順はエンジンから直接受け取る
+            ApplySeatOrder(_engine.SeatOrder);
             ApplySpeed(); // 補充・引き継ぎのNPCにも進行スピードを反映する
             RoundInfoText = FormatRoundInfo(Math.Max(1, _engine.RoundNumber), _engine.Rules.Progress.RoundCount);
             ApplyFieldBadges(_engine.Field);
@@ -445,6 +484,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         // ゲーム開始（ラウンド表示は実際のルールのラウンド数で初期化する）
         _engine.StartGame();
+        // イベントは UI スレッドの待ち行列経由で届くため、最初の座席順（席替え込み）はここで直接反映する
+        ApplySeatOrder(_engine.SeatOrder);
         RoundInfoText = FormatRoundInfo(_engine.RoundNumber, _engine.Rules.Progress.RoundCount);
         UpdateAllPlayersInfo();
         UpdateHumanHandVisuals();
@@ -462,9 +503,11 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         switch (ev)
         {
-            case RoundStartedEvent:
+            case RoundStartedEvent rs:
                 // 新しいラウンドは、革命・11バック・縛りが一切残っていない状態から始める
                 ResetRoundBadges();
+                // 席替え：画面の左・上・右の席も新しい座席順に並べ直す（手番の回り方と画面を一致させる）
+                ApplySeatOrder(rs.SeatOrder);
                 break;
 
             case HandsDealtEvent:
@@ -490,7 +533,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 ApplyFieldBadges(cp.Field);
                 StatusMessage = $"{GetPlayerVm(cp.PlayerId).Name} がカードを出しました";
                 UpdateAllPlayersInfo();
-                _audio.Play(SoundEffect.CardPlay);
+                if (!_isFastForwarding) _audio.Play(SoundEffect.CardPlay);
                 break;
 
             case PlayerPassedEvent pp:
@@ -500,11 +543,16 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
             case EffectAppliedEvent ea:
                 ApplyFieldBadges(ea.Field);
-                if (ea.Applied)
+                if (ea.Applied && !_isFastForwarding) // 残りをスキップ中は演出と音を出さない
                 {
                     TriggerCutInForEffect(ea.Effect.Type, ea.PlayerId, ea.Field.IsElevenBack);
                     PlayEffectSound(ea.Effect.Type);
                 }
+                break;
+
+            case PlayersSkippedEvent ps:
+                NoticeMessage = $"{GetPlayerVm(ps.ByPlayerId).Name} のスキップで "
+                    + string.Join("・", ps.SkippedPlayerIds.Select(id => GetPlayerVm(id).Name)) + " の手番が飛ばされました";
                 break;
 
             case ElevenBackExpiredEvent eb:
@@ -517,9 +565,12 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 ApplyFieldBadges(ff.Field); // 11バック・縛りは場が流れると解除される
                 StatusMessage = ff.Cause.HasValue ? $"場が流れました（{ff.Cause.Value}）" : "場が流れました";
                 for (int i = 0; i < 4; i++) GetPlayerVm(i).IsPassed = false;
-                FieldFlushedTriggered?.Invoke(this, EventArgs.Empty);
-                SweepTriggered?.Invoke(this, SweepKind.PrismFlash);
-                _audio.Play(SoundEffect.FieldFlush);
+                if (!_isFastForwarding)
+                {
+                    FieldFlushedTriggered?.Invoke(this, EventArgs.Empty);
+                    SweepTriggered?.Invoke(this, SweepKind.PrismFlash);
+                    _audio.Play(SoundEffect.FieldFlush);
+                }
                 break;
 
             case RanksDeclaredEvent rd:
@@ -536,6 +587,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 break;
 
             case RoundEndedEvent re:
+                StopFastForward(); // 次のラウンドは元の進行スピードで
                 IsGameOver = re.IsGameOver;
                 HandleRoundEnded(re.Result);
                 break;
@@ -546,6 +598,56 @@ public sealed partial class GameTableViewModel : ViewModelBase
         }
 
         UpdateHumanHandVisuals();
+        UpdateSkipToResultAvailability();
+    }
+
+    // ------------------------------------------------------------------
+    // 残りをスキップして結果へ（自分があがった後、残りが NPC だけのとき）
+    // ------------------------------------------------------------------
+
+    /// <summary>残りの対戦を待ち時間なしで進めている最中か。</summary>
+    private bool _isFastForwarding;
+
+    /// <summary>「残りをスキップして結果へ」ボタンを出すか。</summary>
+    [ObservableProperty]
+    public partial bool CanSkipToResult { get; set; }
+
+    /// <summary>
+    /// 自分があがって（都落ち・反則も含む）、まだ残っているのが NPC だけなら、観戦をスキップできる。
+    /// ゲストは NPC を動かしていないので出さない。
+    /// </summary>
+    private void UpdateSkipToResultAvailability()
+    {
+        CanSkipToResult = !_isFastForwarding
+            && _client is null
+            && _engine is { Phase: GamePhase.Playing } engine
+            && engine.GetPlayer(_myPlayerId).IsFinished
+            // あがった直後でも、自分の判断（あがりの手で起きた12ボンバーの宣言・7渡しなど）が残っている間は出さない
+            && !(engine.PendingDecision is { } pending && pending.PlayerId == _myPlayerId)
+            && !IsDecisionDialogOpen
+            && engine.Players.Where(p => !p.IsFinished).All(p => p.Kind == PlayerKind.Npc)
+            && engine.Players.Any(p => !p.IsFinished);
+    }
+
+    /// <summary>残りの対戦を、NPC の考える時間なし・演出なしで最後まで進め、ラウンド結果を表示する。</summary>
+    [RelayCommand]
+    private void SkipToResult()
+    {
+        UpdateSkipToResultAvailability();
+        if (!CanSkipToResult) return;
+        _isFastForwarding = true;
+        CanSkipToResult = false;
+        if (_npcController is not null) _npcController.Timing = NpcTimingOptions.Instant;
+        if (_hostSession?.Npc is { } hostNpc) hostNpc.Timing = NpcTimingOptions.Instant;
+        StatusMessage = "残りの対戦をスキップしています...";
+    }
+
+    /// <summary>早送りをやめ、NPC の考える時間を進行スピードの設定へ戻す。</summary>
+    private void StopFastForward()
+    {
+        if (!_isFastForwarding) return;
+        _isFastForwarding = false;
+        ApplySpeed();
     }
 
     // ------------------------------------------------------------------
@@ -606,7 +708,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
         PlayFinishSound(playerId, kind);
 
         // きれいなあがり方（通常のあがり）だけ、静かな光の演出で祝う
-        if (kind == FinishKind.Normal && place > 0)
+        if (kind == FinishKind.Normal && place > 0 && !_isFastForwarding)
         {
             FinishCelebrationTriggered?.Invoke(this, new FinishCelebrationEventArgs(
                 name, place, playerId == _myPlayerId, RankTitle(GameEngine.RankForPosition(place, 4))));
@@ -716,7 +818,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
         CanPass = isMyTurn && (_engine.PendingDecision?.CanPass ?? !_engine.Field.IsEmpty);
         bool interrupt = _engine.PendingDecision is { } pd && pd.Kind.IsInterruptChance();
         StatusMessage = isMyTurn
-            ? (interrupt ? "割り込みのチャンスです（止める / 見送る）" : "あなたのターンです")
+            ? (interrupt ? InterruptStatus(_engine.PendingDecision!.Kind) : "あなたのターンです")
             : (interrupt ? $"{GetPlayerVm(activePlayerId).Name} が割り込むか考えています..." : $"{GetPlayerVm(activePlayerId).Name} のターン...");
     }
 
@@ -912,7 +1014,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                     _guestResultRound = notice.Count;
                     RoundResultText = string.Join("\n", standings
                         .OrderBy(s => s.Position)
-                        .Select(s => $"{s.Position}位: {GetPlayerVm(s.PlayerId).Name} ({s.Rank}) -> 得点: {s.Points}pt"));
+                        .Select(s => $"{s.Position}位: {GetPlayerVm(s.PlayerId).Name} ({s.Rank}) -> 得点: {SignedPoints(s.Points)}（合計 {SignedPoints(s.TotalScore)}）"));
                     IsGameOver = notice.Applied;
                     IsRoundResultOpen = true;
                     UpdateRoundResultActions();
@@ -947,6 +1049,9 @@ public sealed partial class GameTableViewModel : ViewModelBase
                         TriggerCutInForEffect(effect, effectPlayer, null);
                     }
                     PlayEffectSound(effect);
+                    break;
+                case "PlayersSkipped" when notice.PlayerId is { } skipper:
+                    NoticeMessage = $"{GetPlayerVm(skipper).Name} のスキップで {notice.Count}人 の手番が飛ばされました";
                     break;
                 case "RanksDeclared" when notice.PlayerId is { } declarer && notice.Ranks is { } ranks:
                     OnRanksDeclared(declarer, ranks);
@@ -1057,7 +1162,13 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private void ApplyClientView(ClientView view)
     {
         if (_isShutDown) return;
+        bool viewerChanged = _myPlayerId != view.MyPlayerId;
         _myPlayerId = view.MyPlayerId;
+        ApplySeatOrder(view.SeatOrder);
+        if (viewerChanged)
+        {
+            SeatLayoutVersion++; // 自分の席が決まった：同じ座席順でも左・上・右に出す人が変わる
+        }
         RoundInfoText = FormatRoundInfo(view.RoundNumber, view.RoundCount);
 
         // ゲスト：ホストが次のラウンドを始めたら結果画面を閉じる
@@ -1143,7 +1254,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 OpenInterruptPrompt(interrupt.Kind, interrupt.Effect, interrupt.TargetPlayerId, legalSet.FirstOrDefault());
                 UpdateGuestCanPlay();
             }
-            StatusMessage = "割り込みのチャンスです（止める / 見送る）";
+            StatusMessage = InterruptStatus(interrupt.Kind);
         }
         else
         {
@@ -1272,6 +1383,10 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
     private DecisionKind _interruptPromptKind;
 
+    private static string InterruptStatus(DecisionKind kind) => kind == DecisionKind.SandstormStopChance
+        ? "砂嵐で止めるか、パス（流す）かを選んでください"
+        : "割り込みのチャンスです（止める / 見送る）";
+
     /// <summary>
     /// 割り込みの確認を開く。止められる札（<paramref name="stopCards"/>）を選択済みにするので、
     /// そのまま「止める」（Enter）を押せば出せる。別の組み合わせにしたいときは手札で選び直せる。
@@ -1279,18 +1394,25 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private void OpenInterruptPrompt(DecisionKind kind, SpecialEffectType? effect, int? flusherId, IReadOnlyList<Card>? stopCards)
     {
         string flusher = flusherId is { } id ? GetPlayerVm(id).Name : "相手";
+        bool canStop = stopCards is { Count: > 0 };
         if (kind == DecisionKind.SandstormStopChance)
         {
+            // 砂嵐の確認は、持っていなくても全員に出る（手札の有無が他の人に透けないように）
             string target = effect == SpecialEffectType.Ambulance ? "99車（救急車）" : "ろくろ首";
-            InterruptTitle = "割り込みチャンス：砂嵐";
-            InterruptMessage = $"{flusher} の{target}を、砂嵐で止められます。止めると場が流れて、あなたが親になります。";
+            string sandstorm = $"砂嵐（{RankOptionViewModel.LabelOf(_rules.Flow.SandstormRank)}を{_rules.Flow.SandstormCount}枚）";
+            InterruptTitle = $"{flusher} の{target}：砂嵐で止める？";
+            InterruptMessage = canStop
+                ? $"{sandstorm}で止められます。止めると場が流れて、あなたが親になります。止めなければ「パス（流す）」。"
+                : $"{sandstorm}を持っていないので止められません。「パス（流す）」を押すと{target}で場が流れます。";
             InterruptAcceptText = "砂嵐で止める [Enter]";
+            InterruptDeclineText = "パス（流す） [BS]";
         }
         else
         {
             InterruptTitle = "割り込みチャンス：4止め";
             InterruptMessage = $"{flusher} の8切りを、4で止められます。止めると場は流れず、次の人へ続きます。";
             InterruptAcceptText = "4で止める [Enter]";
+            InterruptDeclineText = "見送る [BS]";
         }
 
         foreach (var cardVm in HumanHand)
@@ -1471,10 +1593,14 @@ public sealed partial class GameTableViewModel : ViewModelBase
         UpdateHumanHandVisuals();
     }
 
+    /// <summary>得点の表示（+2pt / 0pt / -1pt）。「2・1・-1・-2」の配分ではマイナスになる。</summary>
+    private static string SignedPoints(int points) => (points > 0 ? $"+{points}" : points.ToString()) + "pt";
+
     private void HandleRoundEnded(RoundResult result)
     {
         RoundInfoText = FormatRoundInfo(_engine?.RoundNumber ?? 0, _rules.Progress.RoundCount) + "終了";
-        var lines = result.Standings.Select(s => $"{s.Position}位: {GetPlayerVm(s.PlayerId).Name} ({s.Rank}) -> 得点: {s.Points}pt");
+        var lines = result.Standings.Select(s => $"{s.Position}位: {GetPlayerVm(s.PlayerId).Name} ({s.Rank}) -> 得点: {SignedPoints(s.Points)}"
+            + (_engine is not null ? $"（合計 {SignedPoints(_engine.GetPlayer(s.PlayerId).TotalScore)}）" : ""));
         RoundResultText = string.Join("\n", lines);
         IsRoundResultOpen = true;
         UpdateRoundResultActions();

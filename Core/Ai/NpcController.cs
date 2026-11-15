@@ -73,6 +73,14 @@ public sealed record NpcTimingOptions
         },
     };
 
+    /// <summary>待ち時間なし（自分があがった後、残りの対戦をスキップして結果へ進むとき）。</summary>
+    public static NpcTimingOptions Instant { get; } = new()
+    {
+        BaseDelay = TimeSpan.Zero,
+        Jitter = TimeSpan.Zero,
+        SideDecisionDelay = TimeSpan.Zero,
+    };
+
     /// <summary>進行スピードの表示名。</summary>
     public static string SpeedName(GameSpeed speed) => speed switch
     {
@@ -208,7 +216,9 @@ public sealed class NpcController : IDisposable
         }
         _lastHandled = decision;
 
-        var delay = decision.Kind.IsPlayDecision()
+        // 割り込み（4止め・砂嵐）の確認は、止められる札を持っていてもいなくても同じ短い間で答える
+        // （考える時間の長さで手札が透けないように。砂嵐は全員に確認が回るので、長いと待たされる）
+        var delay = decision.Kind.IsPlayDecision() && !decision.Kind.IsInterruptChance()
             ? _timing.BaseDelay + TimeSpan.FromMilliseconds(_random.Next((int)Math.Max(1, _timing.Jitter.TotalMilliseconds)))
             : _timing.SideDecisionDelay;
 

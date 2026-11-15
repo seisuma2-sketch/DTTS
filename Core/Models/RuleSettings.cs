@@ -171,6 +171,10 @@ public sealed class RuleSettings
         {
             ElevenBack.Duration = ElevenBackDuration.UntilFlush;
         }
+        if (!Enum.IsDefined(Flow.FourStopCount))
+        {
+            Flow.FourStopCount = FourStopCountRule.DoubleEight;
+        }
 
         // トリガー数字が Joker 等の不正値になっていたら既定値へ戻す
         Revolution.CoupRank = ClampNatural(Revolution.CoupRank, Rank.Nine);
@@ -351,13 +355,17 @@ public sealed class FlowRules
     public Rank EightCutRank { get; set; } = Rank.Eight;
 
     /// <summary>
-    /// 4止め：8切りが出た直後、他のプレイヤーが同枚数の <see cref="FourStopRank"/> を出すと8切りを無効化できる。
+    /// 4止め：8切りが出た直後、他のプレイヤーが <see cref="FourStopRank"/> を決まった枚数（<see cref="FourStopCount"/>）
+    /// 出すと8切りを無効化できる。
     /// （エンジンは8切り発生時に <c>FieldState.IsEightCutPending</c> を立てて割り込みを受け付ける）
     /// </summary>
     public bool FourStopEnabled { get; set; } = false;
 
     /// <summary>4止めのトリガー数字。</summary>
     public Rank FourStopRank { get; set; } = Rank.Four;
+
+    /// <summary>4止めに必要な枚数（標準は8の枚数の2倍：8が1枚なら4が2枚）。</summary>
+    public FourStopCountRule FourStopCount { get; set; } = FourStopCountRule.DoubleEight;
 
     /// <summary>
     /// 砂嵐：<see cref="SandstormRank"/> をちょうど <see cref="SandstormCount"/> 枚出すと、

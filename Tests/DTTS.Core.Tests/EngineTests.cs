@@ -133,25 +133,95 @@ internal static class EngineTests
         }
         Check(jokerKeptCases > 0, "joker protection exercised");
 
-        // ---- 4止め ----
+        // ---- 4止め（標準：8の枚数の2倍。8が1枚なら4を2枚）----
         {
             var r = RuleSettings.CreateDefault();
             r.Flow.FourStopEnabled = true;
+            Check(r.Flow.FourStopCount == FourStopCountRule.DoubleEight, "4stop: double count is the default");
             var e = new GameEngine(r, Players(4), new SystemRandomSource(3));
             e.StartGame();
             int l = e.PendingDecision!.PlayerId;
             int a = (l + 1) % 4, b = (l + 2) % 4, c = (l + 3) % 4;
             e.GetPlayer(l).SetHand(C("D3 H8 S9"));
-            e.GetPlayer(a).SetHand(C("S4 C5"));
-            e.GetPlayer(b).SetHand(C("H6 C6"));
+            e.GetPlayer(a).SetHand(C("S4 C5"));           // 4が1枚だけ → 8×1 は止められない
+            e.GetPlayer(b).SetHand(C("H4 C4 C6"));        // 4が2枚 → 止められる
             e.GetPlayer(c).SetHand(C("D7 CK"));
             Play(e, l, "D3", "4stop");
             Pass(e, a, "4stop"); Pass(e, b, "4stop"); Pass(e, c, "4stop");
             Play(e, l, "H8", "4stop");
-            Check(e.PendingDecision!.Kind == DecisionKind.FourStopChance && e.PendingDecision.PlayerId == a, "4stop chance to holder only");
-            Play(e, a, "S4", "4stop");
-            Check(e.Field.CurrentPlay!.Rank == Rank.Four && !e.Field.IsEightCutPending, "4 stays on field");
-            Check(e.PendingDecision!.Kind == DecisionKind.PlayOrPass && e.PendingDecision.PlayerId == b, "turn continues after stopper");
+            Check(e.PendingDecision!.Kind == DecisionKind.FourStopChance && e.PendingDecision.PlayerId == b,
+                "4stop: a single 4 cannot stop a single 8, so only the pair holder is asked");
+            var legal = e.GetLegalPlays(b);
+            Check(legal.Count == 1 && legal[0].Play!.Count == 2 && legal[0].BeatMethod == BeatMethod.FourStop, "4stop: the 4-pair is the only legal stop");
+            Check(e.SubmitPlay(b, C("H4")).Error == CommandError.IllegalPlay, "4stop: one 4 over one 8 is rejected");
+            Play(e, b, "H4 C4", "4stop");
+            Check(e.Field.CurrentPlay!.Rank == Rank.Four && e.Field.CurrentPlay.Count == 2 && !e.Field.IsEightCutPending, "4stop: the 4-pair stays on the field");
+            Check(e.PendingDecision!.Kind == DecisionKind.PlayOrPass && e.PendingDecision.PlayerId == c, "4stop: turn continues after the stopper");
+            Check(e.GetLegalPlays(c).Count == 0, "4stop: the next player now needs a stronger pair");
+        }
+        {
+            // 8と同じ枚数の設定：4を1枚で止められる
+            var r = RuleSettings.CreateDefault();
+            r.Flow.FourStopEnabled = true;
+            r.Flow.FourStopCount = FourStopCountRule.SameAsEight;
+            var e = new GameEngine(r, Players(4), new SystemRandomSource(3));
+            e.StartGame();
+            int l = e.PendingDecision!.PlayerId;
+            int a = (l + 1) % 4, b = (l + 2) % 4;
+            e.GetPlayer(l).SetHand(C("D3 H8 S9"));
+            e.GetPlayer(a).SetHand(C("S4 C5"));
+            e.GetPlayer(b).SetHand(C("H6 C6"));
+            e.GetPlayer((l + 3) % 4).SetHand(C("D7 CK"));
+            Play(e, l, "D3", "4stop-same");
+            Pass(e, a, "4stop-same"); Pass(e, b, "4stop-same"); Pass(e, (l + 3) % 4, "4stop-same");
+            Play(e, l, "H8", "4stop-same");
+            Check(e.PendingDecision!.Kind == DecisionKind.FourStopChance && e.PendingDecision.PlayerId == a, "4stop-same: one 4 stops one 8");
+            Play(e, a, "S4", "4stop-same");
+            Check(e.Field.CurrentPlay!.Rank == Rank.Four && !e.Field.IsEightCutPending && e.PendingDecision!.PlayerId == b, "4stop-same: play continues");
+        }
+        {
+            // 8が2枚なら4は4枚。4を4枚出すと、革命の条件も満たすので革命も起きる
+            var r = RuleSettings.CreateDefault();
+            r.Flow.FourStopEnabled = true;
+            r.Lock.SuitLockEnabled = false;
+            var e = new GameEngine(r, Players(4), new SystemRandomSource(3));
+            var effects = new List<SpecialEffectType>();
+            e.EventOccurred += (_, ev) => { if (ev is EffectAppliedEvent ea && ea.Applied) effects.Add(ea.Effect.Type); };
+            e.StartGame();
+            int l = e.PendingDecision!.PlayerId;
+            int a = (l + 1) % 4, b = (l + 2) % 4, c = (l + 3) % 4;
+            e.GetPlayer(l).SetHand(C("D3 C3 H8 S8 S9"));
+            e.GetPlayer(a).SetHand(C("D6 C7"));
+            e.GetPlayer(b).SetHand(C("S5 H5 C6"));
+            e.GetPlayer(c).SetHand(C("D4 C4 H4 S4 DK"));           // 4が4枚（2枚だけ出しても止められない）
+            Play(e, l, "D3 C3", "4stop-x2");
+            Pass(e, a, "4stop-x2"); Pass(e, b, "4stop-x2"); Pass(e, c, "4stop-x2");
+            Play(e, l, "H8 S8", "4stop-x2");
+            Check(e.PendingDecision!.Kind == DecisionKind.FourStopChance && e.PendingDecision.PlayerId == c, "4stop-x2: only the 4-quad holder is asked");
+            Check(e.SubmitPlay(c, C("D4 C4")).Error == CommandError.IllegalPlay, "4stop-x2: two 4s over two 8s are rejected");
+            Play(e, c, "D4 C4 H4 S4", "4stop-x2");
+            Check(effects.Contains(SpecialEffectType.FourStop) && !effects.Contains(SpecialEffectType.EightCut), "4stop-x2: the 8-cut is cancelled");
+            Check(effects.Contains(SpecialEffectType.Revolution) && e.Field.IsRevolution, "4stop-x2: four 4s also start a revolution");
+            Check(e.Field.CurrentPlay!.Count == 4 && !e.Field.IsEightCutPending, "4stop-x2: the quad stays on the field");
+        }
+        {
+            // 階段に含まれる8の8切りは、4では止められない（そのまま流れる）
+            var r = RuleSettings.CreateDefault();
+            r.Flow.FourStopEnabled = true;
+            r.Sequence.EffectsInSequence = true;
+            var e = new GameEngine(r, Players(4), new SystemRandomSource(3));
+            e.StartGame();
+            int l = e.PendingDecision!.PlayerId;
+            int a = (l + 1) % 4;
+            e.GetPlayer(l).SetHand(C("D3 H7 H8 H9 SK"));
+            e.GetPlayer(a).SetHand(C("S4 H4 C4 D4 JK0 C5"));
+            e.GetPlayer((l + 2) % 4).SetHand(C("C6 D6"));
+            e.GetPlayer((l + 3) % 4).SetHand(C("D7 CK"));
+            Play(e, l, "D3", "4stop-seq");
+            Pass(e, a, "4stop-seq"); Pass(e, (l + 2) % 4, "4stop-seq"); Pass(e, (l + 3) % 4, "4stop-seq");
+            Play(e, l, "H7 H8 H9", "4stop-seq");
+            Check(e.Field.IsEmpty && e.PendingDecision!.Kind == DecisionKind.PlayOrPass && e.PendingDecision.PlayerId == l,
+                "4stop-seq: an 8 inside a sequence cannot be stopped");
         }
         {
             // 4止めを見送れば8切り成立
@@ -162,7 +232,7 @@ internal static class EngineTests
             int l = e.PendingDecision!.PlayerId;
             int a = (l + 1) % 4;
             e.GetPlayer(l).SetHand(C("D3 H8 S9"));
-            e.GetPlayer(a).SetHand(C("S4 C5"));
+            e.GetPlayer(a).SetHand(C("S4 C4 C5"));
             e.GetPlayer((l + 2) % 4).SetHand(C("H6 C6"));
             e.GetPlayer((l + 3) % 4).SetHand(C("D7 CK"));
             Play(e, l, "D3", "8cut");
@@ -518,7 +588,7 @@ internal static class EngineTests
             void Deal(GameEngine e, int l, int a, int b, int c)
             {
                 e.GetPlayer(l).SetHand(C("D3 " + pair + " SK"));
-                e.GetPlayer(a).SetHand(C("C5 C8"));               // 砂嵐を持たない → 機会なし
+                e.GetPlayer(a).SetHand(C("C5 C8"));               // 砂嵐を持たない → 確認は出るがパス（流す）しかできない
                 e.GetPlayer(b).SetHand(C("S3 H3 C3 D7 D8"));      // 砂嵐を持つ
                 e.GetPlayer(c).SetHand(C("D4 CK"));
             }
@@ -539,7 +609,14 @@ internal static class EngineTests
                 flushes.Clear();
                 Play(e, l, pair, kind);
                 var d = e.PendingDecision!;
-                Check(d.Kind == DecisionKind.SandstormStopChance && d.PlayerId == b && d.CanPass, kind + ": chance goes to the sandstorm holder only");
+                // 砂嵐を持っていない a にも確認が出る（持っている人にだけ聞くと手札が透けるため）
+                Check(d.Kind == DecisionKind.SandstormStopChance && d.PlayerId == a && d.CanPass, kind + ": a non-holder is asked too (in turn order)");
+                Check(e.GetLegalPlays(a).Count == 0, kind + ": the non-holder can only pass");
+                Check(e.SubmitPlay(a, C("C5")).Error == CommandError.IllegalPlay, kind + ": the non-holder cannot play over the window");
+                Check(flushes.Count == 0 && e.Field.IsSandstormStopPending, kind + ": nothing flushes before everyone answers");
+                Pass(e, a, kind + " non-holder passes");
+                d = e.PendingDecision!;
+                Check(d.Kind == DecisionKind.SandstormStopChance && d.PlayerId == b && d.CanPass, kind + ": then the holder is asked");
                 Check(d.Effect == rank && d.TargetPlayerId == l, kind + ": decision names the interrupted effect and player");
                 Check(e.Field.IsSandstormStopPending && !e.Field.IsEmpty && flushes.Count == 0, kind + ": flush is held while the window is open");
                 var legal = e.GetLegalPlays(b);
@@ -571,23 +648,37 @@ internal static class EngineTests
                 Pass(e, a, kind); Pass(e, b, kind); Pass(e, c, kind);
                 passes.Clear();
                 Play(e, l, pair, kind);
+                Pass(e, a, kind + " decline");
                 Pass(e, b, kind + " decline");
-                Check(passes.Count == 1 && passes[0].IsFourStopDecline && passes[0].PlayerId == b, kind + ": decline is not a normal pass");
-                Check(e.GetPlayer(b).PassCountThisRound == 1, kind + ": decline does not count as a pass");
+                Check(!effects.Contains(rank) && e.PendingDecision!.PlayerId == c && e.PendingDecision.Kind == DecisionKind.SandstormStopChance,
+                    kind + ": the last player is still asked before the flush");
+                Pass(e, c, kind + " decline");
+                Check(passes.Count == 3 && passes.All(p => p.IsFourStopDecline) && passes.Select(p => p.PlayerId).SequenceEqual(new[] { a, b, c }),
+                    kind + ": everyone declines in turn order, none is a normal pass");
+                Check(e.GetPlayer(b).PassCountThisRound == 1 && e.GetPlayer(a).PassCountThisRound == 1, kind + ": decline does not count as a pass");
                 Check(effects.Contains(rank), kind + ": effect applied after the decline");
                 Check(e.Field.IsEmpty && !e.Field.IsSandstormStopPending && e.PendingDecision!.PlayerId == l
                     && e.PendingDecision.Kind == DecisionKind.PlayOrPass, kind + ": original player leads after the decline");
             }
-            // (3) 誰も砂嵐を持っていない：確認なしで即座に流れる
+            // (3) 誰も砂嵐を持っていない：それでも全員に順に確認し、全員がパス（流す）したら流れる
             {
                 var (e, l, a, b, c) = Start(Rules());
+                var asked = new List<int>();
+                e.EventOccurred += (_, ev) =>
+                {
+                    if (ev is DecisionRequestedEvent dr && dr.Decision.Kind == DecisionKind.SandstormStopChance) asked.Add(dr.Decision.PlayerId);
+                };
                 Deal(e, l, a, b, c);
                 e.GetPlayer(b).SetHand(C("S3 H3 D7 D8")); // 3 は2枚だけ
                 Play(e, l, "D3", kind);
                 Pass(e, a, kind); Pass(e, b, kind); Pass(e, c, kind);
                 Play(e, l, pair, kind);
+                Check(asked.SequenceEqual(new[] { a }) && e.Field.IsSandstormStopPending, kind + ": no holder -> still asked, starting with the next player");
+                Pass(e, a, kind); Pass(e, b, kind);
+                Check(asked.SequenceEqual(new[] { a, b, c }) && e.GetLegalPlays(c).Count == 0, kind + ": every remaining player is asked once");
+                Pass(e, c, kind);
                 Check(e.Field.IsEmpty && e.PendingDecision!.Kind == DecisionKind.PlayOrPass && e.PendingDecision.PlayerId == l,
-                    kind + ": no holder -> immediate flush");
+                    kind + ": no holder -> flush after everyone passes");
             }
             // (4) 砂嵐ルールが無効：3を3枚持っていても確認しない
             {
@@ -620,7 +711,12 @@ internal static class EngineTests
             Play(e, l, "S6 H6", "two-holders");
             Check(e.PendingDecision!.Kind == DecisionKind.SandstormStopChance && e.PendingDecision.PlayerId == a, "joker-substituted sandstorm may stop");
             Pass(e, a, "two-holders decline");
-            Check(e.Field.IsEmpty && e.PendingDecision!.PlayerId == l, "two-holders: c cannot form a sandstorm, so the flush stands");
+            Check(e.PendingDecision!.Kind == DecisionKind.SandstormStopChance && e.PendingDecision.PlayerId == b && e.GetLegalPlays(b).Count == 0,
+                "two-holders: b (no sandstorm) is asked next");
+            Pass(e, b, "two-holders b");
+            Check(e.PendingDecision!.PlayerId == c && e.GetLegalPlays(c).Count == 0, "two-holders: c cannot form a sandstorm but is asked");
+            Pass(e, c, "two-holders c");
+            Check(e.Field.IsEmpty && e.PendingDecision!.PlayerId == l, "two-holders: nobody stopped, so the flush stands");
         }
 
         // ---- 3枚縛り（縛り発生回数2：同じスートが3回続いて縛り）----
@@ -889,6 +985,21 @@ internal static class EngineTests
                 r.Flow.AmbulanceEnabled = true; r.Flow.RokurokubiEnabled = true;
                 r.Special.TwelveBomberEnabled = true; r.Joker.JokerCount = 2;
             }, 4),
+            // 4止め：8と同じ枚数で止められる設定／標準（2倍）＋ジョーカー2枚・ジョーカー効果あり
+            ("fourstop-same", r => { AllSpecials(r); r.Flow.FourStopCount = FourStopCountRule.SameAsEight; }, 4),
+            ("fourstop-double-jokers", r => { AllSpecials(r); r.Joker.JokerCount = 2; r.Joker.JokerTriggersEffects = true; }, 4),
+            // 得点配分 2・1・-1・-2（合計がマイナスになる・延長戦の判定も通る）
+            ("points-minus", r =>
+            {
+                r.Progress.PointsDaifugo = 2; r.Progress.PointsFugo = 1; r.Progress.PointsHeimin = 0;
+                r.Progress.PointsHinmin = -1; r.Progress.PointsDaihinmin = -2;
+            }, 4),
+            ("points-minus-5p", r =>
+            {
+                AllSpecials(r);
+                r.Progress.PointsDaifugo = 2; r.Progress.PointsFugo = 1; r.Progress.PointsHeimin = 0;
+                r.Progress.PointsHinmin = -1; r.Progress.PointsDaihinmin = -2;
+            }, 5),
         };
 
         foreach (var (name, apply, count) in configs)
@@ -906,7 +1017,7 @@ internal static class EngineTests
             Check(ok == 60, $"simulation {name}: {ok}/60");
         }
 
-        // 設定画面のプリセット（標準・シンプル・全部盛り）でも最後まで正しく進む
+        // 設定画面のプリセット（初心者用・中級者用・完全上級者）でも最後まで正しく進む
         foreach (var preset in Enum.GetValues<RulePreset>())
         {
             int ok = 0;
@@ -921,9 +1032,8 @@ internal static class EngineTests
         }
         var keep = RuleSettings.CreateDefault();
         keep.Progress.RoundCount = 7;
-        Check(RulePresets.Create(RulePreset.Chaos, keep).Progress.RoundCount == 7, "preset keeps round count");
-        Check(RulePresets.Create(RulePreset.Chaos).Special.TwelveBomberEnabled && !RulePresets.Create(RulePreset.Simple).Lock.SuitLockEnabled,
-            "preset contents");
+        Check(RulePresets.Create(RulePreset.Expert, keep).Progress.RoundCount == 7, "preset keeps round count");
+        PresetContents();
 
         Console.WriteLine("coverage: " + string.Join(", ", Coverage.OrderBy(k => k.Key).Select(k => $"{k.Key}={k.Value}")));
         foreach (var must in new[] { "Revolution", "EightCut", "FourStop", "SevenPass", "TenDiscard", "TwelveBomber", "ranks-declared",
@@ -934,6 +1044,62 @@ internal static class EngineTests
             Check(Coverage.ContainsKey(must), "coverage " + must);
         }
         return (_pass, _fail);
+    }
+
+    /// <summary>ルール設定の全カテゴリにある ON/OFF（bool）の項目を、名前つきで列挙する。</summary>
+    private static IEnumerable<(string Name, bool Value)> BoolRules(RuleSettings r)
+    {
+        foreach (var category in typeof(RuleSettings).GetProperties())
+        {
+            if (category.PropertyType.IsClass && category.PropertyType != typeof(string) && category.GetValue(r) is { } section)
+            {
+                foreach (var p in category.PropertyType.GetProperties())
+                {
+                    if (p.PropertyType == typeof(bool) && p.CanRead && p.CanWrite)
+                    {
+                        yield return ($"{category.Name}.{p.Name}", (bool)p.GetValue(section)!);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void PresetContents()
+    {
+        // 設定画面のボタンは CommandParameter に名前を書いて Enum.TryParse で探すため、名前が変わるとボタンが無反応になる
+        Check(Enum.GetNames<RulePreset>().SequenceEqual(new[] { "Beginner", "Intermediate", "Expert" }), "preset names match the settings page buttons");
+        foreach (var preset in Enum.GetValues<RulePreset>())
+        {
+            Check(!string.IsNullOrWhiteSpace(RulePresets.DisplayName(preset)) && RulePresets.DisplayName(preset) != preset.ToString(), $"preset {preset} has a display name");
+        }
+
+        // 初心者用：革命・8切り・スート縛り・階段・カード交換だけ
+        var b = RulePresets.Create(RulePreset.Beginner);
+        Check(b.Revolution.Enabled && b.Flow.EightCutEnabled && b.Lock.SuitLockEnabled && b.Sequence.Enabled && b.Exchange.Enabled,
+            "beginner: the basic rules are on");
+        Check(!b.ElevenBack.Enabled && !b.Joker.SpadeThreeReturnEnabled && !b.RankChange.MiyakoOchiEnabled && !b.ForbiddenFinish.Enabled
+            && !b.Special.SevenPassEnabled && !b.Special.TenDiscardEnabled && !b.Special.TwelveBomberEnabled && !b.SkipReverse.FiveSkipEnabled
+            && !b.Flow.FourStopEnabled && !b.Flow.SandstormEnabled && !b.Lock.NumberLockEnabled && !b.Revolution.CoupEnabled,
+            "beginner: special effects are off");
+
+        // 中級者用：定番＋人気の特殊効果
+        var m = RulePresets.Create(RulePreset.Intermediate);
+        Check(m.ElevenBack.Enabled && m.Joker.SpadeThreeReturnEnabled && m.RankChange.MiyakoOchiEnabled && m.Special.SevenPassEnabled
+            && m.Special.TenDiscardEnabled && m.SkipReverse.FiveSkipEnabled && m.ForbiddenFinish.Enabled && m.Lock.SuitLockEnabled,
+            "intermediate: popular rules are on");
+        Check(!m.Special.TwelveBomberEnabled && !m.Flow.SandstormEnabled && !m.RankChange.GekokujoEnabled, "intermediate: advanced rules stay off");
+
+        // 完全上級者：すべての ON/OFF 項目が有効（項目を増やしたらここで気付けるよう、全項目を列挙して調べる）
+        var x = RulePresets.Create(RulePreset.Expert);
+        var off = BoolRules(x).Where(t => !t.Value).Select(t => t.Name).ToList();
+        Check(off.Count == 0, "expert: every on/off rule is enabled (off: " + string.Join(", ", off) + ")");
+        Check(BoolRules(x).Count() >= 55, $"expert: the bool rule scan found {BoolRules(x).Count()} rules");
+        Check(x.ElevenBack.Duration == ElevenBackDuration.Persistent && x.Joker.JokerCount == 2, "expert: strong 11-back and two jokers");
+
+        // 既定値（新規インストール時）はプリセットに合わせて変わっていない
+        var d = RuleSettings.CreateDefault();
+        Check(d.ElevenBack.Enabled && !d.Special.SevenPassEnabled && d.Joker.JokerCount == 1 && d.Flow.FourStopCount == FourStopCountRule.DoubleEight,
+            "defaults are unchanged");
     }
 
     internal static void AllSpecials(RuleSettings r)

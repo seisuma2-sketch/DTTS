@@ -39,6 +39,15 @@ public enum ElevenBackDuration : byte
     Persistent,
 }
 
+/// <summary>4止めで8切りを止めるのに必要な4の枚数。</summary>
+public enum FourStopCountRule : byte
+{
+    /// <summary>8の枚数の2倍（8が1枚なら4が2枚、8が2枚なら4が4枚）。標準。</summary>
+    DoubleEight = 0,
+    /// <summary>8と同じ枚数（8が1枚なら4が1枚）。</summary>
+    SameAsEight,
+}
+
 /// <summary>2ラウンド目以降の親の決め方。</summary>
 public enum RoundLeaderRule : byte
 {

@@ -42,8 +42,13 @@ internal static class Program
         Console.WriteLine($"Services: pass={sp}, fail={sf}");
         totalFail += sf;
 
+        Console.WriteLine("--- 5. TurnOrderTests ---");
+        var (tp, tf) = TurnOrderTests.Run();
+        Console.WriteLine($"TurnOrder: pass={tp}, fail={tf}");
+        totalFail += tf;
+
         Console.WriteLine("========================================");
-        int totalPass = jp + ep + np + sp;
+        int totalPass = jp + ep + np + sp + tp;
         Console.WriteLine($"TOTAL: pass={totalPass}, fail={totalFail}");
         Console.WriteLine(totalFail == 0 ? "ALL TESTS PASSED!" : "SOME TESTS FAILED!");
         Console.WriteLine("========================================");

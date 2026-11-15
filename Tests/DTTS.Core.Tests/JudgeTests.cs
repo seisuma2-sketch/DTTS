@@ -330,8 +330,30 @@ internal static class JudgeTests
         // 4止め
         rules.Flow.FourStopEnabled = true;
         var f8 = Play(j, empty, "H8").WithEightCutPending(true);
-        Check(j.Judge(C("S4"), f8).BeatMethod == BeatMethod.FourStop, "four stop");
+        // 標準：8の枚数の2倍の4が必要（8が1枚なら4を2枚）
+        Check(j.Judge(C("S4 H4"), f8).BeatMethod == BeatMethod.FourStop, "four stop: 4-pair stops a single 8");
+        Check(j.Judge(C("S4"), f8).RejectReason == PlayRejectReason.FourStopOnly, "four stop: one 4 is not enough by default");
+        Check(j.Judge(C("S4 H4 C4"), f8).RejectReason == PlayRejectReason.FourStopOnly, "four stop: three 4s are not the required count");
         Check(j.Judge(C("S9"), f8).RejectReason == PlayRejectReason.FourStopOnly, "four stop only");
+        var f88 = Play(j, empty, "H8 D8").WithEightCutPending(true);
+        Check(j.Judge(C("S4 H4 C4 D4"), f88).BeatMethod == BeatMethod.FourStop, "four stop: four 4s stop two 8s");
+        Check(!j.Judge(C("S4 H4"), f88).IsLegal, "four stop: two 4s cannot stop two 8s by default");
+        Check(j.GetLegalPlays(C("S4 H4 C5"), f8).Count == 1 && j.GetLegalPlays(C("S4 C5"), f8).Count == 0,
+            "four stop: legal plays use the doubled count");
+        Check(j.Judge(C("S4 JK0"), f8).RejectReason == PlayRejectReason.FourStopOnly, "four stop: joker substitute needs joker effects");
+        rules.Joker.JokerTriggersEffects = true;
+        Check(j.Judge(C("S4 JK0"), f8).BeatMethod == BeatMethod.FourStop, "four stop: joker substitute with joker effects");
+        rules.Joker.JokerTriggersEffects = false;
+        // 8と同じ枚数の設定
+        rules.Flow.FourStopCount = FourStopCountRule.SameAsEight;
+        Check(j.Judge(C("S4"), f8).BeatMethod == BeatMethod.FourStop, "four stop (same count): one 4 stops one 8");
+        Check(j.Judge(C("S4 H4"), f8).RejectReason == PlayRejectReason.FourStopOnly, "four stop (same count): a pair is the wrong count");
+        Check(j.Judge(C("S4 H4"), f88).BeatMethod == BeatMethod.FourStop, "four stop (same count): pair stops a pair");
+        rules.Flow.FourStopCount = FourStopCountRule.DoubleEight;
+        // 階段の8切りは止められない
+        var fSeq8 = Play(j, empty, "H7 H8 H9").WithEightCutPending(true);
+        Check(!j.Judge(C("S4 H4 C4 D4 JK0 C5"), fSeq8).IsLegal && j.GetLegalPlays(C("S4 H4 C4 D4"), fSeq8).Count == 0,
+            "four stop: a sequence 8-cut cannot be stopped");
         rules.Flow.FourStopEnabled = false;
 
         // エンペラー

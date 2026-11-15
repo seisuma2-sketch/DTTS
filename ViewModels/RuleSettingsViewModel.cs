@@ -216,19 +216,13 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
         }
     }
 
-    /// <summary>プリセット（標準・シンプル・全部盛り）を適用する。ラウンド数はそのまま引き継ぐ。</summary>
+    /// <summary>プリセット（初心者用・中級者用・完全上級者）を適用する。ラウンド数はそのまま引き継ぐ。</summary>
     [RelayCommand]
     private void ApplyPreset(string? name)
     {
-        if (!Enum.TryParse<RulePreset>(name, out var preset)) return;
+        if (!Enum.TryParse<RulePreset>(name, out var preset) || !Enum.IsDefined(preset)) return;
         Rules = RulePresets.Create(preset, Rules);
-        string label = preset switch
-        {
-            RulePreset.Simple => "シンプル",
-            RulePreset.Chaos => "全部盛り",
-            _ => "標準",
-        };
-        StatusMessage = $"プリセット「{label}」を適用しました（「設定を保存」またはタイトルへ戻ると保存されます）";
+        StatusMessage = $"プリセット「{RulePresets.DisplayName(preset)}」を適用しました（「設定を保存」またはタイトルへ戻ると保存されます）";
     }
 
     /// <summary>すべてのカテゴリを開く・閉じる。</summary>

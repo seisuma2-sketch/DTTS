@@ -469,14 +469,22 @@ public sealed class JudgeLogic : IJudgeLogic
             && play.Cards[0].Suit == Suit.Spade && play.Cards[0].Rank == j.SpadeThreeReturnRank;
     }
 
+    /// <summary>4止めに必要な4の枚数（標準は8の枚数の2倍）。</summary>
+    public int FourStopRequiredCount(CardPlay eightPlay)
+    {
+        ArgumentNullException.ThrowIfNull(eightPlay);
+        return _rules.Flow.FourStopCount == FourStopCountRule.SameAsEight ? eightPlay.Count : eightPlay.Count * 2;
+    }
+
     private bool IsFourStop(CardPlay play, CardPlay eightPlay)
     {
         var f = _rules.Flow;
+        // 4は単騎・同じ数字の組（8が1枚でも4は2枚のペアで出す）。階段の8切りは止められない
         return f.FourStopEnabled
-            && !play.IsSequenceLike
+            && !eightPlay.IsSequenceLike
+            && play.Type is HandType.Single or HandType.Multiple
             && !play.IsJokerOnly
-            && play.Type == eightPlay.Type
-            && play.Count == eightPlay.Count
+            && play.Count == FourStopRequiredCount(eightPlay)
             && play.Rank == f.FourStopRank
             && (play.JokerCount == 0 || _rules.Joker.JokerTriggersEffects);
     }
@@ -922,8 +930,12 @@ public sealed class JudgeLogic : IJudgeLogic
         ArgumentNullException.ThrowIfNull(field);
         var results = new List<PlayJudgement>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        // 砂嵐の割り込み受付中は、場札と枚数が違っても砂嵐を出せる
-        int? requiredCount = field.IsSandstormStopPending ? null : field.CurrentPlay?.Count;
+        // 砂嵐の割り込み受付中は、場札と枚数が違っても砂嵐を出せる。4止めは8の枚数で必要枚数が決まる
+        int? requiredCount = field.IsSandstormStopPending
+            ? null
+            : field.IsEightCutPending && field.CurrentPlay is { } eight
+                ? FourStopRequiredCount(eight)
+                : field.CurrentPlay?.Count;
 
         foreach (var candidate in EnumerateCandidates(hand))
         {

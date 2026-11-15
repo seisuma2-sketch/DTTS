@@ -130,23 +130,27 @@
                             <!-- プリセットバー（ワンクリックで全項目を切り替え。自分で保存したものは右側の「マイプリセット」） -->
                             <StackPanel Spacing="8">
                                 <TextBlock Text="プリセット" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AppTextSecondaryBrush}" />
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Button Command="{x:Bind ViewModel.ApplyPresetCommand}" CommandParameter="Standard" CornerRadius="16" Padding="14,6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Background="{StaticResource AppBackgroundDeepBrush}">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <FontIcon Glyph="&#xE8FD;" FontSize="13" />
-                                            <TextBlock Text="標準" FontSize="13" />
-                                        </StackPanel>
-                                    </Button>
-                                    <Button Command="{x:Bind ViewModel.ApplyPresetCommand}" CommandParameter="Simple" CornerRadius="16" Padding="14,6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Background="{StaticResource AppBackgroundDeepBrush}">
+                                <!-- CommandParameter は RulePreset の名前（Beginner / Intermediate / Expert） -->
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Margin="0,0,8,6" Command="{x:Bind ViewModel.ApplyPresetCommand}" CommandParameter="Beginner" AutomationProperties.Name="プリセット：初心者用" CornerRadius="16" Padding="14,6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Background="{StaticResource AppBackgroundDeepBrush}"
+                                            ToolTipService.ToolTip="革命・8切り・スート縛り・階段・カード交換だけの、覚えることが少ないルール">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
                                             <FontIcon Glyph="&#xE73E;" FontSize="13" />
-                                            <TextBlock Text="シンプル" FontSize="13" />
+                                            <TextBlock Text="初心者用" FontSize="13" />
                                         </StackPanel>
                                     </Button>
-                                    <Button Command="{x:Bind ViewModel.ApplyPresetCommand}" CommandParameter="Chaos" CornerRadius="16" Padding="14,6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Background="{StaticResource AppBackgroundDeepBrush}">
+                                    <Button Margin="0,0,8,6" Command="{x:Bind ViewModel.ApplyPresetCommand}" CommandParameter="Intermediate" AutomationProperties.Name="プリセット：中級者用" CornerRadius="16" Padding="14,6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Background="{StaticResource AppBackgroundDeepBrush}"
+                                            ToolTipService.ToolTip="定番のルールに、11バック・スペ3返し・都落ち・7渡し・10捨て・5スキップ・9リバースを加えた構成">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon Glyph="&#xE8FD;" FontSize="13" />
+                                            <TextBlock Text="中級者用" FontSize="13" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Margin="0,0,8,6" Command="{x:Bind ViewModel.ApplyPresetCommand}" CommandParameter="Expert" AutomationProperties.Name="プリセット：完全上級者（全ルールあり）" CornerRadius="16" Padding="14,6" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Background="{StaticResource AppBackgroundDeepBrush}"
+                                            ToolTipService.ToolTip="実装されているすべてのローカルルールを有効にしたフル構成（ジョーカー2枚・強化11バック）">
                                         <StackPanel Orientation="Horizontal" Spacing="6">
                                             <FontIcon Glyph="&#xE945;" FontSize="13" />
-                                            <TextBlock Text="全部盛り" FontSize="13" />
+                                            <TextBlock Text="完全上級者（全ルールあり）" FontSize="13" />
                                         </StackPanel>
                                     </Button>
                                 </StackPanel>
@@ -186,32 +190,60 @@
                                 </ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate x:DataType="vm:RuleCategoryViewModel">
-                                        <Expander
-                                            IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}"
-                                            HorizontalAlignment="Stretch"
-                                            HorizontalContentAlignment="Stretch">
-                                            <Expander.Header>
-                                                <Grid ColumnSpacing="12" Padding="0,6">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <StackPanel Spacing="1">
-                                                        <TextBlock Text="{x:Bind Heading}" FontSize="14" FontWeight="SemiBold" />
-                                                        <TextBlock Text="{x:Bind Summary}" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
-                                                    </StackPanel>
-                                                    <!-- 有効数バッジ（1つでも有効ならテーマカラー） -->
-                                                    <Border
-                                                        Grid.Column="1"
-                                                        CornerRadius="10"
-                                                        Padding="10,2"
-                                                        VerticalAlignment="Center"
-                                                        Background="{x:Bind views:RuleSettingsPage.BadgeBackground(HasEnabled), Mode=OneWay}">
-                                                        <TextBlock Text="{x:Bind BadgeText, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" Foreground="{x:Bind views:RuleSettingsPage.BadgeForeground(HasEnabled), Mode=OneWay}" />
-                                                    </Border>
-                                                </Grid>
-                                            </Expander.Header>
-                                            <StackPanel Spacing="6">
+                                        <!--
+                                            軽量な折りたたみ（Expander の高さアニメーションは開閉のたびに中身を毎フレーム計り直してカクつくため使わない）。
+                                            見出しのボタンで開閉し、中身は即座に表示して不透明度だけを短くフェードさせる（コンポジションで描くのでレイアウトは1回だけ）。
+                                        -->
+                                        <Border
+                                            CornerRadius="8"
+                                            Background="#0DFFFFFF"
+                                            BorderBrush="{StaticResource AppBorderSubtleBrush}"
+                                            BorderThickness="1">
+                                            <StackPanel>
+                                                <Button
+                                                    Tag="{x:Bind}"
+                                                    Click="OnCategoryHeaderClicked"
+                                                    HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Stretch"
+                                                    Padding="14,6,12,6"
+                                                    CornerRadius="8"
+                                                    Background="Transparent"
+                                                    BorderThickness="0"
+                                                    AutomationProperties.Name="{x:Bind Heading}"
+                                                    AutomationProperties.HelpText="クリックで開く・閉じる">
+                                                    <Grid ColumnSpacing="12" Padding="0,6">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <StackPanel Spacing="1">
+                                                            <TextBlock Text="{x:Bind Heading}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                                            <TextBlock Text="{x:Bind Summary}" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                                        </StackPanel>
+                                                        <!-- 有効数バッジ（1つでも有効ならテーマカラー） -->
+                                                        <Border
+                                                            Grid.Column="1"
+                                                            CornerRadius="10"
+                                                            Padding="10,2"
+                                                            VerticalAlignment="Center"
+                                                            Background="{x:Bind views:RuleSettingsPage.BadgeBackground(HasEnabled), Mode=OneWay}">
+                                                            <TextBlock Text="{x:Bind BadgeText, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" Foreground="{x:Bind views:RuleSettingsPage.BadgeForeground(HasEnabled), Mode=OneWay}" />
+                                                        </Border>
+                                                        <!-- 開閉の矢印（開いているときは上向き） -->
+                                                        <FontIcon
+                                                            Grid.Column="2"
+                                                            Glyph="{x:Bind views:RuleSettingsPage.ChevronGlyph(IsExpanded), Mode=OneWay}"
+                                                            FontSize="12"
+                                                            VerticalAlignment="Center"
+                                                            Foreground="{StaticResource AppTextSecondaryBrush}" />
+                                                    </Grid>
+                                                </Button>
+                                            <StackPanel
+                                                Spacing="6"
+                                                Padding="14,2,14,14"
+                                                Visibility="{x:Bind IsExpanded, Mode=OneWay}"
+                                                Loaded="OnCategoryContentLoaded">
                                                 <!-- ON/OFF の項目：幅に応じて1〜2列。行にマウスを重ねる・クリック・フォーカスで右のガイドに解説を出す -->
                                                 <ItemsRepeater ItemsSource="{x:Bind Items}">
                                                     <ItemsRepeater.Layout>
@@ -288,7 +320,8 @@
                                                     </ItemsRepeater.ItemTemplate>
                                                 </ItemsRepeater>
                                             </StackPanel>
-                                        </Expander>
+                                            </StackPanel>
+                                        </Border>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
@@ -388,24 +421,29 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
 
-                                <!-- 席1 (東) -->
+                                <!-- 席1：あなたの次に手番が来る人（画面の左） -->
                                 <StackPanel Grid.Column="0" Spacing="8">
-                                    <TextBlock Text="席 1 (東)" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
+                                    <TextBlock Text="席 1（左・あなたの次）" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
                                     <TextBox Header="名前" Text="{x:Bind ViewModel.Seat1Name, Mode=TwoWay}" />
                                 </StackPanel>
 
-                                <!-- 席2 (北) -->
+                                <!-- 席2：向かい（画面の上） -->
                                 <StackPanel Grid.Column="1" Spacing="8">
-                                    <TextBlock Text="席 2 (北)" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
+                                    <TextBlock Text="席 2（上・向かい）" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
                                     <TextBox Header="名前" Text="{x:Bind ViewModel.Seat2Name, Mode=TwoWay}" />
                                 </StackPanel>
 
-                                <!-- 席3 (西) -->
+                                <!-- 席3：あなたの前に手番が来る人（画面の右） -->
                                 <StackPanel Grid.Column="2" Spacing="8">
-                                    <TextBlock Text="席 3 (西)" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
+                                    <TextBlock Text="席 3（右・あなたの前）" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
                                     <TextBox Header="名前" Text="{x:Bind ViewModel.Seat3Name, Mode=TwoWay}" />
                                 </StackPanel>
                             </Grid>
+                            <TextBlock
+                                Text="手番は画面上の時計回り（あなた → 左 → 上 → 右）に進みます。「席替え」がオンのときは、ラウンドごとに席が入れ替わります。"
+                                FontSize="12"
+                                TextWrapping="Wrap"
+                                Foreground="{StaticResource AppTextSecondaryBrush}" />
                         </StackPanel>
                     </Border>
 

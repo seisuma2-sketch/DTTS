@@ -4,6 +4,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Threading.Tasks;
 using DTTS.Common;
+using DTTS.Core.Logic;
 using DTTS.Core.Models;
 using DTTS.ViewModels;
 using DTTS.Views.Controls;
@@ -332,6 +333,11 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(GameTableViewModel.SeatLayoutVersion))
+        {
+            UpdateAllPanels(); // 席替え・初回の座席順の確定：左・上・右に出す人を並べ直す
+        }
+
         if (e.PropertyName == nameof(GameTableViewModel.IsRoundResultOpen) && ViewModel.IsRoundResultOpen)
         {
             HideCutIn();
@@ -670,20 +676,17 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
 
     private void UpdateAllPanels()
     {
-        var p0 = ViewModel.Player0;
-        Player0Panel.SetPlayerInfo(p0.Name, p0.HandCount, p0.Rank, p0.TotalScore, p0.IsTurn, p0.IsThinking, p0.IsPassed, p0.FinishPlace);
+        Show(ViewModel.Player0, Player0Panel, null);
+        // 座席順で自分の次の人から 左 → 上 → 右（画面上の時計回り）。席替えのたびに並びが変わる
+        Show(ViewModel.SeatSlotPlayer(SeatLayout.Left), LeftSeatPanel, LeftSeatSlimPanel);
+        Show(ViewModel.SeatSlotPlayer(SeatLayout.Top), TopSeatPanel, TopSeatSlimPanel);
+        Show(ViewModel.SeatSlotPlayer(SeatLayout.Right), RightSeatPanel, RightSeatSlimPanel);
 
-        var p1 = ViewModel.Player1;
-        Player1Panel.SetPlayerInfo(p1.Name, p1.HandCount, p1.Rank, p1.TotalScore, p1.IsTurn, p1.IsThinking, p1.IsPassed, p1.FinishPlace);
-        Player1SlimPanel.SetPlayerInfo(p1.Name, p1.HandCount, p1.Rank, p1.TotalScore, p1.IsTurn, p1.IsThinking, p1.IsPassed, p1.FinishPlace);
-
-        var p2 = ViewModel.Player2;
-        Player2Panel.SetPlayerInfo(p2.Name, p2.HandCount, p2.Rank, p2.TotalScore, p2.IsTurn, p2.IsThinking, p2.IsPassed, p2.FinishPlace);
-        Player2SlimPanel.SetPlayerInfo(p2.Name, p2.HandCount, p2.Rank, p2.TotalScore, p2.IsTurn, p2.IsThinking, p2.IsPassed, p2.FinishPlace);
-
-        var p3 = ViewModel.Player3;
-        Player3Panel.SetPlayerInfo(p3.Name, p3.HandCount, p3.Rank, p3.TotalScore, p3.IsTurn, p3.IsThinking, p3.IsPassed, p3.FinishPlace);
-        Player3SlimPanel.SetPlayerInfo(p3.Name, p3.HandCount, p3.Rank, p3.TotalScore, p3.IsTurn, p3.IsThinking, p3.IsPassed, p3.FinishPlace);
+        static void Show(PlayerViewModel p, PlayerPanelControl wide, PlayerPanelControl? slim)
+        {
+            wide.SetPlayerInfo(p.Name, p.HandCount, p.Rank, p.TotalScore, p.IsTurn, p.IsThinking, p.IsPassed, p.FinishPlace);
+            slim?.SetPlayerInfo(p.Name, p.HandCount, p.Rank, p.TotalScore, p.IsTurn, p.IsThinking, p.IsPassed, p.FinishPlace);
+        }
     }
 
     private void OnCardClicked(object? sender, Card card)
@@ -743,6 +746,14 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
                     e.Handled = true;
                     break;
             }
+            return;
+        }
+
+        // --- 1b. 自分があがった後：S で残りをスキップして結果へ ---
+        if (e.Key == VirtualKey.S && ViewModel.CanSkipToResult)
+        {
+            ViewModel.SkipToResultCommand.Execute(null);
+            e.Handled = true;
             return;
         }
 

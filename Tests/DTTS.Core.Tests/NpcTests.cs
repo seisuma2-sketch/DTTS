@@ -139,7 +139,7 @@ internal static class NpcTests
                 {
                     continue; // ♦3 を持つ席が親。席0 以外が親の配牌は対象外
                 }
-                bool chance = false, stopped = false, declined = false;
+                bool chance = false, stopped = false, declined = false, nonHolderStopped = false;
                 FieldFlushedEvent? flush = null;
                 engine.EventOccurred += (_, ev) =>
                 {
@@ -147,14 +147,19 @@ internal static class NpcTests
                     if (ev is FieldFlushedEvent ff && chance && flush is null) flush = ff;
                     if (ev is DecisionRequestedEvent { Decision.Kind: DecisionKind.SandstormStopChance }) chance = true;
                     if (ev is CardsPlayedEvent { Judgement.BeatMethod: BeatMethod.SandstormStop }) stopped = true;
-                    if (ev is PlayerPassedEvent { IsFourStopDecline: true }) declined = true;
+                    if (ev is PlayerPassedEvent { IsFourStopDecline: true, PlayerId: 2 }) declined = true;
+                    // 砂嵐を持たない席にも確認が出る：その NPC は必ずパス（流す）を返す
+                    if (ev is CardsPlayedEvent { PlayerId: 1 or 3, Judgement.BeatMethod: BeatMethod.SandstormStop }) nonHolderStopped = true;
                 };
                 engine.SubmitPlay(0, C("D3"));
                 engine.SubmitPass(1); engine.SubmitPass(2); engine.SubmitPass(3);
                 var difficulty = (NpcDifficulty)(seed % 3);
+                npc.Assign(1, NpcProfile.Default, new SystemRandomSource(seed + 100));
                 npc.Assign(2, new NpcProfile(difficulty, (NpcPersonality)(seed % 4)), new SystemRandomSource(seed));
+                npc.Assign(3, NpcProfile.Default, new SystemRandomSource(seed + 300));
                 Check(engine.SubmitPlay(0, C("S6 H6")).IsAccepted, "npc sandstorm: rokurokubi played");
                 Check(chance && (stopped ^ declined), $"npc answers the sandstorm chance (seed {seed}, {difficulty})");
+                Check(!nonHolderStopped, $"npc sandstorm: non-holders only pass (seed {seed})");
                 Check(flush is not null && flush.NextLeaderId == (stopped ? 2 : 0)
                     && flush.Cause == (stopped ? SpecialEffectType.Sandstorm : SpecialEffectType.Rokurokubi),
                     $"npc sandstorm: the right player leads afterwards (seed {seed})");

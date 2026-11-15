@@ -1171,7 +1171,8 @@ public sealed class GameEngine
     // ======================================================================
 
     /// <summary>
-    /// 場を流す効果の発動を保留し、止められる手を持つ他のプレイヤーへ進行方向順に割り込みの機会を与える。
+    /// 場を流す効果の発動を保留し、他のプレイヤーへ進行方向順に割り込みの機会を与える
+    /// （4止めは止められる手を持つ人だけ、砂嵐は残っている全員）。
     /// </summary>
     /// <param name="flusherId">場を流そうとしているプレイヤー。</param>
     /// <param name="effect">保留する効果（8切り・ろくろ首・99車）。</param>
@@ -1187,8 +1188,10 @@ public sealed class GameEngine
         _interruptQueue.Clear();
         foreach (int id in ActivePlayersAfter(flusherId).Where(id => id != flusherId))
         {
-            // 止められる手を持つプレイヤーにのみ機会を与える（不要な判断要求を出さない）
-            if (_judge.GetLegalPlays(GetPlayer(id).Hand, Field).Count > 0)
+            // 砂嵐（ろくろ首・99車への割り込み）は、持っているかどうかに関わらず全員に「止める／パス（流す）」を確認する。
+            // 持っている人にだけ聞くと、確認が出た・出ない（NPCが考え込んだ）ことで手札が他の人に透けてしまうため。
+            // 4止めは従来どおり、止められる手を持つプレイヤーにのみ機会を与える
+            if (kind == DecisionKind.SandstormStopChance || _judge.GetLegalPlays(GetPlayer(id).Hand, Field).Count > 0)
             {
                 _interruptQueue.Enqueue(id);
             }
