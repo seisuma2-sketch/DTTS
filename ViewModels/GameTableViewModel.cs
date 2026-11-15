@@ -176,6 +176,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
     // --- モーダル・ダイアログ ---
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasGuideHint))]
     public partial bool IsDecisionDialogOpen { get; set; }
 
     [ObservableProperty]
@@ -218,6 +219,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
     /// 「止める」か「見送る」かを選ぶ。止める札は自動で選択済みにする。
     /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasGuideHint))]
     public partial bool IsInterruptPromptOpen { get; set; }
 
     [ObservableProperty]
@@ -619,6 +621,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
     /// <summary>「残りをスキップして結果へ」ボタンを出すか。</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasGuideHint))]
     public partial bool CanSkipToResult { get; set; }
 
     /// <summary>
@@ -695,8 +698,11 @@ public sealed partial class GameTableViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(HasGuideHint))]
     public partial string GuideHint { get; set; } = "";
 
-    /// <summary>操作ガイドを出しているか。</summary>
-    public bool HasGuideHint => GuideHint.Length > 0;
+    /// <summary>
+    /// 操作ガイドを出しているか。割り込みの確認・カード選択・ダイアログ・「残りをスキップ」ボタンが出ている間は、
+    /// それらと重ならないよう隠す（カード選択のヒントは選択バーの説明文に入れる）。
+    /// </summary>
+    public bool HasGuideHint => GuideHint.Length > 0 && !IsInterruptPromptOpen && !IsDecisionDialogOpen && !CanSkipToResult;
 
     /// <summary>操作ガイドを出す（null なら何もしない）。しばらくすると自動で消える。残りをスキップ中は出さない。</summary>
     private void ShowGuideHint(string? text)
@@ -1308,8 +1314,13 @@ public sealed partial class GameTableViewModel : ViewModelBase
         if (myTurnNow && !_guestWasMyTurn)
         {
             var fv = view.Field;
-            ShowGuideHint(_guide.ForTurn(fv.CurrentCardIds is not { Length: > 0 }, legalSet.Count > 0,
-                fv.IsStrengthReversed, fv.LockedSuits is { Length: > 0 }, fv.IsNumberLocked));
+            bool isLead = fv.CurrentCardIds is not { Length: > 0 };
+            // ゲストの画面には「必ず含めるカード」が届かないので、親番で出せる手すべてに共通するカード（最初の ♦3）から求める
+            Card? required = isLead && legalSet.Count > 1
+                ? legalSet.Skip(1).Aggregate((IEnumerable<Card>)legalSet[0], (acc, lp) => acc.Intersect(lp)).FirstOrDefault()
+                : null;
+            ShowGuideHint(_guide.ForTurn(isLead, legalSet.Count > 0,
+                fv.IsStrengthReversed, fv.LockedSuits is { Length: > 0 }, fv.IsNumberLocked, required?.ToString()));
         }
         _guestWasMyTurn = myTurnNow;
 
@@ -1373,7 +1384,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 // 初心者用：自分の手番ごとに、今できることのヒントを出す（ゲストは画面の更新時に出す）
                 var f = _engine.Field;
                 ShowGuideHint(_guide.ForTurn(f.IsEmpty, _engine.GetLegalPlays(_myPlayerId).Count > 0,
-                    f.IsStrengthReversed, f.Lock.IsSuitLocked, f.Lock.IsNumberLocked));
+                    f.IsStrengthReversed, f.Lock.IsSuitLocked, f.Lock.IsNumberLocked, f.RequiredCard?.ToString()));
                 break;
 
             case DecisionKind.FourStopChance:
@@ -1411,11 +1422,9 @@ public sealed partial class GameTableViewModel : ViewModelBase
                     CardSelectionPurpose.TenDiscard => "捨てるカードを手札から選んでください",
                     _ => "カードを手札から選んでください",
                 };
-                DecisionMessage = reason;
-                if (dec.Purpose is { } purpose)
-                {
-                    ShowGuideHint(_guide.ForCardSelection(purpose));
-                }
+                // ヒントは選択バーの説明文に添える（バーの上に別のヒントを重ねない）
+                string? selectionHint = dec.Purpose is { } purpose ? _guide.ForCardSelection(purpose) : null;
+                DecisionMessage = selectionHint is null ? reason : reason + Environment.NewLine + selectionHint;
                 // 出す操作で選んでいたカードが残っていると数え間違えるため、選択を空にして始める
                 foreach (var cardVm in HumanHand)
                 {
@@ -1461,9 +1470,11 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
     private DecisionKind _interruptPromptKind;
 
-    private static string InterruptStatus(DecisionKind kind) => kind == DecisionKind.SandstormStopChance
+    private string InterruptStatus(DecisionKind kind) => kind == DecisionKind.SandstormStopChance
         ? "砂嵐で止めるか、パス（流す）かを選んでください"
-        : "4止め（または砂嵐）で止めるか、パス（流す）かを選んでください";
+        : _rules.Flow.SandstormEnabled
+            ? "4止め（または砂嵐）で止めるか、パス（流す）かを選んでください"
+            : "4止めで止めるか、パス（流す）かを選んでください";
 
     private static string FlushEffectLabel(SpecialEffectType? effect) => effect switch
     {

@@ -70,11 +70,16 @@ public sealed class GuideHints
     /// <param name="reversed">強さが逆転中か（革命・11バック）。</param>
     /// <param name="suitLocked">スート縛り中か。</param>
     /// <param name="numberLocked">数しば中か。</param>
-    public string? ForTurn(bool isLead, bool hasLegalPlay, bool reversed = false, bool suitLocked = false, bool numberLocked = false)
+    /// <param name="requiredCard">親番で必ず含めるカード（第1ラウンドの最初の ♦3 など。表示用の名前。なければ null）。</param>
+    public string? ForTurn(bool isLead, bool hasLegalPlay, bool reversed = false, bool suitLocked = false, bool numberLocked = false, string? requiredCard = null)
     {
         if (Level != GuideLevel.Beginner)
         {
             return null;
+        }
+        if (isLead && !string.IsNullOrEmpty(requiredCard))
+        {
+            return $"ヒント：最初の1手は {requiredCard} を含めて出します（{requiredCard} 1枚でも、{requiredCard} を含む組・階段でもかまいません）。カードを選んで「出す」[Enter]。";
         }
         if (isLead)
         {

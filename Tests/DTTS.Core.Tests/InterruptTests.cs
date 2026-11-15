@@ -431,6 +431,18 @@ internal static class InterruptTests
 
         Check(middle.ForTurn(true, true) is null, "guide intermediate: no per-turn tutorial");
         Check(beginner.ForTurn(true, true)!.Contains("親"), "guide beginner: lead hint");
+        string? first = beginner.ForTurn(true, true, requiredCard: Card.Of(Suit.Diamond, Rank.Three).ToString());
+        Check(first is not null && first.Contains("♦3") && !first.Contains("好きなカード"),
+            "guide beginner: the very first lead names the required ♦3 instead of 'any card'");
+        {
+            // エンジンの場にも、最初の親番で ♦3 が必須として載っている（画面はここからヒントを作る）
+            var r = RuleSettings.CreateDefault();
+            r.Progress.DiamondThreeStarts = true;
+            var e = new GameEngine(r, Enumerable.Range(0, 4).Select(i => new PlayerSetup("P" + i, PlayerKind.Human)).ToList(), new SystemRandomSource(5));
+            e.StartGame();
+            Check(e.Field.RequiredCard?.ToString() == "♦3" && e.GetLegalPlays(e.PendingDecision!.PlayerId).All(p => p.Play!.Cards.Contains(Card.Of(Suit.Diamond, Rank.Three))),
+                "guide: the first lead requires ♦3 and every legal play contains it");
+        }
         Check(beginner.ForTurn(false, false)!.Contains("パス"), "guide beginner: no-legal-play hint suggests passing");
         string? locked = beginner.ForTurn(false, true, reversed: true, suitLocked: true);
         Check(locked is not null && locked.Contains("逆転") && locked.Contains("スート縛り"), "guide beginner: follow hint mentions reversal and suit lock");
