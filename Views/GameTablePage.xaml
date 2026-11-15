@@ -7,6 +7,8 @@
     xmlns:ctrl="using:DTTS.Views.Controls"
     xmlns:vm="using:DTTS.ViewModels"
     xmlns:views="using:DTTS.Views"
+    xmlns:pres="using:DTTS.Services.Presentation"
+    xmlns:models="using:DTTS.Core.Models"
     mc:Ignorable="d"
     Background="{StaticResource AppBackgroundDeepBrush}"
     Loaded="OnPageLoaded"
@@ -59,6 +61,11 @@
                         <Setter Target="ActionButtons.Margin" Value="10,0,0,0" />
                         <Setter Target="HandScrollViewer.(Grid.Column)" Value="0" />
                         <Setter Target="HandScrollViewer.(Grid.ColumnSpan)" Value="3" />
+                        <Setter Target="SuggestionBar.(Grid.Column)" Value="0" />
+                        <Setter Target="SuggestionBar.(Grid.ColumnSpan)" Value="3" />
+                        <Setter Target="SuggestionBar.HorizontalAlignment" Value="Right" />
+                        <Setter Target="SuggestionBar.Margin" Value="0,-38,12,0" />
+                        <Setter Target="SuggestionBar.MaxWidth" Value="440" />
                         <!-- 下の段が高くなる分、手札の上に浮かせる操作バーも持ち上げる -->
                         <Setter Target="CardSelectionBar.Margin" Value="16,0,16,300" />
                         <Setter Target="InterruptBar.Margin" Value="16,0,16,300" />
@@ -406,12 +413,71 @@
                                     IsSelected="{x:Bind IsSelected, Mode=TwoWay}"
                                     CanPlay="{x:Bind CanPlay, Mode=OneWay}"
                                     IsKeyboardCursor="{x:Bind IsKeyboardCursor, Mode=OneWay}"
+                                    IsLegalSelection="{x:Bind IsLegalSelection, Mode=OneWay}"
                                     CardClicked="OnCardClicked"
-                                    CardDoubleClicked="OnCardDoubleClicked" />
+                                    CardDoubleClicked="OnCardDoubleClicked"
+                                    SameRankRequested="OnCardSameRankRequested" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
+
+                <!--
+                    まとめて選ぶ候補（今の場に出せるペア・3枚・階段）。押すとその組をまとめて選ぶ。
+                    手札の上辺に重ねて浮かせ、出ていても手札や場の位置は動かさない。右クリック・長押しで同じ数字をまとめて選ぶこともできる
+                -->
+                <Border
+                    x:Name="SuggestionBar"
+                    Grid.Row="1"
+                    Grid.Column="1"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Margin="0,-36,0,0"
+                    MaxWidth="660"
+                    Padding="8,4"
+                    CornerRadius="16"
+                    Background="#D9101722"
+                    BorderBrush="#33FFFFFF"
+                    BorderThickness="1"
+                    Visibility="{x:Bind ViewModel.HasPlaySuggestions, Mode=OneWay}"
+                    ToolTipService.ToolTip="押すとその組をまとめて選びます（カードの右クリック・長押しで同じ数字をまとめて選べます）">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="まとめて選ぶ" FontSize="11" VerticalAlignment="Center" Foreground="{StaticResource AppTextSecondaryBrush}" Margin="2,0,2,0" />
+                        <!-- 候補が多くて入りきらないときは、横にスクロールできる（スクロールバーは出さない） -->
+                        <ScrollViewer
+                            HorizontalScrollBarVisibility="Hidden"
+                            HorizontalScrollMode="Enabled"
+                            VerticalScrollBarVisibility="Disabled"
+                            VerticalScrollMode="Disabled">
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.PlaySuggestionChips, Mode=OneWay}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="6" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="pres:PlaySuggestion">
+                                    <Button
+                                        Content="{x:Bind Label}"
+                                        Tag="{x:Bind}"
+                                        Click="OnSuggestionClicked"
+                                        IsTabStop="False"
+                                        Padding="10,2,10,3"
+                                        MinHeight="0"
+                                        CornerRadius="12"
+                                        FontSize="13"
+                                        FontWeight="SemiBold"
+                                        Background="#26FFFFFF"
+                                        BorderBrush="{StaticResource AppAccentBrush}"
+                                        BorderThickness="1"
+                                        Foreground="{StaticResource AppTextPrimaryBrush}"
+                                        AutomationProperties.Name="{x:Bind Label}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        </ScrollViewer>
+                    </StackPanel>
+                </Border>
 
                 <!-- 操作ボタン群 (パス / 出す) & ショートカット案内 -->
                 <StackPanel x:Name="ActionButtons" Grid.Row="1" Grid.Column="2" Spacing="10" VerticalAlignment="Bottom" Margin="14,0,0,4">
@@ -592,6 +658,88 @@
                     Background="{StaticResource AppAccentBrush}"
                     Foreground="{StaticResource AppOnAccentBrush}" />
             </Grid>
+        </Border>
+
+        <!--
+            カード交換の結果（2ラウンド目以降）：渡したカード・受け取ったカードを小さなカードで数秒間見せる。
+            対戦が始まった（最初の「出すかパスか」）ときに出し、6秒で消える。クリックでもすぐ閉じる
+        -->
+        <Button
+            x:Name="ExchangeSummaryCard"
+            Visibility="{x:Bind ViewModel.IsExchangeSummaryOpen, Mode=OneWay}"
+            Command="{x:Bind ViewModel.DismissExchangeSummaryCommand}"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Margin="16,0,16,60"
+            Padding="18,12,18,14"
+            CornerRadius="14"
+            Background="#F2161E2C"
+            BorderBrush="{StaticResource AppAccentBrush}"
+            BorderThickness="1.5"
+            IsTabStop="False"
+            AutomationProperties.Name="{x:Bind ViewModel.ExchangeSummaryText, Mode=OneWay}"
+            ToolTipService.ToolTip="クリックで閉じる">
+            <StackPanel Spacing="10">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE8AB;" FontSize="16" Foreground="{StaticResource AppAccentBrush}" />
+                    <TextBlock Text="カード交換の結果" FontSize="15" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                </StackPanel>
+                <Grid ColumnSpacing="22">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="6" Visibility="{x:Bind ViewModel.HasExchangeGiven, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE72A;" FontSize="12" Foreground="#FFF0A35E" />
+                            <TextBlock Text="{x:Bind ViewModel.ExchangeGivenLabel, Mode=OneWay}" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                        </StackPanel>
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.ExchangeGivenCards, Mode=OneWay}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="4" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="models:Card">
+                                    <ctrl:CardControl Card="{x:Bind}" Width="46" Height="67" IsHitTestVisible="False" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="6" Visibility="{x:Bind ViewModel.HasExchangeReceived, Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE72B;" FontSize="12" Foreground="#FF6FD39B" />
+                            <TextBlock Text="{x:Bind ViewModel.ExchangeReceivedLabel, Mode=OneWay}" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" />
+                        </StackPanel>
+                        <ItemsControl ItemsSource="{x:Bind ViewModel.ExchangeReceivedCards, Mode=OneWay}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="4" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="models:Card">
+                                    <ctrl:CardControl Card="{x:Bind}" Width="46" Height="67" IsHitTestVisible="False" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </Button>
+
+        <!-- 検証用の自動プレイ中（起動引数 autoplay）であることの目印 -->
+        <Border
+            Visibility="{x:Bind ViewModel.IsAutoplay}"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Top"
+            Margin="0,6,18,0"
+            Padding="10,2"
+            CornerRadius="10"
+            Background="#CC5B3FA8"
+            IsHitTestVisible="False">
+            <TextBlock Text="自動プレイ中（検証用）" FontSize="11" Foreground="White" />
         </Border>
 
         <!--
@@ -812,6 +960,10 @@
                 </StackPanel>
             </Border>
         </Grid>
+
+        <!-- 場へカードが飛ぶ演出の層：出したプレイヤーの席から場まで、カードの写しを画面の上で滑らせる
+             （場の枠は角丸で中身を切り抜くため、枠の外を通る動きはこの層で描く）。クリックは下へ通す -->
+        <Canvas x:Name="FlightLayer" IsHitTestVisible="False" />
 
     </Grid>
 </Page>

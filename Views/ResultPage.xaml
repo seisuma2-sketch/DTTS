@@ -60,7 +60,7 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <Button Style="{StaticResource AppBackButtonStyle}" Command="{x:Bind ViewModel.GoBackCommand}" VerticalAlignment="Center" ToolTipService.ToolTip="タイトルへ戻る（Esc）">
+                <Button Style="{StaticResource AppBackButtonStyle}" AutomationProperties.Name="タイトルへ戻る" Command="{x:Bind ViewModel.GoBackCommand}" VerticalAlignment="Center" ToolTipService.ToolTip="タイトルへ戻る（Esc）">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xE72B;" FontSize="12" />
                         <TextBlock Text="タイトル" FontSize="13" />

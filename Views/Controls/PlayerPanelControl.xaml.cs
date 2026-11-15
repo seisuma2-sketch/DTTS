@@ -138,6 +138,29 @@ public sealed partial class PlayerPanelControl : UserControl
         }
     }
 
+    /// <summary>アバター（性格を表す線画アイコン）を設定する。</summary>
+    public void SetAvatar(string glyph, string label)
+    {
+        if (AvatarIcon.Glyph != glyph)
+        {
+            AvatarIcon.Glyph = glyph;
+        }
+        ToolTipService.SetToolTip(AvatarCircle, label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(AvatarCircle, label);
+    }
+
+    /// <summary>ひとことの吹き出しを出す（ふわっと出て、しばらくすると消える）。</summary>
+    public void ShowReaction(string text, TimeSpan lifetime)
+    {
+        if (string.IsNullOrEmpty(text) || Visibility != Visibility.Visible)
+        {
+            return;
+        }
+        ReactionText.Text = text;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ReactionBubble, text);
+        DTTS.Common.CompositionAnimationHelper.AnimateReactionBubble(ReactionBubble, lifetime.TotalMilliseconds);
+    }
+
     private void SetStatus(string text, Brush foreground, Brush background)
     {
         StatusText.Text = text;

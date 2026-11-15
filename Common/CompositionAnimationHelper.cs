@@ -105,6 +105,101 @@ public static class CompositionAnimationHelper
     }
 
     /// <summary>
+    /// ひとことの吹き出し：少し下から浮かび上がって現れ、しばらく留まってから消える（1本のキーフレームで完結し、
+    /// 途中で次の吹き出しが来ても最後は必ず透明になる）。
+    /// </summary>
+    public static void AnimateReactionBubble(FrameworkElement bubble, double lifetimeMs)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(bubble);
+        var compositor = visual.Compositor;
+        ElementCompositionPreview.SetIsTranslationEnabled(bubble, true);
+        bubble.Opacity = 1; // 表示の不透明度は Composition 側で動かす
+        visual.CenterPoint = new Vector3((float)bubble.ActualWidth, (float)bubble.ActualHeight, 0f);
+        var duration = TimeSpan.FromMilliseconds(Math.Max(400, lifetimeMs));
+        float inEnd = (float)Math.Min(0.25, 180 / duration.TotalMilliseconds);
+        float outStart = (float)Math.Max(inEnd, 1 - 260 / duration.TotalMilliseconds);
+        var ease = compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0.9f), new Vector2(0.3f, 1f));
+
+        var opacity = compositor.CreateScalarKeyFrameAnimation();
+        opacity.InsertKeyFrame(0f, 0f);
+        opacity.InsertKeyFrame(inEnd, 1f, ease);
+        opacity.InsertKeyFrame(outStart, 1f);
+        opacity.InsertKeyFrame(1f, 0f);
+        opacity.Duration = duration;
+
+        var lift = compositor.CreateVector3KeyFrameAnimation();
+        lift.InsertKeyFrame(0f, new Vector3(0f, 8f, 0f));
+        lift.InsertKeyFrame(inEnd, Vector3.Zero, ease);
+        lift.InsertKeyFrame(outStart, Vector3.Zero);
+        lift.InsertKeyFrame(1f, new Vector3(0f, -4f, 0f));
+        lift.Duration = duration;
+
+        var scale = compositor.CreateVector3KeyFrameAnimation();
+        scale.InsertKeyFrame(0f, new Vector3(0.85f, 0.85f, 1f));
+        scale.InsertKeyFrame(inEnd, Vector3.One, ease);
+        scale.InsertKeyFrame(1f, Vector3.One);
+        scale.Duration = duration;
+
+        visual.StartAnimation("Opacity", opacity);
+        visual.StartAnimation("Translation", lift);
+        visual.StartAnimation("Scale", scale);
+    }
+
+    /// <summary>
+    /// カードが出したプレイヤーの位置から場へ滑ってきて着地する（Translation と Scale のばね）。
+    /// </summary>
+    /// <param name="element">場のカード（の入れ物）。</param>
+    /// <param name="from">出どころから見た、カードの今の位置までのずれ（出どころ − カード中心）。</param>
+    /// <param name="startScale">出発時の大きさ（相手の席からは小さく、手札からはほぼ同じ大きさ）。</param>
+    /// <param name="delayMs">複数枚を少しずつずらして飛ばすための遅れ。</param>
+    /// <param name="onLanded">着地（ばねが落ち着いた）後に呼ぶ処理（写しを消して本物を見せる等）。</param>
+    public static void AnimateCardFlight(FrameworkElement element, Vector3 from, float startScale, int delayMs, Action? onLanded = null)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(element);
+        var compositor = visual.Compositor;
+        var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
+        if (onLanded is not null)
+        {
+            batch.Completed += (_, _) => onLanded();
+        }
+        ElementCompositionPreview.SetIsTranslationEnabled(element, true);
+        visual.CenterPoint = new Vector3((float)element.ActualWidth / 2f, (float)element.ActualHeight / 2f, 0f);
+
+        // 出発位置に置いてから、ばねで場の位置（ずれ 0）へ戻す。遅れている間は見えないようにしておく
+        visual.Properties.InsertVector3("Translation", from);
+        visual.Scale = new Vector3(startScale, startScale, 1f);
+        visual.Opacity = 0f;
+
+        var move = compositor.CreateSpringVector3Animation();
+        move.InitialValue = from;
+        move.FinalValue = Vector3.Zero;
+        move.DampingRatio = 0.78f;
+        move.Period = TimeSpan.FromMilliseconds(80);
+        move.DelayBehavior = AnimationDelayBehavior.SetInitialValueBeforeDelay;
+        if (delayMs > 0) move.DelayTime = TimeSpan.FromMilliseconds(delayMs);
+
+        var bounce = compositor.CreateSpringVector3Animation();
+        bounce.InitialValue = new Vector3(startScale, startScale, 1f);
+        bounce.FinalValue = Vector3.One;
+        bounce.DampingRatio = 0.5f;
+        bounce.Period = TimeSpan.FromMilliseconds(70);
+        bounce.DelayBehavior = AnimationDelayBehavior.SetInitialValueBeforeDelay;
+        if (delayMs > 0) bounce.DelayTime = TimeSpan.FromMilliseconds(delayMs);
+
+        var fade = compositor.CreateScalarKeyFrameAnimation();
+        fade.InsertKeyFrame(0f, 0f);
+        fade.InsertKeyFrame(1f, 1f);
+        fade.Duration = TimeSpan.FromMilliseconds(90);
+        fade.DelayBehavior = AnimationDelayBehavior.SetInitialValueBeforeDelay;
+        if (delayMs > 0) fade.DelayTime = TimeSpan.FromMilliseconds(delayMs);
+
+        visual.StartAnimation("Translation", move);
+        visual.StartAnimation("Scale", bounce);
+        visual.StartAnimation("Opacity", fade);
+        batch.End();
+    }
+
+    /// <summary>
     /// 場流れ演出（カードが右方向へスッと流れて消滅）。
     /// </summary>
     public static void AnimateFlushOut(UIElement element, Action? onCompleted = null)

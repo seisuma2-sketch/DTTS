@@ -10,7 +10,8 @@
     PointerPressed="OnPointerPressed"
     PointerEntered="OnPointerEntered"
     PointerExited="OnPointerExited"
-    DoubleTapped="OnDoubleTapped">
+    DoubleTapped="OnDoubleTapped"
+    Holding="OnHolding">
 
     <!--
         カードの中身は 70×102 の座標で設計し、Viewbox でコントロールの大きさ（既定 84×122）に合わせて拡大縮小する。
@@ -21,6 +22,22 @@
             <!-- 影（柔らかく見えるよう、ずらした半透明の板を2枚重ねる） -->
             <Border Margin="3,5,1,0" CornerRadius="8" Background="#38000000" />
             <Border Margin="2,3,2,2" CornerRadius="8" Background="#30000000" />
+
+            <!-- 選んだカードがそのまま出せる組になったときの発光（テーマカラーの外側の光の輪） -->
+            <Border
+                x:Name="LegalGlow"
+                Width="78"
+                Height="110"
+                Margin="0,-4,0,0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                CornerRadius="11"
+                BorderThickness="3"
+                BorderBrush="{StaticResource AppAccentBrush}"
+                Background="{StaticResource AppAccentSubtleBrush}"
+                Opacity="0.9"
+                IsHitTestVisible="False"
+                Visibility="Collapsed" />
 
             <!-- カード本体 -->
             <Border

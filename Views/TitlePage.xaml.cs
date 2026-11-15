@@ -29,6 +29,8 @@ public sealed partial class TitlePage : Page
 
     private async void OnPageLoaded(object sender, RoutedEventArgs e)
     {
+        // タイトルでは落ち着いた曲（対戦画面から戻ったときは、緊張の曲からフェードで切り替わる）
+        App.Services.GetRequiredService<DTTS.Services.Audio.IAudioService>().PlayBgm(DTTS.Services.Audio.BgmTrack.Lounge);
         await ViewModel.LoadSummaryAsync();
     }
 

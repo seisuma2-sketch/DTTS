@@ -13,6 +13,7 @@ using DTTS.Core.Models;
 using DTTS.Services.Audio;
 using DTTS.Services.Database;
 using DTTS.Services.Network;
+using DTTS.Services.Presentation;
 using DTTS.Services.Settings;
 using Microsoft.UI.Dispatching;
 
@@ -432,6 +433,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
             // 第1ラウンドの RoundStartedEvent はロビーで発行済みなので、座席順はエンジンから直接受け取る
             ApplySeatOrder(_engine.SeatOrder);
             ApplySpeed(); // 補充・引き継ぎのNPCにも進行スピードを反映する
+            SetUpAutoplay(_hostSession.Npc); // 検証用（--autoplay）：ホストの席も NPC が打つ
+            UpdateAvatars();
             RoundInfoText = FormatRoundInfo(Math.Max(1, _engine.RoundNumber), _engine.Rules.Progress.RoundCount);
             ApplyFieldBadges(_engine.Field);
             UpdateAllPlayersInfo();
@@ -486,6 +489,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
         _npcController.Assign(1, _npcProfiles[1]);
         _npcController.Assign(2, _npcProfiles[2]);
         _npcController.Assign(3, _npcProfiles[3]);
+        SetUpAutoplay(_npcController); // 検証用（--autoplay）：自分の席も NPC が打つ
+        UpdateAvatars();
 
         // イベント購読（後始末で解除するためハンドラを保持）
         _engineHandler = (sender, ev) => OnEngineEvent(ev);
@@ -515,6 +520,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
             case RoundStartedEvent rs:
                 // 新しいラウンドは、革命・11バック・縛りが一切残っていない状態から始める
                 ResetRoundBadges();
+                ResetExchangeSummary();
                 if (rs.RoundNumber == 1) _guide.Reset(); // 再戦：中級者用の「初めての効果」ヒントをまた出す
                 // 席替え：画面の左・上・右の席も新しい座席順に並べ直す（手番の回り方と画面を一致させる）
                 ApplySeatOrder(rs.SeatOrder);
@@ -531,9 +537,20 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 IsInterruptPromptOpen = false; // 前の割り込み確認は決着済み。自分宛ての割り込みなら下で開き直す
                 UpdateTurnState(dr.Decision.PlayerId);
                 HandleDecisionRequested(dr.Decision);
+                MaybeShowExchangeSummary(dr.Decision.Kind);
+                break;
+
+            case PlayerKindChangedEvent:
+                UpdateAvatars(); // 切断した席を NPC が引き継いだ（または戻った）
+                break;
+
+            case CardsTransferredEvent ct:
+                OnCardsTransferred(ct.FromPlayerId, ct.ToPlayerId, ct.Cards, ct.Reason);
                 break;
 
             case CardsPlayedEvent cp:
+                FieldPlayedBy = cp.PlayerId; // 場へ飛ぶ演出の出どころ（FieldCards を入れ替える前に決める）
+                if (cp.Judgement.Play != null) RaiseCardsFlight(cp.PlayerId, cp.Judgement.Play.Cards);
                 FieldCards.Clear();
                 if (cp.Judgement.Play != null)
                 {
@@ -549,6 +566,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
             case PlayerPassedEvent pp:
                 GetPlayerVm(pp.PlayerId).IsPassed = true;
                 StatusMessage = $"{GetPlayerVm(pp.PlayerId).Name} がパスしました";
+                if (!pp.IsFourStopDecline) React(pp.PlayerId, ReactionKind.Pass);
                 break;
 
             case EffectAppliedEvent ea:
@@ -572,6 +590,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 break;
 
             case FieldFlushedEvent ff:
+                FieldPlayedBy = null;
                 FieldCards.Clear();
                 ApplyFieldBadges(ff.Field); // 11バック・縛りは場が流れると解除される
                 StatusMessage = ff.Cause.HasValue ? $"場が流れました（{ff.Cause.Value}）" : "場が流れました";
@@ -601,6 +620,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 StopFastForward(); // 次のラウンドは元の進行スピードで
                 IsGameOver = re.IsGameOver;
                 HandleRoundEnded(re.Result);
+                ScheduleAutoAdvance();
                 break;
 
             case GameEndedEvent ge:
@@ -610,6 +630,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         UpdateHumanHandVisuals();
         UpdateSkipToResultAvailability();
+        UpdateBgm();
     }
 
     // ------------------------------------------------------------------
@@ -767,6 +788,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
             _ => place > 0 ? $"{name} が {place}位 であがりました！" : $"{name} があがりました！",
         };
         PlayFinishSound(playerId, kind);
+        ReactToFinish(playerId, kind, place);
 
         // きれいなあがり方（通常のあがり）だけ、静かな光の演出で祝う
         if (kind == FinishKind.Normal && place > 0 && !_isFastForwarding)
@@ -955,6 +977,10 @@ public sealed partial class GameTableViewModel : ViewModelBase
         {
             cardVm.CanPlay = IsCardSelectionMode || !isMyTurn || legalPlays.Any(lp => lp.Play != null && lp.Play.Cards.Contains(cardVm.Card));
         }
+        RefreshLegalSelectionGlow();
+        // まとめて選ぶ候補は、自分の「出すかパスか」の番だけ（割り込みの確認では止め札が選択済みなので出さない）
+        bool myPlayTurn = !IsCardSelectionMode && _engine.PendingDecision is { Kind: DecisionKind.PlayOrPass } pd && pd.PlayerId == _myPlayerId;
+        RefreshSuggestions(myPlayTurn ? legalPlays.Where(lp => lp.Play != null).Select(lp => lp.Play!.Cards) : null);
         UpdateSelectionCount();
     }
 
@@ -980,6 +1006,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
         var selected = HumanHand.Where(vm => vm.IsSelected).Select(vm => vm.Card).ToList();
         CanPlay = !IsCardSelectionMode && selected.Count > 0
             && _guestLegalPlays.Any(lp => lp.Count == selected.Count && lp.All(selected.Contains));
+        RefreshLegalSelectionGlow();
     }
 
     // ------------------------------------------------------------------
@@ -1090,6 +1117,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 case "RoundStarted":
                     NoticeMessage = "";
                     ResetRoundBadges();
+                    ResetExchangeSummary();
                     for (int i = 0; i < 4; i++)
                     {
                         GetPlayerVm(i).FinishPlace = null;
@@ -1098,6 +1126,10 @@ public sealed partial class GameTableViewModel : ViewModelBase
                     break;
                 case "CardsPlayed":
                     _audio.Play(SoundEffect.CardPlay);
+                    if (notice.PlayerId is { } playedBy && notice.CardIds is { Length: > 0 } playedIds)
+                    {
+                        RaiseCardsFlight(playedBy, playedIds.Select(Card.FromId).ToList());
+                    }
                     break;
                 case "FieldFlushed":
                     FieldFlushedTriggered?.Invoke(this, EventArgs.Empty);
@@ -1112,6 +1144,12 @@ public sealed partial class GameTableViewModel : ViewModelBase
                     }
                     PlayEffectSound(effect);
                     ShowGuideHint(_guide.ForEffect(effect));
+                    break;
+                case "PlayerPassed" when notice.PlayerId is { } passer:
+                    React(passer, ReactionKind.Pass);
+                    break;
+                case "CardsTransferred" when notice.PlayerId is { } from && notice.OtherPlayerId is { } to:
+                    OnCardsTransferred(from, to, notice.CardIds?.Select(Card.FromId).ToList(), notice.TransferReason);
                     break;
                 case "PlayersSkipped" when notice.PlayerId is { } skipper:
                     NoticeMessage = $"{GetPlayerVm(skipper).Name} のスキップで {notice.Count}人 の手番が飛ばされました";
@@ -1258,13 +1296,15 @@ public sealed partial class GameTableViewModel : ViewModelBase
         if (view.Field.IsNumberLocked) lockList.Add("数しば");
         LockDescription = lockList.Count > 0 ? $"【{string.Join("+", lockList)}】" : "";
 
-        // 場札
-        FieldCards.Clear();
-        if (view.Field.CurrentCardIds != null)
+        // 場札（変わったときだけ入れ替える。入れ替えると場へ飛ぶ演出が走るため）
+        var fieldNow = (view.Field.CurrentCardIds ?? Array.Empty<int>()).Select(Card.FromId).ToList();
+        if (!fieldNow.SequenceEqual(FieldCards))
         {
-            foreach (var id in view.Field.CurrentCardIds)
+            FieldPlayedBy = view.Field.LastPlayerId;
+            FieldCards.Clear();
+            foreach (var card in fieldNow)
             {
-                FieldCards.Add(Card.FromId(id));
+                FieldCards.Add(card);
             }
         }
 
@@ -1272,6 +1312,10 @@ public sealed partial class GameTableViewModel : ViewModelBase
         foreach (var p in view.Players)
         {
             var vm = GetPlayerVm(p.Id);
+            // ゲストには相手の性格が届かないので、NPC の席は共通のアイコン、人の席は人物のアイコン
+            bool npcSeat = p.Kind == PlayerKind.Npc && p.Id != _myPlayerId;
+            vm.AvatarGlyph = npcSeat ? NpcReactions.NpcGlyph : NpcReactions.AvatarGlyph(null);
+            vm.AvatarLabel = p.Id == _myPlayerId ? "あなた" : npcSeat ? "NPC" : "プレイヤー";
             vm.Name = DisplayName(p.Id, p.Name);
             vm.HandCount = p.HandCount;
             vm.Rank = p.Rank;
@@ -1301,6 +1345,11 @@ public sealed partial class GameTableViewModel : ViewModelBase
             : new List<List<Card>>();
         _guestLegalPlays = legalSet;
         UpdateGuestCanPlay();
+        RefreshSuggestions(isMyDecision && view.Decision?.Kind == DecisionKind.PlayOrPass && !IsCardSelectionMode
+            ? legalSet.Select(l => (IReadOnlyList<Card>)l)
+            : null);
+        MaybeShowExchangeSummary(view.Decision?.Kind);
+        MaybeGuestAutoplay(view);
 
         foreach (var cardVm in HumanHand)
         {
@@ -1370,11 +1419,14 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 _currentDecision = null;
             }
         }
+        UpdateBgm();
     }
 
     private void HandleDecisionRequested(PendingDecision dec)
     {
         if (dec.PlayerId != _myPlayerId) return;
+        // 検証用の自動プレイ（1人用・ホスト）では NPC が自分の席に答えるので、確認やダイアログは開かない
+        if (_autoplay && _client is null) return;
 
         _currentDecision = dec;
 
@@ -1745,6 +1797,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
     /// <param name="elevenBackOn">11バックの効果のとき、反転が掛かったか（true）解除されたか（false）。分からなければ null。</param>
     private void TriggerCutInForEffect(SpecialEffectType effectType, int playerId, bool? elevenBackOn)
     {
+        ReactToEffect(playerId, effectType); // 出した人のひとこと（1人用・ホスト・ゲスト共通）
         var playerName = GetPlayerVm(playerId).Name;
         switch (effectType)
         {
@@ -2006,6 +2059,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private async Task ShutdownCoreAsync()
     {
         _isShutDown = true;
+        StopFeelTimers();
         _guideHintTimer?.Stop();
         GuideHint = "";
         IsDecisionDialogOpen = false;

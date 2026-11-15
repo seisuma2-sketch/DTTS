@@ -15,8 +15,8 @@ namespace DTTS.Views.Controls;
 
 /// <summary>
 /// タイトル画面・対戦画面のヘッダーにある音量ボタン。クリックすると小さな音量ポップアップ（Flyout）が開き、
-/// 効果音のオン/オフと効果音の音量（0〜100）をその場で変えられる。
-/// 変更はすぐ音に反映し、外観設定（SoundEnabled / SeVolume）として保存する（スライダーは少し待ってからまとめて保存）。
+/// 効果音のオン/オフと効果音・BGM の音量（0〜100）をその場で変えられる。
+/// 変更はすぐ音に反映し、外観設定（SoundEnabled / SeVolume / BgmVolume）として保存する（スライダーは少し待ってからまとめて保存）。
 /// </summary>
 public sealed partial class SoundToggleButton : Button
 {
@@ -31,10 +31,13 @@ public sealed partial class SoundToggleButton : Button
     private readonly ToggleSwitch _toggle;
     private readonly Slider _slider;
     private readonly TextBlock _valueText;
+    private readonly Slider _bgmSlider;
+    private readonly TextBlock _bgmValueText;
     private readonly Flyout _flyout;
     private DispatcherQueueTimer? _saveTimer;
     private bool _syncing;
     private bool _volumeDirty;
+    private bool _bgmDirty;
 
     public SoundToggleButton()
     {
@@ -47,11 +50,11 @@ public sealed partial class SoundToggleButton : Button
 
         _toggle = new ToggleSwitch
         {
-            OnContent = "効果音 オン",
-            OffContent = "効果音 オフ（ミュート）",
+            OnContent = "サウンド オン",
+            OffContent = "サウンド オフ（効果音・BGM ともミュート）",
             MinWidth = 0,
         };
-        AutomationProperties.SetName(_toggle, "効果音のオン・オフ");
+        AutomationProperties.SetName(_toggle, "サウンドのオン・オフ");
         _toggle.Toggled += OnToggled;
 
         _slider = new Slider
@@ -94,12 +97,44 @@ public sealed partial class SoundToggleButton : Button
         Grid.SetColumn(_valueText, 1);
         sliderRow.Children.Add(_valueText);
 
+        // BGM の音量（動かしている間も、流れている曲にすぐ反映する）
+        _bgmSlider = new Slider
+        {
+            Minimum = 0,
+            Maximum = 100,
+            StepFrequency = 1,
+            SmallChange = 5,
+            LargeChange = 10,
+            TickFrequency = 10,
+            TickPlacement = TickPlacement.Outside,
+            Width = 220,
+            IsThumbToolTipEnabled = true,
+        };
+        AutomationProperties.SetName(_bgmSlider, "BGM の音量");
+        _bgmSlider.ValueChanged += OnBgmSliderValueChanged;
+        _bgmValueText = new TextBlock
+        {
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 32,
+            TextAlignment = TextAlignment.Right,
+        };
+        var bgmRow = new Grid { ColumnSpacing = 10 };
+        bgmRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        bgmRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        bgmRow.Children.Add(_bgmSlider);
+        Grid.SetColumn(_bgmValueText, 1);
+        bgmRow.Children.Add(_bgmValueText);
+
         var panel = new StackPanel { Spacing = 6, MinWidth = 270 };
         panel.Children.Add(new TextBlock { Text = "サウンド", FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.Bold });
         panel.Children.Add(_toggle);
         panel.Children.Add(new TextBlock { Text = "効果音の音量", FontSize = 12, Opacity = 0.75, Margin = new Thickness(0, 4, 0, 0) });
         panel.Children.Add(sliderRow);
         panel.Children.Add(preview);
+        panel.Children.Add(new TextBlock { Text = "BGM の音量", FontSize = 12, Opacity = 0.75, Margin = new Thickness(0, 2, 0, 0) });
+        panel.Children.Add(bgmRow);
         panel.Children.Add(new TextBlock
         {
             Text = "変更はすぐに反映され、設定にも保存されます。",
@@ -131,6 +166,8 @@ public sealed partial class SoundToggleButton : Button
 
     private static int CurrentVolume => (int)Math.Round(Math.Clamp(Audio.SeVolume, 0.0, 1.0) * 100);
 
+    private static int CurrentBgmVolume => (int)Math.Round(Math.Clamp(Audio.BgmVolume, 0.0, 1.0) * 100);
+
     /// <summary>ポップアップを開くとき、今の音の設定を表示に反映する。</summary>
     private void SyncFromAudio()
     {
@@ -141,6 +178,9 @@ public sealed partial class SoundToggleButton : Button
             _slider.Value = CurrentVolume;
             _slider.IsEnabled = Audio.IsEnabled;
             _valueText.Text = CurrentVolume.ToString();
+            _bgmSlider.Value = CurrentBgmVolume;
+            _bgmSlider.IsEnabled = Audio.IsEnabled;
+            _bgmValueText.Text = CurrentBgmVolume.ToString();
         }
         finally
         {
@@ -154,7 +194,7 @@ public sealed partial class SoundToggleButton : Button
         int volume = CurrentVolume;
         _icon.Glyph = !on || volume == 0 ? GlyphOff : volume < 40 ? GlyphLow : GlyphOn;
         string label = on
-            ? $"サウンド: オン・効果音 {volume}（クリックで音量を調節）"
+            ? $"サウンド: オン・効果音 {volume}・BGM {CurrentBgmVolume}（クリックで音量を調節）"
             : "サウンド: オフ（クリックで音量を調節）";
         ToolTipService.SetToolTip(this, label);
         AutomationProperties.SetName(this, label);
@@ -166,6 +206,7 @@ public sealed partial class SoundToggleButton : Button
         bool enabled = _toggle.IsOn;
         Audio.SetSoundEnabled(enabled);
         _slider.IsEnabled = enabled;
+        _bgmSlider.IsEnabled = enabled;
         UpdateLook();
         await SaveAsync(a => a.SoundEnabled = enabled, "SoundToggleButton.SaveEnabled");
     }
@@ -185,6 +226,19 @@ public sealed partial class SoundToggleButton : Button
         _saveTimer.Start();
     }
 
+    private void OnBgmSliderValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (_syncing) return;
+        int volume = (int)Math.Round(Math.Clamp(e.NewValue, 0, 100));
+        Audio.SetBgmVolume(AppearanceSettings.ToUnitVolume(volume)); // 流れている曲にすぐ反映
+        _bgmValueText.Text = volume.ToString();
+        UpdateLook();
+        _bgmDirty = true;
+        _saveTimer ??= CreateSaveTimer();
+        _saveTimer.Stop();
+        _saveTimer.Start();
+    }
+
     private DispatcherQueueTimer CreateSaveTimer()
     {
         var timer = DispatcherQueue.CreateTimer();
@@ -198,10 +252,18 @@ public sealed partial class SoundToggleButton : Button
     private void FlushSave()
     {
         _saveTimer?.Stop();
-        if (!_volumeDirty) return;
-        _volumeDirty = false;
-        int volume = CurrentVolume;
-        _ = SaveAsync(a => a.SeVolume = volume, "SoundToggleButton.SaveVolume");
+        if (_volumeDirty)
+        {
+            _volumeDirty = false;
+            int volume = CurrentVolume;
+            _ = SaveAsync(a => a.SeVolume = volume, "SoundToggleButton.SaveVolume");
+        }
+        if (_bgmDirty)
+        {
+            _bgmDirty = false;
+            int bgm = CurrentBgmVolume;
+            _ = SaveAsync(a => a.BgmVolume = bgm, "SoundToggleButton.SaveBgmVolume");
+        }
     }
 
     private static void PlayPreview()

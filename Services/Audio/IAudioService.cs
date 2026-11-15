@@ -25,6 +25,17 @@ public enum SoundEffect : byte
     DefeatJingle,
 }
 
+/// <summary>BGM の曲。</summary>
+public enum BgmTrack : byte
+{
+    /// <summary>BGM なし。</summary>
+    None = 0,
+    /// <summary>通常時：落ち着いたラウンジ・ジャズ。</summary>
+    Lounge,
+    /// <summary>緊張：革命中・あがりが迫ったとき。</summary>
+    Tension,
+}
+
 /// <summary>
 /// 効果音の再生。ゲーム進行（Core）とは独立し、UI層がゲームイベントを受けて「鳴らすだけ」の後追い演出に使う。
 /// 再生の完了を待つAPIは持たない（音でゲーム進行を止めない）。
@@ -40,14 +51,24 @@ public interface IAudioService : IDisposable
     /// <summary>効果音の音量（0.0〜1.0）。</summary>
     double SeVolume { get; }
 
-    /// <summary>BGM の音量（0.0〜1.0）。BGM は未実装で、値の保持のみ。</summary>
+    /// <summary>BGM の音量（0.0〜1.0）。</summary>
     double BgmVolume { get; }
+
+    /// <summary>流している（流そうとしている）BGM。</summary>
+    BgmTrack CurrentBgm { get; }
 
     /// <summary>音声出力を準備し、全効果音を読み込む。何度呼んでも初期化は1回だけ。</summary>
     Task InitializeAsync();
 
     /// <summary>効果音を鳴らす（無効・音量0・準備前は何もしない）。</summary>
     void Play(SoundEffect effect);
+
+    /// <summary>
+    /// BGM を切り替える（前の曲はフェードアウト、新しい曲はフェードインして継ぎ目なくループする）。
+    /// 同じ曲なら何もしない。<see cref="BgmTrack.None"/> でフェードアウトして止める。
+    /// サウンドが無効・BGM 音量 0 のときは鳴らないが、どの曲を流すかは覚えておき、有効になったらその曲を流す。
+    /// </summary>
+    void PlayBgm(BgmTrack track);
 
     /// <summary>サウンドの有効・無効を切り替える。</summary>
     void SetSoundEnabled(bool enabled);
@@ -81,6 +102,19 @@ public static class SoundEffectCatalog
         SoundEffect.DefeatJingle => "defeat_jingle.wav",
         _ => throw new ArgumentOutOfRangeException(nameof(effect)),
     };
+
+    /// <summary>BGM のファイル名（<see cref="BgmTrack.None"/> は null）。</summary>
+    public static string? BgmFileName(BgmTrack track) => track switch
+    {
+        BgmTrack.Lounge => "bgm_lounge.wav",
+        BgmTrack.Tension => "bgm_tension.wav",
+        _ => null,
+    };
+
+    /// <summary>
+    /// BGM の基準の大きさ（効果音より控えめにする）。スライダー 100% でもこの倍率まで。
+    /// </summary>
+    public const double BgmHeadroom = 0.55;
 
     /// <summary>
     /// 同じ音を同時に鳴らせる数。連続で起きる音（配る・出す・選ぶ）は複数のボイスを交互に使い、

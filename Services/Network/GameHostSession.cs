@@ -124,6 +124,10 @@ public sealed class GameHostSession : IAsyncDisposable
         .Select(s => new SeatInfo(s.Id, s.Name, s.Kind, s.Connection is not null && !s.Connection.IsClosed, s.Id == 0))
         .ToArray();
 
+    /// <summary>その席の NPC の設定（人が操作している席でも、切断時に引き継ぐ NPC の設定を返す）。</summary>
+    public NpcProfile NpcProfileOf(int seatId)
+        => seatId >= 0 && seatId < _seats.Length ? _seats[seatId].NpcProfile : NpcProfile.Default;
+
     /// <summary>探索（部屋一覧）に応答できているか。探索用ポートが使用中の場合は false（IP直接指定での参加は可能）。</summary>
     public bool IsDiscoverable => _discovery is not null;
 

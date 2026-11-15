@@ -17,6 +17,10 @@ public sealed partial class CardViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsKeyboardCursor { get; set; }
 
+    /// <summary>選んでいるカードがそのまま出せる組になっているか（選択中のカードをテーマカラーで光らせる）。</summary>
+    [ObservableProperty]
+    public partial bool IsLegalSelection { get; set; }
+
     public CardViewModel(Card card)
     {
         Card = card;

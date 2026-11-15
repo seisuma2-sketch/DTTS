@@ -159,7 +159,7 @@
                 <StackPanel x:Name="MenuColumn" Grid.Column="1" Grid.Row="0" Spacing="14" VerticalAlignment="Center">
                     <!-- プライマリ：ひとりで対戦（大きなカードボタン） -->
                     <Button
-                        Command="{x:Bind ViewModel.StartSinglePlayerCommand}"
+                        Command="{x:Bind ViewModel.StartSinglePlayerCommand}" AutomationProperties.Name="ひとりで対戦"
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Stretch"
                         Padding="22,20"
@@ -187,7 +187,7 @@
 
                     <!-- 通信対戦 -->
                     <Button
-                        Command="{x:Bind ViewModel.OpenLobbyCommand}"
+                        Command="{x:Bind ViewModel.OpenLobbyCommand}" AutomationProperties.Name="通信対戦（LAN）"
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Stretch"
                         Padding="20,16"
@@ -224,25 +224,25 @@
                             <RowDefinition Height="78" />
                         </Grid.RowDefinitions>
 
-                        <Button Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenRuleSettingsCommand}">
+                        <Button Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenRuleSettingsCommand}" AutomationProperties.Name="ルール ＆ 外見設定">
                             <StackPanel Spacing="4">
                                 <FontIcon Glyph="&#xE713;" FontSize="18" HorizontalAlignment="Left" Foreground="{StaticResource AppAccentBrush}" />
                                 <TextBlock Text="ルール ＆ 外見設定" FontSize="14" FontWeight="SemiBold" />
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="1" Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenResultCommand}">
+                        <Button Grid.Column="1" Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenResultCommand}" AutomationProperties.Name="通算戦績 ＆ 履歴">
                             <StackPanel Spacing="4">
                                 <FontIcon Glyph="&#xE9D2;" FontSize="18" HorizontalAlignment="Left" Foreground="{StaticResource AppAccentBrush}" />
                                 <TextBlock Text="通算戦績 ＆ 履歴" FontSize="14" FontWeight="SemiBold" />
                             </StackPanel>
                         </Button>
-                        <Button Grid.Row="1" Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenHelpCommand}">
+                        <Button Grid.Row="1" Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenHelpCommand}" AutomationProperties.Name="遊び方 ＆ ルール解説">
                             <StackPanel Spacing="4">
                                 <FontIcon Glyph="&#xE897;" FontSize="18" HorizontalAlignment="Left" Foreground="{StaticResource AppAccentBrush}" />
                                 <TextBlock Text="遊び方 ＆ ルール解説" FontSize="14" FontWeight="SemiBold" />
                             </StackPanel>
                         </Button>
-                        <Button Grid.Row="1" Grid.Column="1" Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenFeedbackCommand}">
+                        <Button Grid.Row="1" Grid.Column="1" Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenFeedbackCommand}" AutomationProperties.Name="フィードバック ＆ 要望">
                             <StackPanel Spacing="4">
                                 <FontIcon Glyph="&#xE8BD;" FontSize="18" HorizontalAlignment="Left" Foreground="{StaticResource AppAccentBrush}" />
                                 <TextBlock Text="フィードバック ＆ 要望" FontSize="14" FontWeight="SemiBold" />

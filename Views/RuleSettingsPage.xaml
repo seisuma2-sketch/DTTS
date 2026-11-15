@@ -420,7 +420,7 @@
                                 </Button>
                             </StackPanel>
                             <Slider
-                                Header="BGM の音量（BGM は今後追加予定）"
+                                Header="BGM の音量（落ち着いたラウンジ・ジャズ。革命中などは緊張感のある曲に変わります）"
                                 Width="300"
                                 HorizontalAlignment="Left"
                                 Minimum="0"

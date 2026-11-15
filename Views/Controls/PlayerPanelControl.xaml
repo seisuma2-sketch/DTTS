@@ -48,11 +48,25 @@
                 <Grid Grid.Row="0" ColumnSpacing="7">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
+                    <!-- アバター：性格を表すモノクロの線画アイコン（堅実＝盾・革命狙い＝回転・温存＝時計・アグレッシブ＝稲妻） -->
+                    <Border
+                        x:Name="AvatarCircle"
+                        Width="26"
+                        Height="26"
+                        CornerRadius="13"
+                        VerticalAlignment="Center"
+                        BorderThickness="1"
+                        BorderBrush="#66D6DEEA"
+                        Background="#1FFFFFFF">
+                        <FontIcon x:Name="AvatarIcon" Glyph="&#xE77B;" FontSize="13" Foreground="#FFE4EAF3" />
+                    </Border>
                     <Border
                         x:Name="RankBadge"
+                        Grid.Column="1"
                         CornerRadius="10"
                         Padding="8,2"
                         VerticalAlignment="Center"
@@ -65,7 +79,7 @@
                     </Border>
                     <TextBlock
                         x:Name="PlayerNameText"
-                        Grid.Column="1"
+                        Grid.Column="2"
                         FontSize="15"
                         FontWeight="SemiBold"
                         VerticalAlignment="Center"
@@ -74,7 +88,7 @@
                         TextTrimming="CharacterEllipsis" />
                     <Border
                         x:Name="TurnBadge"
-                        Grid.Column="2"
+                        Grid.Column="3"
                         CornerRadius="10"
                         Padding="8,2"
                         VerticalAlignment="Center"
@@ -145,6 +159,31 @@
                     </StackPanel>
                 </Grid>
             </Grid>
+        </Border>
+
+        <!--
+            ひとことの吹き出し（パス・革命・8切り・あがりなど）。パネルの上辺に少し重ねて、ふわっと出して1.5秒ほどで消す。
+            操作の邪魔にならないよう、クリックは下に通す
+        -->
+        <Border
+            x:Name="ReactionBubble"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Top"
+            Margin="0,-22,6,0"
+            MaxWidth="190"
+            Padding="10,4,10,5"
+            CornerRadius="11"
+            Background="#F2F4F7FB"
+            BorderBrush="#33000000"
+            BorderThickness="1"
+            Opacity="0"
+            IsHitTestVisible="False">
+            <TextBlock
+                x:Name="ReactionText"
+                FontSize="12"
+                FontWeight="SemiBold"
+                Foreground="#FF1B2130"
+                TextTrimming="CharacterEllipsis" />
         </Border>
     </Grid>
 </UserControl>

@@ -39,7 +39,7 @@ DTTS は MSIX パッケージで配布します。テスト用の自己署名証
 **PowerShell（管理者として実行）で行う場合**
 
 ```powershell
-Import-Certificate -FilePath .\DTTS_1.0.7.0_x64.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+Import-Certificate -FilePath .\DTTS_1.0.8.0_x64.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople
 ```
 
 > 「信頼されたルート証明機関」には入れないでください。MSIX のサイドロードには「信頼されたユーザー」で足ります。
@@ -51,7 +51,7 @@ Import-Certificate -FilePath .\DTTS_1.0.7.0_x64.cer -CertStoreLocation Cert:\Loc
 **PowerShell で行う場合**（管理者権限は不要）:
 
 ```powershell
-Add-AppxPackage -Path .\DTTS_1.0.7.0_x64.msix
+Add-AppxPackage -Path .\DTTS_1.0.8.0_x64.msix
 ```
 
 インストール後、スタートメニューの **DTTS** から起動できます。
@@ -61,7 +61,7 @@ Add-AppxPackage -Path .\DTTS_1.0.7.0_x64.msix
 Windows App Runtime が入っていない PC です。同梱の依存パッケージを指定してインストールします。
 
 ```powershell
-Add-AppxPackage -Path .\DTTS_1.0.7.0_x64.msix -DependencyPath (Get-ChildItem .\Dependencies\x64\*.msix).FullName
+Add-AppxPackage -Path .\DTTS_1.0.8.0_x64.msix -DependencyPath (Get-ChildItem .\Dependencies\x64\*.msix).FullName
 ```
 
 ## 更新・アンインストール
@@ -110,3 +110,15 @@ Start-Process "shell:AppsFolder\12f303fd-92ec-4cdb-bfb0-e30f02f5c93f_<発行元�
 
 - パッケージ化せずに起動する場合は、環境変数 `DTTS_MUTE=1` でも同じ効果があります。
 - 起動引数 `--frame-probe` を付けると、設定画面でカテゴリを開閉したときのフレーム間隔（最大・平均・33ms を超えた回数）を `%TEMP%\DTTS_frameprobe.log` に記録します（滑らかさの確認用。付けなければ何もしません）。
+- 起動引数 `--autoplay` を付けると、自分の席も NPC が打ち、ラウンド結果も自動で次へ進みます（最後まで通しで流して表示崩れ・止まりがないかを見る確認用。画面上部に「自動プレイ中（検証用）」と出ます）。
+  通信対戦のゲストに付けた場合は、ゲストの席が自動で答えます。
+- 起動引数 `--data-dir <フォルダ>` で、設定・戦績・crash.log の保存先を変えられます（同じ PC でホストとゲストを2つ起動するときに、データを分けるため）。
+
+## BGM の作り直し
+
+BGM（`Assets\Audio\bgm_lounge.wav`・`bgm_tension.wav`）と効果音は、すべて `tools\audio\gen_audio.py` でコードから合成しています（外部素材なし）。
+
+```powershell
+python -I tools/audio/gen_audio.py Assets/Audio        # 効果音と BGM
+python -I tools/audio/gen_audio.py Assets/Audio bgm    # BGM だけ
+```

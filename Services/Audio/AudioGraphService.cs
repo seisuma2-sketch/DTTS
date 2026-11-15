@@ -18,6 +18,8 @@ namespace DTTS.Services.Audio;
 /// <item>連続する音は複数のボイスを交互に使い、同じ音を重ねて鳴らせる。</item>
 /// <item>全効果音はサブミックスノードを通り、その出力ゲインで音量を一括制御する。</item>
 /// <item>出力デバイスが無い・切り替わって復旧できない場合は黙って無効化し、次の再生要求で再初期化を試みる。</item>
+/// <item>BGM は別のサブミックス（BGM バス）を通り、ファイル入力ノードの無限ループで継ぎ目なく流す。
+/// 曲の切り替えは <see cref="BgmMixer"/> の計算でフェードし、フェード中だけ短い間隔のタイマーで音量を進める。</item>
 /// </list>
 /// </summary>
 public sealed class AudioGraphService : IAudioService
@@ -28,6 +30,14 @@ public sealed class AudioGraphService : IAudioService
     private readonly Dictionary<SoundEffect, int> _nextVoice = new();
     private AudioGraph? _graph;
     private AudioSubmixNode? _effectsBus;
+    private AudioSubmixNode? _bgmBus;
+    private readonly Dictionary<BgmTrack, AudioFileInputNode> _bgmNodes = new();
+    private readonly BgmMixer _bgmMixer = new();
+    private System.Threading.Timer? _fadeTimer;
+    private DateTime _lastFadeTick;
+
+    /// <summary>フェード中に音量を進める間隔。</summary>
+    private static readonly TimeSpan FadeInterval = TimeSpan.FromMilliseconds(30);
     private Task? _initTask;
     private bool _enabled = true;
     private double _seVolume = 0.8;
@@ -65,6 +75,18 @@ public sealed class AudioGraphService : IAudioService
 
     /// <inheritdoc />
     public double BgmVolume => _bgmVolume;
+
+    /// <inheritdoc />
+    public BgmTrack CurrentBgm
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _bgmMixer.Current;
+            }
+        }
+    }
 
     /// <inheritdoc />
     public Task InitializeAsync()
@@ -122,6 +144,112 @@ public sealed class AudioGraphService : IAudioService
     }
 
     /// <inheritdoc />
+    public void PlayBgm(BgmTrack track)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        lock (_gate)
+        {
+            if (track == _bgmMixer.Current)
+            {
+                return;
+            }
+            var start = _bgmMixer.Switch(track);
+            if (_graph is null)
+            {
+                // 準備ができたら、そのとき流すべき曲をフェードインで始める
+                _initTask ??= InitializeCoreAsync();
+                return;
+            }
+            if (start is { } t)
+            {
+                StartBgmNode(t);
+            }
+            EnsureFadeTimer();
+        }
+    }
+
+    /// <summary>曲の頭から、音量 0 で鳴らし始める（フェードインはタイマーが進める）。ロック内で呼ぶ。</summary>
+    private void StartBgmNode(BgmTrack track)
+    {
+        if (!_bgmNodes.TryGetValue(track, out var node))
+        {
+            return;
+        }
+        try
+        {
+            node.OutgoingGain = 0.0;
+            node.Stop();
+            node.Seek(TimeSpan.Zero);
+            node.Start();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Audio] BGM を開始できません: {track}: {ex.Message}");
+        }
+    }
+
+    /// <summary>フェード用のタイマーを動かす（フェードが終われば自分で止まる）。ロック内で呼ぶ。</summary>
+    private void EnsureFadeTimer()
+    {
+        if (!_bgmMixer.IsFading)
+        {
+            return;
+        }
+        _lastFadeTick = DateTime.UtcNow;
+        _fadeTimer ??= new System.Threading.Timer(_ => OnFadeTick(), null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+        _fadeTimer.Change(FadeInterval, FadeInterval);
+    }
+
+    private void OnFadeTick()
+    {
+        lock (_gate)
+        {
+            if (_disposed || _fadeTimer is null)
+            {
+                return;
+            }
+            var now = DateTime.UtcNow;
+            var elapsed = now - _lastFadeTick;
+            _lastFadeTick = now;
+            var changed = _bgmMixer.Advance(elapsed, out var stopped);
+            foreach (var track in changed)
+            {
+                if (_bgmNodes.TryGetValue(track, out var node))
+                {
+                    try
+                    {
+                        node.OutgoingGain = _bgmMixer.Level(track);
+                    }
+                    catch (Exception)
+                    {
+                        // デバイス切断の直後など。次の初期化でやり直す
+                    }
+                }
+            }
+            foreach (var track in stopped)
+            {
+                if (_bgmNodes.TryGetValue(track, out var node))
+                {
+                    try
+                    {
+                        node.Stop();
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
+            }
+            if (!_bgmMixer.IsFading)
+            {
+                _fadeTimer.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+            }
+        }
+    }
+
+    /// <inheritdoc />
     public void SetSoundEnabled(bool enabled)
     {
         _enabled = enabled;
@@ -139,6 +267,7 @@ public sealed class AudioGraphService : IAudioService
     public void SetBgmVolume(double volume)
     {
         _bgmVolume = Math.Clamp(double.IsFinite(volume) ? volume : 0.0, 0.0, 1.0);
+        ApplyGain();
     }
 
     /// <inheritdoc />
@@ -161,6 +290,8 @@ public sealed class AudioGraphService : IAudioService
                 return;
             }
             _disposed = true;
+            _fadeTimer?.Dispose();
+            _fadeTimer = null;
             TearDown();
         }
     }
@@ -196,6 +327,37 @@ public sealed class AudioGraphService : IAudioService
 
             var bus = graph.CreateSubmixNode();
             bus.AddOutgoingConnection(output.DeviceOutputNode);
+
+            // BGM：別のバスを通し、ファイル入力ノードを無限ループ（継ぎ目なし）にして停止状態で待機させる
+            var bgmBus = graph.CreateSubmixNode();
+            bgmBus.AddOutgoingConnection(output.DeviceOutputNode);
+            var bgmNodes = new Dictionary<BgmTrack, AudioFileInputNode>();
+            foreach (var track in Enum.GetValues<BgmTrack>())
+            {
+                var bgmName = SoundEffectCatalog.BgmFileName(track);
+                if (bgmName is null)
+                {
+                    continue;
+                }
+                var bgmPath = Path.Combine(_audioDirectory, bgmName);
+                if (!File.Exists(bgmPath))
+                {
+                    Debug.WriteLine($"[Audio] BGM ファイルがありません: {bgmPath}");
+                    continue;
+                }
+                var bgmFile = await StorageFile.GetFileFromPathAsync(bgmPath);
+                var bgmNode = await graph.CreateFileInputNodeAsync(bgmFile);
+                if (bgmNode.Status != AudioFileNodeCreationStatus.Success)
+                {
+                    Debug.WriteLine($"[Audio] BGM の読み込みに失敗しました: {bgmPath}: {bgmNode.Status}");
+                    continue;
+                }
+                bgmNode.FileInputNode.Stop();
+                bgmNode.FileInputNode.LoopCount = null; // 無限ループ
+                bgmNode.FileInputNode.OutgoingGain = 0.0;
+                bgmNode.FileInputNode.AddOutgoingConnection(bgmBus);
+                bgmNodes[track] = bgmNode.FileInputNode;
+            }
 
             var voices = new Dictionary<SoundEffect, AudioFileInputNode[]>();
             foreach (var effect in Enum.GetValues<SoundEffect>())
@@ -235,6 +397,12 @@ public sealed class AudioGraphService : IAudioService
                 }
                 _graph = graph;
                 _effectsBus = bus;
+                _bgmBus = bgmBus;
+                _bgmNodes.Clear();
+                foreach (var (track, node) in bgmNodes)
+                {
+                    _bgmNodes[track] = node;
+                }
                 _voices.Clear();
                 foreach (var (effect, nodes) in voices)
                 {
@@ -244,6 +412,15 @@ public sealed class AudioGraphService : IAudioService
             }
             ApplyGain();
             graph.Start();
+            lock (_gate)
+            {
+                // 準備中に指定された曲（または作り直す前に流れていた曲）をフェードインで始める
+                if (_bgmMixer.Rewind() is { } current)
+                {
+                    StartBgmNode(current);
+                }
+                EnsureFadeTimer();
+            }
         }
         catch (Exception ex)
         {
@@ -280,6 +457,9 @@ public sealed class AudioGraphService : IAudioService
         var graph = _graph;
         _graph = null;
         _effectsBus = null;
+        _bgmBus = null;
+        _bgmNodes.Clear();
+        _fadeTimer?.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
         _voices.Clear();
         _nextVoice.Clear();
         if (graph is not null)
@@ -299,17 +479,23 @@ public sealed class AudioGraphService : IAudioService
     private void ApplyGain()
     {
         AudioSubmixNode? bus;
+        AudioSubmixNode? bgmBus;
         lock (_gate)
         {
             bus = _effectsBus;
-        }
-        if (bus is null)
-        {
-            return;
+            bgmBus = _bgmBus;
         }
         try
         {
-            bus.OutgoingGain = _enabled ? SoundEffectCatalog.ToGain(_seVolume) : 0.0;
+            if (bus is not null)
+            {
+                bus.OutgoingGain = _enabled ? SoundEffectCatalog.ToGain(_seVolume) : 0.0;
+            }
+            // サウンドが無効なら BGM も完全に無音
+            if (bgmBus is not null)
+            {
+                bgmBus.OutgoingGain = _enabled ? SoundEffectCatalog.ToGain(_bgmVolume) * SoundEffectCatalog.BgmHeadroom : 0.0;
+            }
         }
         catch (Exception ex)
         {

@@ -64,7 +64,7 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
 
-                <Button Style="{StaticResource AppBackButtonStyle}" Command="{x:Bind ViewModel.GoBackCommand}" VerticalAlignment="Center" ToolTipService.ToolTip="タイトルへ戻る（Esc）">
+                <Button Style="{StaticResource AppBackButtonStyle}" AutomationProperties.Name="タイトルへ戻る" Command="{x:Bind ViewModel.GoBackCommand}" VerticalAlignment="Center" ToolTipService.ToolTip="タイトルへ戻る（Esc）">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xE72B;" FontSize="12" />
                         <TextBlock Text="タイトル" FontSize="13" />
@@ -159,6 +159,7 @@
 
                                 <Button
                                     Command="{x:Bind ViewModel.HostRoomCommand}"
+                                    AutomationProperties.Name="部屋を作成する"
                                     HorizontalAlignment="Stretch"
                                     Height="50"
                                     CornerRadius="25"
@@ -189,6 +190,7 @@
                                     </StackPanel>
                                     <Button
                                         Command="{x:Bind ViewModel.SearchRoomsCommand}"
+                                        AutomationProperties.Name="部屋を探す"
                                         HorizontalAlignment="Right"
                                         VerticalAlignment="Center"
                                         CornerRadius="16"
@@ -266,10 +268,11 @@
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBox PlaceholderText="192.168.1.xxx" Text="{x:Bind ViewModel.DirectJoinHost, Mode=TwoWay}" CornerRadius="10" />
+                                        <TextBox PlaceholderText="192.168.1.xxx" Text="{x:Bind ViewModel.DirectJoinHost, Mode=TwoWay}" CornerRadius="10" AutomationProperties.Name="ホストのアドレス" />
                                         <Button
                                             Grid.Column="1"
                                             Command="{x:Bind ViewModel.DirectJoinCommand}"
+                                            AutomationProperties.Name="アドレスを指定して参加"
                                             MinWidth="96"
                                             CornerRadius="10"
                                             Background="{StaticResource AppAccentBrush}"
@@ -359,6 +362,7 @@
                                 <Border CornerRadius="30" Margin="-4" Background="{StaticResource AppAccentSubtleBrush}" IsHitTestVisible="False" />
                                 <Button
                                     Command="{x:Bind ViewModel.StartGameAsHostCommand}"
+                                    AutomationProperties.Name="対戦を開始する"
                                     HorizontalAlignment="Stretch"
                                     Height="56"
                                     CornerRadius="28"

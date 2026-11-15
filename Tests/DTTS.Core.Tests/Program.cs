@@ -52,8 +52,13 @@ internal static class Program
         Console.WriteLine($"Interrupt: pass={ip}, fail={iff}");
         totalFail += iff;
 
+        Console.WriteLine("--- 7. PresentationTests ---");
+        var (pp, pf) = PresentationTests.Run();
+        Console.WriteLine($"Presentation: pass={pp}, fail={pf}");
+        totalFail += pf;
+
         Console.WriteLine("========================================");
-        int totalPass = jp + ep + np + sp + tp + ip;
+        int totalPass = jp + ep + np + sp + tp + ip + pp;
         Console.WriteLine($"TOTAL: pass={totalPass}, fail={totalFail}");
         Console.WriteLine(totalFail == 0 ? "ALL TESTS PASSED!" : "SOME TESTS FAILED!");
         Console.WriteLine("========================================");

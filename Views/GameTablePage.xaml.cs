@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Linq;
 using System.ComponentModel;
 using System.Threading.Tasks;
 using DTTS.Common;
@@ -149,6 +150,8 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         ViewModel.BomberVanishTriggered += OnBomberVanishTriggered;
         ViewModel.FinishCelebrationTriggered += OnFinishCelebrationTriggered;
+        ViewModel.ReactionTriggered += OnReactionTriggered;
+        ViewModel.CardsFlightTriggered += OnCardsFlightTriggered;
     }
 
     // ------------------------------------------------------------------
@@ -342,6 +345,7 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         {
             HideCutIn();
             HideBomberVanish();
+            FlightLayer.Children.Clear(); // 飛んでいる途中のカードの写しは、結果の上に残さない
             // 最後のあがりの演出は消さず、結果の上（画面上部）へ移して最後まで見せる
             if (FinishOverlay.Visibility == Visibility.Visible)
             {
@@ -543,22 +547,191 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         AnimateHandDeal();
     }
 
+    /// <summary>飛ばす途中のカード（場札の一覧が入れ替わっても、その場のポップインはしない）。</summary>
+    private IReadOnlyList<Card>? _pendingFlight;
+
+    /// <summary>場のカードの大きさ（場が流れた後に着地点を作るとき用。場の CardControl の既定の大きさ）。</summary>
+    private const double FieldCardWidth = 84, FieldCardHeight = 122, FieldCardSpacing = -12;
+
     private void OnFieldCardsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (e.Action == NotifyCollectionChangedAction.Add && e.NewItems != null)
+        if (e.Action != NotifyCollectionChangedAction.Add || e.NewItems == null || _pendingFlight is not null)
         {
-            // 場にカードが出されたときのポップイン演出
+            return; // 出し札は CardsFlightTriggered 側で、席から飛ばして見せる
+        }
+        // 出し札の合図がない場札の変化（ゲストの画面の取り直しなど）は、その場でポップインする
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (_isDetached || _pendingFlight is not null) return;
+            for (int i = 0; i < FieldCardsItemsControl.Items.Count; i++)
+            {
+                if (FieldCardsItemsControl.ContainerFromIndex(i) is ContentPresenter cp)
+                {
+                    CompositionAnimationHelper.AnimateCardPopIn(cp, i * 40);
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// カードが出された：出したプレイヤーの席（自分なら手札）から場へ、カードを1枚ずつ滑らせる。
+    /// 8切り・砂嵐などで場がすぐ流れた場合も、カードはいったん場に着地してから流れていく。
+    /// </summary>
+    private void OnCardsFlightTriggered(object? sender, CardsFlightEventArgs e)
+    {
+        if (_isDetached) return;
+        var source = FlightSource(e.PlayerId); // 場札が入れ替わる前に、席の位置を測っておく
+        if (source is null) return;
+        _pendingFlight = e.Cards;
+        // 場札の一覧が入れ替わってから写しが飛び立つまで、本物を一瞬でも見せない
+        Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(FieldCardsItemsControl).Opacity = 0f;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => RunFlight(e.Cards, source.Value));
+    }
+
+    private void RunFlight(IReadOnlyList<Card> cards, (Windows.Foundation.Point Point, float StartScale) source)
+    {
+        if (ReferenceEquals(_pendingFlight, cards)) _pendingFlight = null;
+        var itemsVisual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(FieldCardsItemsControl);
+        if (_isDetached || ViewModel.IsFastForwarding)
+        {
+            itemsVisual.Opacity = 1f;
+            return;
+        }
+        FieldCardsItemsControl.UpdateLayout();
+        var field = ViewModel.FieldCards;
+        bool onField = cards.All(field.Contains);
+
+        // 場が流れた後（8切りなど）の着地点：場のマットの中央に、場と同じ並びで置く
+        var mat = FieldCardsContainer.TransformToVisual(FlightLayer).TransformPoint(
+            new Windows.Foundation.Point(FieldCardsContainer.ActualWidth / 2, FieldCardsContainer.ActualHeight / 2));
+        double rowWidth = cards.Count * FieldCardWidth + (cards.Count - 1) * FieldCardSpacing;
+
+        for (int i = 0; i < cards.Count; i++)
+        {
+            ContentPresenter? real = onField ? FieldCardsItemsControl.ContainerFromIndex(field.IndexOf(cards[i])) as ContentPresenter : null;
+            Windows.Foundation.Rect target;
+            if (real is { ActualWidth: > 0 })
+            {
+                var o = real.TransformToVisual(FlightLayer).TransformPoint(new Windows.Foundation.Point(0, 0));
+                target = new Windows.Foundation.Rect(o.X, o.Y, real.ActualWidth, real.ActualHeight);
+                Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(real).Opacity = 0f; // 写しが着地するまで隠す
+            }
+            else
+            {
+                double x = mat.X - rowWidth / 2 + i * (FieldCardWidth + FieldCardSpacing);
+                target = new Windows.Foundation.Rect(x, mat.Y - FieldCardHeight / 2, FieldCardWidth, FieldCardHeight);
+                real = null;
+            }
+            FlyGhost(cards[i], target, source.Point, source.StartScale, i * 45, real);
+        }
+        itemsVisual.Opacity = 1f; // 本物はそれぞれ着地まで隠してある
+    }
+
+    /// <summary>
+    /// カードの写しを画面の一番上の層（FlightLayer）に置いて、出どころから着地点まで滑らせる（場の枠は角丸で中身を切り抜くため）。
+    /// 着地したら、本物が場にあれば写しと入れ替え、場がもう流れていれば少し見せてから流れるように消す。
+    /// </summary>
+    private void FlyGhost(Card card, Windows.Foundation.Rect target, Windows.Foundation.Point source, float startScale, int delayMs, ContentPresenter? real)
+    {
+        var ghost = new CardControl
+        {
+            Card = card,
+            Width = target.Width,
+            Height = target.Height,
+            IsHitTestVisible = false,
+        };
+        Canvas.SetLeft(ghost, target.X);
+        Canvas.SetTop(ghost, target.Y);
+        FlightLayer.Children.Add(ghost);
+        ghost.UpdateLayout();
+
+        var center = new Windows.Foundation.Point(target.X + target.Width / 2, target.Y + target.Height / 2);
+        var from = new System.Numerics.Vector3((float)(source.X - center.X), (float)(source.Y - center.Y), 0f);
+        // 念のための後始末：着地の通知が来なくても（ウィンドウが裏に回った等）、写しを残さず本物を見せる
+        var safety = DispatcherQueue.CreateTimer();
+        safety.Interval = TimeSpan.FromMilliseconds(delayMs + 1800);
+        safety.IsRepeating = false;
+        safety.Tick += (t, _) =>
+        {
+            t.Stop();
+            if (FlightLayer.Children.Remove(ghost) && real is not null)
+            {
+                Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(real).Opacity = 1f;
+            }
+        };
+        safety.Start();
+
+        CompositionAnimationHelper.AnimateCardFlight(ghost, from, startScale, delayMs, () =>
+        {
             DispatcherQueue.TryEnqueue(() =>
             {
-                for (int i = 0; i < FieldCardsItemsControl.Items.Count; i++)
+                if (!FlightLayer.Children.Contains(ghost)) return; // 後始末済み
+                bool stillOnField = real is not null && real.XamlRoot is not null && ViewModel.FieldCards.Contains(card);
+                if (stillOnField)
                 {
-                    if (FieldCardsItemsControl.ContainerFromIndex(i) is ContentPresenter cp)
-                    {
-                        CompositionAnimationHelper.AnimateCardPopIn(cp, i * 40);
-                    }
+                    FlightLayer.Children.Remove(ghost);
+                    Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(real!).Opacity = 1f;
+                    return;
                 }
+                // 場はもう流れている：着地した姿を一瞬見せてから、場流れと同じ向きに流して消す
+                var hold = DispatcherQueue.CreateTimer();
+                hold.Interval = TimeSpan.FromMilliseconds(260);
+                hold.IsRepeating = false;
+                hold.Tick += (t, _) =>
+                {
+                    t.Stop();
+                    CompositionAnimationHelper.AnimateFlushOut(ghost, () => DispatcherQueue.TryEnqueue(() => FlightLayer.Children.Remove(ghost)));
+                };
+                hold.Start();
             });
+        });
+    }
+
+    /// <summary>場へ飛ぶカードの出どころ（画面上の点と、出発時の大きさ）。分からなければ null（その場でポップイン）。</summary>
+    private (Windows.Foundation.Point Point, float StartScale)? FlightSource(int? playerId)
+    {
+        if (playerId is not { } id) return null;
+        FrameworkElement? element;
+        float scale;
+        bool compact = OpponentRow.Visibility == Visibility.Visible;
+        switch (ViewModel.SlotOfPlayer(id))
+        {
+            case SeatLayout.Bottom:
+                element = HandScrollViewer;
+                scale = 0.9f;
+                break;
+            case SeatLayout.Left:
+                element = compact ? LeftSeatSlimPanel : LeftSeatPanel;
+                scale = 0.45f;
+                break;
+            case SeatLayout.Top:
+                element = compact ? TopSeatSlimPanel : TopSeatPanel;
+                scale = 0.45f;
+                break;
+            case SeatLayout.Right:
+                element = compact ? RightSeatSlimPanel : RightSeatPanel;
+                scale = 0.45f;
+                break;
+            default:
+                return null;
         }
+        if (element is null || element.ActualWidth <= 0) return null;
+        var p = element.TransformToVisual(FlightLayer).TransformPoint(new Windows.Foundation.Point(element.ActualWidth / 2, element.ActualHeight / 2));
+        return (p, scale);
+    }
+
+    private void OnReactionTriggered(object? sender, ReactionEventArgs e)
+    {
+        if (_isDetached) return;
+        bool compact = OpponentRow.Visibility == Visibility.Visible;
+        PlayerPanelControl? panel = ViewModel.SlotOfPlayer(e.PlayerId) switch
+        {
+            SeatLayout.Left => compact ? LeftSeatSlimPanel : LeftSeatPanel,
+            SeatLayout.Top => compact ? TopSeatSlimPanel : TopSeatPanel,
+            SeatLayout.Right => compact ? RightSeatSlimPanel : RightSeatPanel,
+            _ => null,
+        };
+        panel?.ShowReaction(e.Text, DTTS.Services.Presentation.NpcReactions.Lifetime);
     }
 
     private void AnimateHandDeal()
@@ -611,6 +784,8 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         ViewModel.SweepTriggered -= OnSweepTriggered;
         ViewModel.BomberVanishTriggered -= OnBomberVanishTriggered;
         ViewModel.FinishCelebrationTriggered -= OnFinishCelebrationTriggered;
+        ViewModel.ReactionTriggered -= OnReactionTriggered;
+        ViewModel.CardsFlightTriggered -= OnCardsFlightTriggered;
         _cutInTimer?.Stop();
         _bomberTimer?.Stop();
         _finishTimer?.Stop();
@@ -686,6 +861,8 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         {
             wide.SetPlayerInfo(p.Name, p.HandCount, p.Rank, p.TotalScore, p.IsTurn, p.IsThinking, p.IsPassed, p.FinishPlace);
             slim?.SetPlayerInfo(p.Name, p.HandCount, p.Rank, p.TotalScore, p.IsTurn, p.IsThinking, p.IsPassed, p.FinishPlace);
+            wide.SetAvatar(p.AvatarGlyph, p.AvatarLabel);
+            slim?.SetAvatar(p.AvatarGlyph, p.AvatarLabel);
         }
     }
 
@@ -701,6 +878,25 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
 
             // 選択の切り替えは ViewModel のコマンドに集約（選択音・出せるかの再計算もここで行う）
             ViewModel.ToggleCardSelectionCommand.Execute(vm);
+        }
+    }
+
+    /// <summary>まとめて選ぶ候補（ペア・階段など）を押した：その組をまとめて選ぶ。</summary>
+    private void OnSuggestionClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DTTS.Services.Presentation.PlaySuggestion suggestion })
+        {
+            ViewModel.ApplySuggestionCommand.Execute(suggestion);
+            Focus(FocusState.Programmatic); // Enter で「出す」が効くよう、フォーカスを画面へ戻す
+        }
+    }
+
+    /// <summary>カードの右クリック・長押し：同じ数字のカードをまとめて選ぶ。</summary>
+    private void OnCardSameRankRequested(object? sender, Card card)
+    {
+        if (sender is CardControl { DataContext: CardViewModel vm })
+        {
+            ViewModel.SelectSameRankCommand.Execute(vm);
         }
     }
 

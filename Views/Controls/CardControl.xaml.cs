@@ -28,8 +28,34 @@ public sealed partial class CardControl : UserControl
     public static readonly DependencyProperty IsKeyboardCursorProperty =
         DependencyProperty.Register(nameof(IsKeyboardCursor), typeof(bool), typeof(CardControl), new PropertyMetadata(false, OnIsKeyboardCursorChanged));
 
+    public static readonly DependencyProperty IsLegalSelectionProperty =
+        DependencyProperty.Register(nameof(IsLegalSelection), typeof(bool), typeof(CardControl), new PropertyMetadata(false, OnIsLegalSelectionChanged));
+
     public event EventHandler<Card>? CardClicked;
     public event EventHandler<Card>? CardDoubleClicked;
+
+    /// <summary>右クリック・長押し：同じ数字のカードをまとめて選びたい。</summary>
+    public event EventHandler<Card>? SameRankRequested;
+
+    /// <summary>選んでいるカードがそのまま出せる組になっているか（外側を光らせる）。</summary>
+    public bool IsLegalSelection
+    {
+        get => (bool)GetValue(IsLegalSelectionProperty);
+        set => SetValue(IsLegalSelectionProperty, value);
+    }
+
+    private static void OnIsLegalSelectionChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CardControl control)
+        {
+            bool on = (bool)e.NewValue;
+            control.LegalGlow.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+            if (on)
+            {
+                CompositionAnimationHelper.AnimateOpacity(control.LegalGlow, 0.9f, 160);
+            }
+        }
+    }
 
     private static ICardSkinManager? _skinManager;
     private bool _isPointerOver;
@@ -290,9 +316,28 @@ public sealed partial class CardControl : UserControl
 
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (Card != null && !IsFacedDown)
+        if (Card == null || IsFacedDown)
         {
-            CardClicked?.Invoke(this, Card);
+            return;
+        }
+        // 右クリックは「同じ数字をまとめて選ぶ」（1枚だけの選択切り替えにはしない）
+        if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse
+            && e.GetCurrentPoint(this).Properties.IsRightButtonPressed)
+        {
+            SameRankRequested?.Invoke(this, Card);
+            e.Handled = true;
+            return;
+        }
+        CardClicked?.Invoke(this, Card);
+    }
+
+    private void OnHolding(object sender, HoldingRoutedEventArgs e)
+    {
+        // タッチ・ペンの長押しも「同じ数字をまとめて選ぶ」
+        if (e.HoldingState == Microsoft.UI.Input.HoldingState.Started && Card != null && !IsFacedDown)
+        {
+            SameRankRequested?.Invoke(this, Card);
+            e.Handled = true;
         }
     }
 

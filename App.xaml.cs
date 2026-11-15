@@ -3,6 +3,7 @@ using System.IO;
 using System.Net.Http;
 using System.Threading.Tasks;
 using DTTS.Common;
+using DTTS.Services;
 using DTTS.Services.Audio;
 using DTTS.Services.Database;
 using DTTS.Services.Feedback;
@@ -40,7 +41,9 @@ public partial class App : Application
             string folder;
             try
             {
-                folder = ApplicationData.Current.LocalFolder.Path;
+                folder = AppLaunchOptions.DataDirectoryForCurrentProcess() is { } dir
+                    ? Path.GetFullPath(dir)
+                    : ApplicationData.Current.LocalFolder.Path;
             }
             catch
             {
@@ -81,6 +84,11 @@ public partial class App : Application
         catch
         {
             appDataPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DTTS");
+        }
+        // 検証用：--data-dir で保存先を分ける（同じ PC でホストとゲストを2つ起動するときなど）
+        if (AppLaunchOptions.DataDirectoryForCurrentProcess() is { } overrideDir)
+        {
+            appDataPath = Path.GetFullPath(overrideDir);
         }
         Directory.CreateDirectory(appDataPath);
 

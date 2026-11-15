@@ -163,7 +163,8 @@ public sealed record NoticeDto(
     bool Applied = true,
     StandingDto[]? Standings = null,
     Rank[]? Ranks = null,
-    CardDiscardReason? DiscardReason = null);
+    CardDiscardReason? DiscardReason = null,
+    CardTransferReason? TransferReason = null);
 
 /// <summary>順位情報。</summary>
 public sealed record StandingDto(int PlayerId, int Position, PlayerRank Rank, int Points, int TotalScore);
@@ -276,7 +277,8 @@ public static class ClientViewBuilder
                 ct.FromPlayerId,
                 ct.ToPlayerId,
                 viewerId == ct.FromPlayerId || viewerId == ct.ToPlayerId ? Ids(ct.Cards) : null,
-                ct.Cards.Count),
+                ct.Cards.Count,
+                TransferReason: ct.Reason),
             CardsDiscardedEvent cd => new NoticeDto("CardsDiscarded", cd.PlayerId, CardIds: Ids(cd.Cards), Count: cd.Cards.Count, DiscardReason: cd.Reason),
             RanksDeclaredEvent rd => new NoticeDto("RanksDeclared", rd.PlayerId, Count: rd.Ranks.Count, Ranks: rd.Ranks.ToArray()),
             FieldFlushedEvent ff => new NoticeDto("FieldFlushed", ff.NextLeaderId, Effect: ff.Cause),
