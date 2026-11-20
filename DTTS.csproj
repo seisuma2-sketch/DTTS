@@ -18,6 +18,10 @@
 
   <ItemGroup>
     <Compile Remove="Tests/**" />
+    <!-- 公式ダウンロードサイト（Vite + React）。アプリのビルドには含めない。 -->
+    <Compile Remove="website/**" />
+    <None Remove="website/**" />
+    <Content Remove="website/**" />
   </ItemGroup>
 
   <!--
