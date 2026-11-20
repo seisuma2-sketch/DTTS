@@ -31,10 +31,14 @@
     WindowIcon.ico は AppWindow.SetIcon と exe のアイコンに使用する。
   -->
   <ItemGroup>
-    <Content Include="Assets\*.png" />
-    <Content Include="Assets\WindowIcon.ico" />
+    <!--
+      CopyToOutputDirectory: パッケージなし発行（DTTS_Setup.exe / ポータブル ZIP）では MSIX に入らないため、
+      出力フォルダーにも置かないとアイコン・効果音・BGM が見つからない（AppContext.BaseDirectory から読む）。
+    -->
+    <Content Include="Assets\*.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\WindowIcon.ico" CopyToOutputDirectory="PreserveNewest" />
     <!-- 効果音（tools/audio/gen_audio.py で生成） -->
-    <Content Include="Assets\Audio\*.wav" />
+    <Content Include="Assets\Audio\*.wav" CopyToOutputDirectory="PreserveNewest" />
     <!-- ジョーカーの絵柄（標準カードで使う。joker1＝1枚目、joker2＝2枚目のジョーカー） -->
     <Content Include="Assets\Jokers\*.jpg" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
