@@ -126,7 +126,7 @@ function InstallGuideModal({ item, onClose }: { item: DownloadItem | null; onClo
     item?.kind === "zip"
       ? [
           { icon: Download, title: "ダウンロード", body: `${item.fileName} を保存します。` },
-          { icon: FolderOpen, title: "展開して実行", body: "任意のフォルダーへ展開し、中のアプリを起動します。" },
+          { icon: FolderOpen, title: "展開して実行", body: "任意のフォルダーへ展開し、中の DTTS.exe を起動します。" },
           { icon: PlayCircle, title: "対戦開始", body: "卓に着いたら、そのまま対戦を始められます。" },
         ]
       : [

@@ -27,7 +27,7 @@ export const DOWNLOADS: Record<DownloadKind, DownloadItem> = {
     kind: "zip",
     fileName: "DTTS_v1.1.6_x64.zip",
     href: `${RELEASE_BASE}/DTTS_v1.1.6_x64.zip`,
-    label: "ZIP 版",
+    label: "ポータブル版",
   },
 };
 

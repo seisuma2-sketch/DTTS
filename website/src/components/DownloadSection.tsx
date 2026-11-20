@@ -20,8 +20,8 @@ const options: {
   {
     kind: "zip",
     recommended: false,
-    title: "ZIP 版",
-    desc: "展開するだけ。好きなフォルダーに置いて使えます。",
+    title: "ポータブル版（ZIP）",
+    desc: "展開して DTTS.exe を起動するだけ。好きなフォルダーに置いて使えます。",
     bullets: ["インストール操作なし", "配置場所を自分で決められる", "手動で管理したい方に"],
   },
 ];
