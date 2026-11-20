@@ -5,7 +5,7 @@ export const PRODUCT = {
   platform: "Windows 10 / 11 64bit",
 } as const;
 
-const BASE = import.meta.env.BASE_URL;
+const RELEASE_BASE = "https://github.com/seisuma2-sketch/DTTS/releases/download/v1.1.5";
 
 export type DownloadKind = "installer" | "zip";
 
@@ -20,13 +20,13 @@ export const DOWNLOADS: Record<DownloadKind, DownloadItem> = {
   installer: {
     kind: "installer",
     fileName: "DTTS_Setup.exe",
-    href: `${BASE}downloads/DTTS_Setup.exe`,
+    href: `${RELEASE_BASE}/DTTS_Setup.exe`,
     label: "インストーラー版",
   },
   zip: {
     kind: "zip",
     fileName: "DTTS_v1.1.5_x64.zip",
-    href: `${BASE}downloads/DTTS_v1.1.5_x64.zip`,
+    href: `${RELEASE_BASE}/DTTS_v1.1.5_x64.zip`,
     label: "ZIP 版",
   },
 };

@@ -13,8 +13,11 @@ export function useDownload() {
   return ctx;
 }
 
-/** 配布ファイルの存在確認（未配置時に SPA フォールバックの index.html を誤って保存させないため） */
+/** 配布ファイルの存在確認（外部 URL は CORS 制約を避けるためチェックをスキップして直接開始する） */
 async function isFileAvailable(href: string) {
+  if (/^https?:\/\//i.test(href)) {
+    return true;
+  }
   try {
     const res = await fetch(href, { method: "HEAD", cache: "no-store" });
     const type = res.headers.get("content-type") ?? "";
