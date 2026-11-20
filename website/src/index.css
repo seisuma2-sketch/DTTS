@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 5rem;
+    background: #020814;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    @apply bg-abyss-950 font-sans text-ice-body;
+    overflow-x: clip;
+    font-feature-settings: "palt";
+  }
+  /* 日本語の見出し・本文を文節単位で折り返す（対応ブラウザのみ。非対応ではそのまま） */
+  h1, h2, h3, p {
+    word-break: auto-phrase;
+    line-break: strict;
+  }
+  ::selection {
+    background: rgba(62, 142, 247, 0.35);
+    color: #f4f8ff;
+  }
+  :focus-visible {
+    outline: 2px solid #60a5fa;
+    outline-offset: 3px;
+    border-radius: 6px;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply border border-white/10 bg-white/[0.035] backdrop-blur-xl;
+  }
+  .text-gradient {
+    background: linear-gradient(180deg, #f4f8ff 0%, #f4f8ff 35%, #60a5fa 78%, #3e8ef7 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .text-gradient-x {
+    background: linear-gradient(90deg, #22d3ee, #60a5fa 45%, #3e8ef7);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.22em] text-azure-soft;
+  }
+  .section-title {
+    @apply text-balance text-4xl font-bold tracking-tightest text-ice sm:text-5xl lg:text-6xl;
+    line-height: 1.08;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-azure px-6 py-3.5 text-[15px] font-semibold text-white shadow-[0_0_0_1px_rgba(96,165,250,0.4),0_10px_40px_-8px_rgba(62,142,247,0.7)] transition hover:bg-[#5299f8] hover:shadow-[0_0_0_1px_rgba(96,165,250,0.6),0_14px_50px_-6px_rgba(62,142,247,0.9)] active:scale-[0.98];
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-6 py-3.5 text-[15px] font-semibold text-ice backdrop-blur-xl transition hover:border-azure-soft/50 hover:bg-white/[0.07] active:scale-[0.98];
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
