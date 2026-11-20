@@ -1,11 +1,11 @@
 export const PRODUCT = {
   name: "DTTS",
   fullName: "DTTS — 4-Player Daifugo Tabletop Suite",
-  version: "v1.1.5",
+  version: "v1.1.6",
   platform: "Windows 10 / 11 64bit",
 } as const;
 
-const RELEASE_BASE = "https://github.com/seisuma2-sketch/DTTS/releases/download/v1.1.5";
+const RELEASE_BASE = "https://github.com/seisuma2-sketch/DTTS/releases/download/v1.1.6";
 
 export type DownloadKind = "installer" | "zip";
 
@@ -25,8 +25,8 @@ export const DOWNLOADS: Record<DownloadKind, DownloadItem> = {
   },
   zip: {
     kind: "zip",
-    fileName: "DTTS_v1.1.5_x64.zip",
-    href: `${RELEASE_BASE}/DTTS_v1.1.5_x64.zip`,
+    fileName: "DTTS_v1.1.6_x64.zip",
+    href: `${RELEASE_BASE}/DTTS_v1.1.6_x64.zip`,
     label: "ZIP 版",
   },
 };
