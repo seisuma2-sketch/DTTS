@@ -5,6 +5,8 @@ export const PRODUCT = {
   platform: "Windows 10 / 11 64bit",
 } as const;
 
+const BASE = import.meta.env.BASE_URL;
+
 export type DownloadKind = "installer" | "zip";
 
 export interface DownloadItem {
@@ -18,13 +20,13 @@ export const DOWNLOADS: Record<DownloadKind, DownloadItem> = {
   installer: {
     kind: "installer",
     fileName: "DTTS_Setup.exe",
-    href: "/downloads/DTTS_Setup.exe",
+    href: `${BASE}downloads/DTTS_Setup.exe`,
     label: "インストーラー版",
   },
   zip: {
     kind: "zip",
     fileName: "DTTS_v1.1.5_x64.zip",
-    href: "/downloads/DTTS_v1.1.5_x64.zip",
+    href: `${BASE}downloads/DTTS_v1.1.5_x64.zip`,
     label: "ZIP 版",
   },
 };
