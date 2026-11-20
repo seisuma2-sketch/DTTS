@@ -31,6 +31,7 @@ public sealed class StandardNpcBrain : INpcStrategy
     // 1回の判断の中だけで使う計算結果のキャッシュ（DecidePlay の開始時に破棄）
     private readonly Dictionary<string, bool> _leadMemo = new(StringComparer.Ordinal);
     private IReadOnlyList<Card>? _unseenCache;
+    private int? _turnsBeforeCache;
     private NpcContext? _cacheOwner;
 
     /// <summary>思考エンジンを生成する。</summary>
@@ -142,7 +143,7 @@ public sealed class StandardNpcBrain : INpcStrategy
             int breaks = HandAnalysis.CountBreaks(play, context.Hand, rules, out int largeBreaks);
             score -= breaks * _w.BreakPenalty;
             score -= largeBreaks * 6.0 * (_w.Revolution - 1.0); // 革命狙いは革命の材料を崩したがらない
-            int turnsBefore = HandAnalysis.EstimateTurns(context.Hand, rules);
+            int turnsBefore = _turnsBeforeCache ??= HandAnalysis.EstimateTurns(context.Hand, rules);
             int turnsAfter = HandAnalysis.EstimateTurns(remaining, rules);
             score += (turnsBefore - turnsAfter) * 1.5;
         }
@@ -327,6 +328,7 @@ public sealed class StandardNpcBrain : INpcStrategy
         _cacheOwner = context;
         _leadMemo.Clear();
         _unseenCache = null;
+        _turnsBeforeCache = null;
     }
 
     // ======================================================================

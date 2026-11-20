@@ -6,7 +6,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="using:DTTS.ViewModels"
     mc:Ignorable="d"
-    Background="{StaticResource AppBackgroundDeepBrush}">
+    Background="{StaticResource AppPageBackgroundBrush}">
 
     <Grid Padding="24">
         <Grid.RowDefinitions>
@@ -18,9 +18,7 @@
         <!-- ヘッダー -->
         <Grid Grid.Row="0" Margin="0,0,0,16">
             <StackPanel Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
-                <Button Command="{x:Bind ViewModel.GoBackCommand}" Background="Transparent" BorderThickness="0" Padding="8,4">
-                    <TextBlock Text="← タイトルへ戻る" Foreground="{StaticResource AppTextSecondaryBrush}" FontSize="14" />
-                </Button>
+                <Button Command="{x:Bind ViewModel.GoBackCommand}" Style="{StaticResource AppBackButtonStyle}" Content="← タイトルへ戻る" AutomationProperties.Name="タイトルへ戻る" />
                 <TextBlock Text="遊び方 ＆ ルール解説（全12カテゴリ）" FontSize="22" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
             </StackPanel>
         </Grid>
@@ -32,6 +30,7 @@
             MaxWidth="600"
             HorizontalAlignment="Left"
             PlaceholderText="ルール名や効果で検索 (例: 8切り, 革命, 階段...)"
+            AutomationProperties.Name="ルール検索"
             Text="{x:Bind ViewModel.SearchQuery, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
         <!-- ルール一覧 (カテゴリごとのカード展開) -->
@@ -39,25 +38,32 @@
             <ItemsControl ItemsSource="{x:Bind ViewModel.FilteredCategories, Mode=OneWay}" MaxWidth="800" HorizontalAlignment="Left">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:RuleHelpCategory">
-                        <Border Margin="0,0,0,20" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="20">
-                            <StackPanel Spacing="12">
-                                <TextBlock Text="{x:Bind Name}" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" />
-
-                                <ItemsControl ItemsSource="{x:Bind Items}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="vm:RuleHelpItem">
-                                            <Border Margin="0,4" Padding="12" CornerRadius="8" Background="#1B1E26" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1">
-                                                <StackPanel Spacing="4">
-                                                    <TextBlock Text="{x:Bind Title}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" />
-                                                    <TextBlock Text="{x:Bind Summary}" FontSize="12" Foreground="{StaticResource AppAccentBrush}" FontWeight="Medium" />
-                                                    <TextBlock Text="{x:Bind Detail}" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" TextWrapping="Wrap" Margin="0,2,0,0" />
-                                                </StackPanel>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
-                        </Border>
+                        <Expander
+                            Margin="0,0,0,14"
+                            IsExpanded="True"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch"
+                            CornerRadius="16"
+                            Background="#B31A2130"
+                            BorderBrush="#26FFFFFF"
+                            BorderThickness="1">
+                            <Expander.Header>
+                                <TextBlock Text="{x:Bind Name}" FontSize="16" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" Margin="4,6" />
+                            </Expander.Header>
+                            <ItemsControl ItemsSource="{x:Bind Items}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:RuleHelpItem">
+                                        <Border Margin="0,4" Padding="12" CornerRadius="8" Background="#1B1E26" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1">
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Text="{x:Bind Title}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" />
+                                                <TextBlock Text="{x:Bind Summary}" FontSize="12" Foreground="{StaticResource AppAccentBrush}" FontWeight="Medium" />
+                                                <TextBlock Text="{x:Bind Detail}" FontSize="12" Foreground="{StaticResource AppTextSecondaryBrush}" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Expander>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>

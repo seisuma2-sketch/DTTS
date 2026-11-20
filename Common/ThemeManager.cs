@@ -33,14 +33,14 @@ public static class ThemeManager
 
         var appResources = Application.Current.Resources;
 
-        // カラーリソース
+        // 既存のブラシインスタンスの色を直接書き換えることで、StaticResource 参照中の全画面に即時反映させる
         appResources[AccentColorKey] = accentColor;
-        appResources[AccentBrushKey] = new SolidColorBrush(accentColor);
-        appResources[OnAccentBrushKey] = new SolidColorBrush(onAccentColor);
+        SetOrUpdateSolidBrush(appResources, AccentBrushKey, accentColor);
+        SetOrUpdateSolidBrush(appResources, OnAccentBrushKey, onAccentColor);
 
         // 半透明アクセント（選択枠やハイライト用）
         var subtleColor = Color.FromArgb(48, accentColor.R, accentColor.G, accentColor.B);
-        appResources[AccentSubtleBrushKey] = new SolidColorBrush(subtleColor);
+        SetOrUpdateSolidBrush(appResources, AccentSubtleBrushKey, subtleColor);
 
         // グラデーションブラシ（Material 3 風）
         var lighterAccent = Color.FromArgb(
@@ -50,16 +50,36 @@ public static class ThemeManager
             (byte)Math.Min(255, accentColor.B + 40)
         );
 
-        var gradient = new LinearGradientBrush
+        if (appResources.TryGetValue(AccentGradientBrushKey, out var existingGrad) && existingGrad is LinearGradientBrush grad && grad.GradientStops.Count >= 2)
         {
-            StartPoint = new Windows.Foundation.Point(0, 0),
-            EndPoint = new Windows.Foundation.Point(1, 1)
-        };
-        gradient.GradientStops.Add(new GradientStop { Color = lighterAccent, Offset = 0.0 });
-        gradient.GradientStops.Add(new GradientStop { Color = accentColor, Offset = 1.0 });
-        appResources[AccentGradientBrushKey] = gradient;
+            grad.GradientStops[0].Color = lighterAccent;
+            grad.GradientStops[1].Color = accentColor;
+        }
+        else
+        {
+            var gradient = new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0),
+                EndPoint = new Windows.Foundation.Point(1, 1)
+            };
+            gradient.GradientStops.Add(new GradientStop { Color = lighterAccent, Offset = 0.0 });
+            gradient.GradientStops.Add(new GradientStop { Color = accentColor, Offset = 1.0 });
+            appResources[AccentGradientBrushKey] = gradient;
+        }
 
         ThemeChanged?.Invoke(null, themeColor);
+    }
+
+    private static void SetOrUpdateSolidBrush(ResourceDictionary resources, string key, Color color)
+    {
+        if (resources.TryGetValue(key, out var existing) && existing is SolidColorBrush scb)
+        {
+            scb.Color = color;
+        }
+        else
+        {
+            resources[key] = new SolidColorBrush(color);
+        }
     }
 
     public static Color ParseHexColor(string hex)

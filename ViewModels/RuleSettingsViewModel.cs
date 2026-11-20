@@ -37,9 +37,21 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
     /// <summary>ローカルルールのカテゴリ（折りたたみカード）。<see cref="Rules"/> を差し替えると作り直す。</summary>
     public ObservableCollection<RuleCategoryViewModel> RuleCategories { get; } = new();
 
+    /// <summary>検索・有効フィルタ適用後の表示用カテゴリ一覧。</summary>
+    public ObservableCollection<RuleCategoryViewModel> FilteredCategories { get; } = new();
+
+    [ObservableProperty]
+    public partial string RuleSearchText { get; set; } = "";
+
+    [ObservableProperty]
+    public partial bool ShowOnlyEnabledRules { get; set; }
+
     /// <summary>有効なローカルルールの合計（例：「有効 18 / 60」）。</summary>
     [ObservableProperty]
     public partial string RuleSummaryText { get; set; } = "";
+
+    partial void OnRuleSearchTextChanged(string value) => ApplyCategoryFilter();
+    partial void OnShowOnlyEnabledRulesChanged(bool value) => ApplyCategoryFilter();
 
     partial void OnRulesChanged(RuleSettings value)
     {
@@ -50,6 +62,53 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
         }
         OnPropertyChanged(nameof(RoundCount));
         UpdateRuleSummary();
+        ApplyCategoryFilter();
+    }
+
+    private void ApplyCategoryFilter()
+    {
+        FilteredCategories.Clear();
+        string q = (RuleSearchText ?? string.Empty).Trim();
+        bool hasQuery = q.Length > 0;
+
+        foreach (var cat in RuleCategories)
+        {
+            if (ShowOnlyEnabledRules && !cat.HasEnabled)
+            {
+                continue;
+            }
+            if (hasQuery)
+            {
+                bool match = cat.Title.Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || cat.Summary.Contains(q, StringComparison.OrdinalIgnoreCase)
+                    || cat.Items.Any(i => i.Label.Contains(q, StringComparison.OrdinalIgnoreCase) || i.Hint.Contains(q, StringComparison.OrdinalIgnoreCase))
+                    || cat.Choices.Any(c => c.Label.Contains(q, StringComparison.OrdinalIgnoreCase) || c.Hint.Contains(q, StringComparison.OrdinalIgnoreCase));
+                if (!match) continue;
+                cat.IsExpanded = true;
+            }
+            FilteredCategories.Add(cat);
+        }
+    }
+
+    public IReadOnlyList<string> RevolutionBgOptions { get; } =
+        RevolutionBgColorInfo.All.Select(c => c.DisplayName).ToArray();
+
+    public int RevolutionBgIndex
+    {
+        get => (int)Appearance.RevolutionBgColor;
+        set
+        {
+            if (Enum.IsDefined((RevolutionBgColor)value))
+            {
+                var bg = (RevolutionBgColor)value;
+                if (Appearance.RevolutionBgColor != bg)
+                {
+                    Appearance.RevolutionBgColor = bg;
+                    OnPropertyChanged();
+                    _ = SaveAppearanceAsync();
+                }
+            }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -119,6 +178,22 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
 
     /// <summary>選んでいる操作ガイドのレベルの説明。</summary>
     public string GuideLevelDescription => Appearance.GuideLevel.Description();
+
+    /// <summary>出せる手がないときに自動でパスするか。</summary>
+    public bool AutoPassWhenCannotPlay
+    {
+        get => Appearance.AutoPassWhenCannotPlay;
+        set
+        {
+            if (Appearance.AutoPassWhenCannotPlay == value) return;
+            Appearance.AutoPassWhenCannotPlay = value;
+            OnPropertyChanged();
+            StatusMessage = value
+                ? "出せる手がないときは自動でパスするようにしました"
+                : "出せる手がないときも手動でパスするようにしました";
+            _ = SaveAppearanceAsync();
+        }
+    }
 
     private static int IndexOfGuideLevel(GuideLevel level)
     {
@@ -306,6 +381,20 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
 
     // --- サウンド（変更は即座に再生音量へ反映し、保存する） ---
 
+    /// <summary>手札カードのホバー演出の有効・無効。</summary>
+    public bool CardHoverEnabled
+    {
+        get => Appearance.CardHoverEnabled;
+        set
+        {
+            if (Appearance.CardHoverEnabled == value) return;
+            Appearance.CardHoverEnabled = value;
+            DTTS.Views.Controls.CardControl.GlobalHoverEnabled = value;
+            OnPropertyChanged();
+            _ = SaveAppearanceAsync();
+        }
+    }
+
     /// <summary>効果音の有効・無効。</summary>
     public bool SoundEnabled
     {
@@ -335,7 +424,7 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
         }
     }
 
-    /// <summary>BGM の音量（0〜100）。BGM は未実装で、値の保存のみ。</summary>
+    /// <summary>BGM の音量（0〜100）。設定変更を AudioGraphService へ即時反映して保存する。</summary>
     public double BgmVolume
     {
         get => Appearance.BgmVolume;
@@ -374,12 +463,15 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
         Rules = await _settingsRepo.LoadRulesAsync();
         Appearance = await _settingsRepo.LoadAppearanceAsync();
         Npc = await _settingsRepo.LoadNpcAsync();
+        OnPropertyChanged(nameof(CardHoverEnabled));
         OnPropertyChanged(nameof(SoundEnabled));
         OnPropertyChanged(nameof(SeVolume));
         OnPropertyChanged(nameof(BgmVolume));
         OnPropertyChanged(nameof(SpeedIndex));
         OnPropertyChanged(nameof(GuideLevelIndex));
         OnPropertyChanged(nameof(GuideLevelDescription));
+        OnPropertyChanged(nameof(AutoPassWhenCannotPlay));
+        OnPropertyChanged(nameof(RevolutionBgIndex));
         try
         {
             _presetStore = await _settingsRepo.LoadRulePresetsAsync();
@@ -444,18 +536,32 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
     [RelayCommand]
     private async Task SaveAllAsync()
     {
-        await _settingsRepo.SaveRulesAsync(Rules);
-        await _settingsRepo.SaveAppearanceAsync(Appearance);
-        await _settingsRepo.SaveNpcAsync(Npc);
-        StatusMessage = "すべての設定を保存しました";
+        try
+        {
+            await _settingsRepo.SaveRulesAsync(Rules);
+            await _settingsRepo.SaveAppearanceAsync(Appearance);
+            await _settingsRepo.SaveNpcAsync(Npc);
+            StatusMessage = "すべての設定を保存しました";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"設定の保存に失敗しました: {ex.Message}";
+        }
     }
 
     [RelayCommand]
     private async Task ResetRulesToDefaultAsync()
     {
-        Rules = RuleSettings.CreateDefault();
-        await _settingsRepo.SaveRulesAsync(Rules);
-        StatusMessage = "ルールを標準設定に初期化しました";
+        try
+        {
+            Rules = RuleSettings.CreateDefault();
+            await _settingsRepo.SaveRulesAsync(Rules);
+            StatusMessage = "ルールを標準設定に初期化しました";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"初期化の保存に失敗しました: {ex.Message}";
+        }
     }
 
     /// <summary>
@@ -490,10 +596,17 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void GoBack()
+    private async Task GoBackAsync()
     {
-        _ = SaveAllAsync();
+        await SaveAllAsync();
         _navigation.NavigateToTitle();
+    }
+
+    [RelayCommand]
+    private async Task CreateRoomWithRulesAsync()
+    {
+        await SaveAllAsync();
+        _navigation.Navigate(typeof(Views.LobbyPage), "auto_host");
     }
 }
 

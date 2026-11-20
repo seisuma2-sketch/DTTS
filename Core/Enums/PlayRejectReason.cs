@@ -27,4 +27,8 @@ public enum PlayRejectReason : byte
     ForbiddenFinish,
     /// <summary>ろくろ首・99車の割り込み受付中で、砂嵐以外は出せない。</summary>
     SandstormStopOnly,
+    /// <summary>4止めが成立した後で、場が流れるまで砂嵐以外は出せない。</summary>
+    FourStopLocked,
+    /// <summary>クーデターが成立した後で、場が流れるまで6・7・砂嵐以外は出せない。</summary>
+    CoupLocked,
 }

@@ -56,9 +56,11 @@ internal static class JudgeTests
             // 受付が終われば（場札が置かれる・流れる）通常の判定に戻る
             Check(!pending.WithPlay(1, stop.Play!, stop.NextLock).IsSandstormStopPending, "window closes when a card is played");
             Check(!pending.Flushed().IsSandstormStopPending, "window closes on flush");
-            // 通常時（受付中でない）の砂嵐は従来どおり同枚数にしか出せない
+            // 通常時（受付中でない）の砂嵐も、どんな場でも出せる（枚数違い・縛り中でも）
             var normal = Play(j, empty, "S6 H6");
-            Check(j.Judge(C("S3 H3 D3"), normal).RejectReason == PlayRejectReason.CountMismatch, "sandstorm outside the window needs the same count");
+            Check(j.Judge(C("S3 H3 D3"), normal) is { IsLegal: true, BeatMethod: BeatMethod.Sandstorm } any && any.FlushesField,
+                "sandstorm can be played over a pair outside the window and flushes");
+            Check(j.Judge(C("S3 H3 D3"), locked.WithSandstormStopPending(false)).BeatMethod == BeatMethod.Sandstorm, "sandstorm ignores a suit lock");
             rules.Joker.JokerTriggersEffects = true;
             Check(j.Judge(C("S3 H3 JK0"), pending).BeatMethod == BeatMethod.SandstormStop, "joker substitutes when joker effects are on");
             rules.Flow.SandstormEnabled = false;
@@ -153,10 +155,9 @@ internal static class JudgeTests
             var j = new JudgeLogic(rules);
             Check(j.Judge(C("SJ"), empty).HasEffect(SpecialEffectType.ElevenBack)
                 && !j.Judge(C("SJ"), empty).HasEffect(SpecialEffectType.StrongElevenBack), "normal 11back effect");
-            rules.ElevenBack.StrongElevenBackEnabled = true;
-            Check(j.Judge(C("SJ"), empty).HasEffect(SpecialEffectType.StrongElevenBack), "strong 11back effect");
+            Check(j.Judge(C("SJ HJ DJ"), empty).HasEffect(SpecialEffectType.StrongElevenBack), "strong 11back effect on 3 jacks");
             rules.ElevenBack.Enabled = false;
-            Check(!j.Judge(C("SJ"), empty).HasEffect(SpecialEffectType.StrongElevenBack)
+            Check(!j.Judge(C("SJ HJ DJ"), empty).HasEffect(SpecialEffectType.StrongElevenBack)
                 && !j.Judge(C("SJ"), empty).HasEffect(SpecialEffectType.ElevenBack), "11back disabled");
         }
     }
@@ -279,9 +280,7 @@ internal static class JudgeTests
         rules.Joker.JokerTriggersEffects = false;
         rules.Sequence.EffectsInSequence = false;
         Check(j.Judge(C("HJ"), empty).HasEffect(SpecialEffectType.ElevenBack), "11back");
-        rules.ElevenBack.StrongElevenBackEnabled = true;
-        Check(j.Judge(C("HJ"), empty).HasEffect(SpecialEffectType.StrongElevenBack), "strong 11back");
-        rules.ElevenBack.StrongElevenBackEnabled = false;
+        Check(j.Judge(C("HJ SJ DJ"), empty).HasEffect(SpecialEffectType.StrongElevenBack), "strong 11back on 3 jacks");
         rules.Flow.EightCutEnabled = false;
         Check(!j.Judge(C("H8"), empty).HasEffect(SpecialEffectType.EightCut), "8 cut disabled");
         rules.Flow.EightCutEnabled = true;
@@ -319,13 +318,42 @@ internal static class JudgeTests
         // 砂嵐・99車
         rules.Flow.AmbulanceEnabled = true;
         var fPair2 = Play(j, empty, "S2 H2");
-        var amb = j.Judge(C("D9 C9"), fPair2);
-        Check(amb.IsLegal && amb.BeatMethod == BeatMethod.Ambulance && amb.FlushesField, "ambulance");
+        // 99車は、ろくろ首と同じく通常どおり場に勝てるときだけ出せる（出せれば場が流れる）
+        Check(j.Judge(C("D9 C9"), fPair2).RejectReason == PlayRejectReason.NotStronger, "ambulance cannot beat a pair of 2s");
+        var fPair5 = Play(j, empty, "S5 H5");
+        var amb = j.Judge(C("D9 C9"), fPair5);
+        Check(amb.IsLegal && amb.BeatMethod == BeatMethod.Stronger && amb.HasEffect(SpecialEffectType.Ambulance) && amb.FlushesField,
+            "ambulance beats a weaker pair and flushes");
+        Check(j.Judge(C("D9 C9"), empty) is { IsLegal: true } lead && lead.HasEffect(SpecialEffectType.Ambulance), "ambulance as a lead flushes");
+        var revPair4 = Play(j, empty, "S4 H4").WithRevolutionToggled();
+        Check(j.Judge(C("D9 C9"), revPair4).RejectReason == PlayRejectReason.NotStronger, "ambulance: 9s lose to 4s during a revolution");
+        rules.Joker.JokerCount = 1;
+        rules.Joker.JokerTriggersEffects = true;
+        Check(!j.Judge(C("D9 C9 JK0"), Play(j, empty, "S4 H4 D4").WithRevolutionToggled()).IsLegal, "ambulance-like 9x2+JK cannot beat 4s in a revolution");
+        rules.Joker.JokerTriggersEffects = false;
         rules.Flow.AmbulanceEnabled = false;
-        Check(!j.Judge(C("D9 C9"), fPair2).IsLegal, "ambulance disabled");
+        Check(j.Judge(C("D9 C9"), fPair5) is { IsLegal: true } plain && !plain.HasEffect(SpecialEffectType.Ambulance), "ambulance disabled: just a pair");
+
+        // 砂嵐：どんな場でも（1枚・ペア・階段・縛り・革命中）出せて、すぐに場が流れる
         rules.Flow.SandstormEnabled = true;
-        Check(j.Judge(C("S3 H3 D3"), Play(j, empty, "S2 H2 D2")).BeatMethod == BeatMethod.Sandstorm, "sandstorm");
+        Check(j.Judge(C("S3 H3 D3"), Play(j, empty, "S2 H2 D2")).BeatMethod == BeatMethod.Sandstorm, "sandstorm over a triple");
+        Check(j.Judge(C("S3 H3 D3"), Play(j, empty, "S2")) is { IsLegal: true, BeatMethod: BeatMethod.Sandstorm } s1 && s1.FlushesField, "sandstorm over a single");
+        Check(j.Judge(C("S3 H3 D3"), Play(j, empty, "H9 H10 HJ")).BeatMethod == BeatMethod.Sandstorm, "sandstorm over a sequence");
+        Check(j.Judge(C("S3 H3 D3"), Play(j, empty, "S2 H2").WithRevolutionToggled()).BeatMethod == BeatMethod.Sandstorm, "sandstorm during a revolution");
+        var handWithStorm = C("S3 H3 D3 C9");
+        var legalOverSingle = j.GetLegalPlays(handWithStorm, Play(j, empty, "S2"));
+        Check(legalOverSingle.Any(p => p.BeatMethod == BeatMethod.Sandstorm), "sandstorm is listed as a legal play over a single");
+        Check(j.Judge(C("S3 H3"), Play(j, empty, "S2")).IsLegal == false, "two 3s are not a sandstorm");
+
+        // 4止めの成立後：場が流れるまで砂嵐しか出せない
+        var fourLocked = Play(j, empty, "S4 H4").WithFourStopLocked(true);
+        Check(j.Judge(C("S5 H5"), fourLocked).RejectReason == PlayRejectReason.FourStopLocked, "after a four stop a stronger pair is refused");
+        Check(j.Judge(C("S3 H3 D3"), fourLocked).BeatMethod == BeatMethod.Sandstorm, "after a four stop the sandstorm is allowed");
+        var lockedLegal = j.GetLegalPlays(C("S5 H5 S3 H3 D3 C2"), fourLocked);
+        Check(lockedLegal.Count == 1 && lockedLegal[0].BeatMethod == BeatMethod.Sandstorm, "after a four stop only the sandstorm is legal");
+        Check(!fourLocked.Flushed().IsFourStopLocked, "four stop lock ends on flush");
         rules.Flow.SandstormEnabled = false;
+        Check(j.GetLegalPlays(C("S5 H5 S3 H3 D3"), fourLocked).Count == 0, "after a four stop without sandstorm rule: nothing is legal");
 
         // 4止め
         rules.Flow.FourStopEnabled = true;
@@ -344,12 +372,6 @@ internal static class JudgeTests
         rules.Joker.JokerTriggersEffects = true;
         Check(j.Judge(C("S4 JK0"), f8).BeatMethod == BeatMethod.FourStop, "four stop: joker substitute with joker effects");
         rules.Joker.JokerTriggersEffects = false;
-        // 8と同じ枚数の設定
-        rules.Flow.FourStopCount = FourStopCountRule.SameAsEight;
-        Check(j.Judge(C("S4"), f8).BeatMethod == BeatMethod.FourStop, "four stop (same count): one 4 stops one 8");
-        Check(j.Judge(C("S4 H4"), f8).RejectReason == PlayRejectReason.FourStopOnly, "four stop (same count): a pair is the wrong count");
-        Check(j.Judge(C("S4 H4"), f88).BeatMethod == BeatMethod.FourStop, "four stop (same count): pair stops a pair");
-        rules.Flow.FourStopCount = FourStopCountRule.DoubleEight;
         // 階段の8切りは止められない
         var fSeq8 = Play(j, empty, "H7 H8 H9").WithEightCutPending(true);
         Check(!j.Judge(C("S4 H4 C4 D4 JK0 C5"), fSeq8).IsLegal && j.GetLegalPlays(C("S4 H4 C4 D4"), fSeq8).Count == 0,
@@ -376,6 +398,11 @@ internal static class JudgeTests
         Check(j.Judge(C("H2"), empty, true).ForbiddenFinish.HasFlag(ForbiddenFinishReason.StrongestNumber), "forbid 2");
         Check(!j.Judge(C("H2"), empty with { IsRevolution = true }, true).IsForbiddenFinish, "rev 2 ok");
         Check(j.Judge(C("H3"), empty with { IsRevolution = true }, true).ForbiddenFinish.HasFlag(ForbiddenFinishReason.StrongestNumber), "rev forbid 3");
+        // 11バック中（通常11バック／革命＋11バック）は 3 も 2 も禁止あがりにならない
+        Check(!j.Judge(C("H3"), empty with { IsElevenBack = true }, true).ForbiddenFinish.HasFlag(ForbiddenFinishReason.StrongestNumber), "11back 3 ok");
+        Check(!j.Judge(C("H2"), empty with { IsElevenBack = true }, true).ForbiddenFinish.HasFlag(ForbiddenFinishReason.StrongestNumber), "11back 2 ok");
+        Check(!j.Judge(C("H2"), empty with { IsRevolution = true, IsElevenBack = true }, true).ForbiddenFinish.HasFlag(ForbiddenFinishReason.StrongestNumber), "rev+11back 2 ok");
+        Check(!j.Judge(C("H3"), empty with { IsRevolution = true, IsElevenBack = true }, true).ForbiddenFinish.HasFlag(ForbiddenFinishReason.StrongestNumber), "rev+11back 3 ok");
         rules.ForbiddenFinish.StrongestFollowsReversal = false;
         Check(!j.Judge(C("H3"), empty with { IsRevolution = true }, true).IsForbiddenFinish, "fixed 2 forbid");
         rules.ForbiddenFinish.StrongestFollowsReversal = true;
@@ -485,6 +512,24 @@ internal static class JudgeTests
         Check(j.Judge(C("H8 JK0"), empty).GetEffect(SpecialEffectType.EightCut)?.Magnitude == 1, "joker no substitute effect");
 
         NewRuleTests();
+
+        // 禁止あがり「最下位 (LastPlace)」設定時、ジョーカー入り階段に正常あがり解釈があれば反則にしない
+        {
+            var r = RuleSettings.CreateDefault();
+            r.Sequence.Enabled = true;
+            r.Sequence.AllowJokerInSequence = true;
+            r.Sequence.EffectsInSequence = true;
+            r.Joker.EffectMode = JokerEffectMode.All;
+            r.Flow.EightCutEnabled = true;
+            r.ForbiddenFinish.Enabled = true;
+            r.ForbiddenFinish.ForbidEightCut = true;
+            r.ForbiddenFinish.JokerFinishRule = GentleStrictRule.Off;
+            r.ForbiddenFinish.Penalty = ForbiddenFinishPenalty.LastPlace;
+            var jLast = new JudgeLogic(r);
+            var res = jLast.Judge(C("S6 S7 JK0"), FieldState.CreateInitial(), isFinishingPlay: true);
+            Check(res.IsLegal && !res.IsForbiddenFinish && res.Play!.Rank == Rank.Five,
+                "forbidden finish LastPlace prefers non-forbidden 5-6-7 over 6-7-8");
+        }
 
         Console.WriteLine($"judge: pass={_pass} fail={_fail}");
         return (_pass, _fail);

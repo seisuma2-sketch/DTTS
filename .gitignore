@@ -26,9 +26,14 @@ skins/
 
 # Test outputs
 TestResults/
+Tests/**/tmp/
 
 
 # Packaging outputs / signing keys
 artifacts/
 *.pfx
 
+
+# Local build leftovers
+BundleArtifacts/
+__pycache__/

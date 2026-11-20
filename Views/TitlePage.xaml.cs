@@ -29,9 +29,16 @@ public sealed partial class TitlePage : Page
 
     private async void OnPageLoaded(object sender, RoutedEventArgs e)
     {
-        // タイトルでは落ち着いた曲（対戦画面から戻ったときは、緊張の曲からフェードで切り替わる）
-        App.Services.GetRequiredService<DTTS.Services.Audio.IAudioService>().PlayBgm(DTTS.Services.Audio.BgmTrack.Lounge);
-        await ViewModel.LoadSummaryAsync();
+        try
+        {
+            // タイトルでは落ち着いた曲（対戦画面から戻ったときは、緊張の曲からフェードで切り替わる）
+            App.Services.GetRequiredService<DTTS.Services.Audio.IAudioService>().PlayBgm(DTTS.Services.Audio.BgmTrack.Lounge);
+            await ViewModel.LoadSummaryAsync();
+        }
+        catch (Exception ex)
+        {
+            App.WriteCrashLog("TitlePage.OnPageLoaded", ex);
+        }
     }
 
     /// <summary>
@@ -94,6 +101,24 @@ public sealed partial class TitlePage : Page
         {
             // パッケージ化されずに起動した場合（パッケージ ID がない）
             return typeof(TitlePage).Assembly.GetName().Version?.ToString(3) ?? "?";
+        }
+    }
+
+    private void OnButtonPointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (sender is UIElement el)
+        {
+            CompositionAnimationHelper.AnimateSpringScale(el, 1.025f, dampingRatio: 0.72f, periodMs: 180f);
+            CompositionAnimationHelper.AnimateSpringTranslationY(el, -2f, dampingRatio: 0.72f, periodMs: 180f);
+        }
+    }
+
+    private void OnButtonPointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (sender is UIElement el)
+        {
+            CompositionAnimationHelper.AnimateSpringScale(el, 1.0f, dampingRatio: 0.72f, periodMs: 200f);
+            CompositionAnimationHelper.AnimateSpringTranslationY(el, 0f, dampingRatio: 0.72f, periodMs: 200f);
         }
     }
 }

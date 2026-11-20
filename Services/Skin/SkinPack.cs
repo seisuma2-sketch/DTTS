@@ -87,18 +87,27 @@ public static class SkinPackScanner
         {
             return null;
         }
+        if (!Directory.Exists(directory) || (File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+        {
+            return null;
+        }
         var images = new Dictionary<int, string>();
         string? back = null;
         string? sharedJoker = null;
 
         foreach (var file in Directory.EnumerateFiles(directory))
         {
+            var info = new FileInfo(file);
+            if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                continue;
+            }
             var ext = Path.GetExtension(file).ToLowerInvariant();
             if (!SupportedExtensions.Contains(ext))
             {
                 continue;
             }
-            if (new FileInfo(file).Length > MaxImageFileBytes)
+            if (info.Length > MaxImageFileBytes)
             {
                 continue;
             }
@@ -205,6 +214,8 @@ public static class SkinPackInstaller
                     throw new InvalidDataException("展開後のサイズが大きすぎます。");
                 }
 
+                long totalExtractedBytes = 0;
+                var buffer = new byte[81920];
                 foreach (var entry in files)
                 {
                     var ext = Path.GetExtension(entry.Name).ToLowerInvariant();
@@ -213,7 +224,8 @@ public static class SkinPackInstaller
                     {
                         continue; // 対応外ファイルは展開しない
                     }
-                    if (entry.Length > SkinPackScanner.MaxImageFileBytes)
+                    long maxEntryBytes = isManifest ? 64 * 1024 : SkinPackScanner.MaxImageFileBytes;
+                    if (entry.Length > maxEntryBytes)
                     {
                         continue;
                     }
@@ -223,7 +235,65 @@ public static class SkinPackInstaller
                     {
                         throw new InvalidDataException($"不正なパスを含んでいます: {entry.FullName}");
                     }
-                    entry.ExtractToFile(destination, overwrite: true);
+                    // ZIPヘッダの自己申告サイズではなく、実際の展開バイト数を計測してZIP爆弾を防ぐ
+                    using var entryStream = entry.Open();
+                    byte[] header = new byte[12];
+                    int headerLen = 0;
+                    FileStream? outStream = null;
+                    try
+                    {
+                        long entryBytes = 0;
+                        int read;
+                        while ((read = entryStream.Read(buffer, 0, buffer.Length)) > 0)
+                        {
+                            bool firstWrite = outStream is null;
+                            if (headerLen < header.Length)
+                            {
+                                int take = Math.Min(header.Length - headerLen, read);
+                                Array.Copy(buffer, 0, header, headerLen, take);
+                                headerLen += take;
+                            }
+                            entryBytes += read;
+                            totalExtractedBytes += read;
+                            if (entryBytes > maxEntryBytes)
+                            {
+                                throw new InvalidDataException($"ファイルサイズが上限を超えています: {entry.Name}");
+                            }
+                            if (totalExtractedBytes > MaxTotalBytes)
+                            {
+                                throw new InvalidDataException("展開後の合計サイズが大きすぎます。");
+                            }
+                            // 拡張子偽装（非画像ファイルの混入）を防ぐため、ディスクへ書く前に先頭マジックバイトを検証する
+                            if (firstWrite)
+                            {
+                                if (!isManifest && (headerLen >= 12 || read < buffer.Length) && !HasValidImageSignature(ext, header.AsSpan(0, headerLen)))
+                                {
+                                    break;
+                                }
+                                if (isManifest || headerLen >= 12 || read < buffer.Length)
+                                {
+                                    outStream = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None);
+                                    outStream.Write(header, 0, headerLen);
+                                    int remaining = read - Math.Min(headerLen, read);
+                                    if (remaining > 0)
+                                    {
+                                        outStream.Write(buffer, read - remaining, remaining);
+                                    }
+                                }
+                                continue;
+                            }
+                            outStream?.Write(buffer, 0, read);
+                        }
+                        if (outStream is null && isManifest && headerLen > 0)
+                        {
+                            outStream = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None);
+                            outStream.Write(header, 0, headerLen);
+                        }
+                    }
+                    finally
+                    {
+                        outStream?.Dispose();
+                    }
                 }
             }
 
@@ -253,8 +323,14 @@ public static class SkinPackInstaller
     /// <summary>パックを削除する。</summary>
     public static bool Uninstall(string skinsRoot, string packId)
     {
-        var target = Path.GetFullPath(Path.Combine(skinsRoot, MakeSafeId(packId)));
-        if (!target.StartsWith(Path.GetFullPath(skinsRoot), StringComparison.OrdinalIgnoreCase) || !Directory.Exists(target))
+        var rootFull = Path.GetFullPath(skinsRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        var target = Path.GetFullPath(Path.Combine(rootFull, MakeSafeId(packId)));
+        if (!target.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase) || !Directory.Exists(target))
+        {
+            return false;
+        }
+        if ((File.GetAttributes(target) & FileAttributes.ReparsePoint) != 0)
         {
             return false;
         }
@@ -262,7 +338,24 @@ public static class SkinPackInstaller
         return true;
     }
 
-    /// <summary>フォルダ名として安全なIDに変換する。</summary>
+    private static readonly HashSet<string> WindowsReservedNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    };
+
+    private static bool HasValidImageSignature(string ext, ReadOnlySpan<byte> header) => ext switch
+    {
+        ".png" => header.Length >= 4 && header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47,
+        ".jpg" or ".jpeg" => header.Length >= 3 && header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF,
+        ".webp" => header.Length >= 12
+            && header[0] == 'R' && header[1] == 'I' && header[2] == 'F' && header[3] == 'F'
+            && header[8] == 'W' && header[9] == 'E' && header[10] == 'B' && header[11] == 'P',
+        _ => false,
+    };
+
+    /// <summary>フォルダ名として安全なIDに変換する（Windows 予約デバイス名も回避）。</summary>
     public static string MakeSafeId(string name)
     {
         var invalid = new HashSet<char>(Path.GetInvalidFileNameChars()) { '.', ' ' };
@@ -271,6 +364,10 @@ public static class SkinPackInstaller
         if (id.Length == 0)
         {
             id = "skin";
+        }
+        if (WindowsReservedNames.Contains(id))
+        {
+            id = "skin_" + id;
         }
         return id.Length > 64 ? id[..64] : id;
     }

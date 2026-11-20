@@ -13,6 +13,9 @@ public sealed class BgmMixer
 {
     private readonly Dictionary<BgmTrack, double> _level = new();
     private readonly Dictionary<BgmTrack, double> _target = new();
+    private readonly List<BgmTrack> _changedScratch = new();
+    private readonly List<BgmTrack> _endedScratch = new();
+    private readonly List<(BgmTrack Track, double Target)> _targetSnapshot = new();
 
     /// <summary>新しい曲が鳴り始めるまでの時間。</summary>
     public TimeSpan FadeIn { get; init; } = TimeSpan.FromMilliseconds(1400);
@@ -24,7 +27,20 @@ public sealed class BgmMixer
     public BgmTrack Current { get; private set; } = BgmTrack.None;
 
     /// <summary>フェードの途中か（再生側はこの間だけ時間を進める）。</summary>
-    public bool IsFading => _target.Any(kv => Math.Abs(Level(kv.Key) - kv.Value) > 1e-9);
+    public bool IsFading
+    {
+        get
+        {
+            foreach (var (track, target) in _target)
+            {
+                if (Math.Abs(Level(track) - target) > 1e-9)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
 
     /// <summary>曲の今の音量（0〜1）。</summary>
     public double Level(BgmTrack track) => _level.TryGetValue(track, out var v) ? v : 0.0;
@@ -58,11 +74,17 @@ public sealed class BgmMixer
     /// <returns>音量が変わった曲。</returns>
     public IReadOnlyList<BgmTrack> Advance(TimeSpan elapsed, out IReadOnlyList<BgmTrack> stopped)
     {
-        var changed = new List<BgmTrack>();
-        var ended = new List<BgmTrack>();
+        _changedScratch.Clear();
+        _endedScratch.Clear();
+        _targetSnapshot.Clear();
+        foreach (var kv in _target)
+        {
+            _targetSnapshot.Add((kv.Key, kv.Value));
+        }
+
         double inStep = FadeIn <= TimeSpan.Zero ? 1.0 : elapsed.TotalMilliseconds / FadeIn.TotalMilliseconds;
         double outStep = FadeOut <= TimeSpan.Zero ? 1.0 : elapsed.TotalMilliseconds / FadeOut.TotalMilliseconds;
-        foreach (var (track, target) in _target.ToList())
+        foreach (var (track, target) in _targetSnapshot)
         {
             double now = Level(track);
             if (Math.Abs(now - target) <= 1e-9)
@@ -71,14 +93,14 @@ public sealed class BgmMixer
             }
             double next = target > now ? Math.Min(target, now + inStep) : Math.Max(target, now - outStep);
             _level[track] = next;
-            changed.Add(track);
+            _changedScratch.Add(track);
             if (next <= 0.0)
             {
-                ended.Add(track);
+                _endedScratch.Add(track);
             }
         }
-        stopped = ended;
-        return changed;
+        stopped = _endedScratch;
+        return _changedScratch;
     }
 
     /// <summary>

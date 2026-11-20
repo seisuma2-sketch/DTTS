@@ -89,8 +89,8 @@ internal static class PresentationTests
         var chips = PlaySuggestions.Build(legal);
         Check(chips.Count > 0 && chips.All(c => legal.Any(lp => lp.Count == c.Cards.Count && lp.All(c.Cards.Contains))),
             "suggest(engine): every chip is a legal play");
-        // 最初の親番は ♦3 を含む手だけが合法：候補もすべて ♦3 を含む
-        Check(chips.All(c => c.Cards.Contains(Card.Parse("D3"))), "suggest(engine): first lead chips include the required ♦3");
+        // 最初の親番でも ♦3 は必須ではないため、♦3 以外の候補も出せる
+        Check(chips.Any(c => !c.Cards.Contains(Card.Parse("D3"))), "suggest(engine): first lead chips are not restricted to ♦3");
     }
 
     private static void Exchange()

@@ -22,6 +22,14 @@ internal static class Program
 
         int totalFail = 0;
 
+        // 開発中の確認用：DTTS_TEST_ONLY=security で通信の暗号化・ロビー管理のテストだけを実行する（既定は全テスト）
+        if (string.Equals(Environment.GetEnvironmentVariable("DTTS_TEST_ONLY"), "security", StringComparison.OrdinalIgnoreCase))
+        {
+            var (op, of) = await NetworkSecurityTests.RunAsync();
+            Console.WriteLine($"NetworkSecurity (only): pass={op}, fail={of}");
+            return of == 0 ? 0 : 1;
+        }
+
         Console.WriteLine("--- 1. JudgeTests ---");
         var (jp, jf) = JudgeTests.Run();
         Console.WriteLine($"Judge: pass={jp}, fail={jf}");
@@ -57,8 +65,13 @@ internal static class Program
         Console.WriteLine($"Presentation: pass={pp}, fail={pf}");
         totalFail += pf;
 
+        Console.WriteLine("--- 8. NetworkSecurityTests ---");
+        var (xp, xf) = await NetworkSecurityTests.RunAsync();
+        Console.WriteLine($"NetworkSecurity: pass={xp}, fail={xf}");
+        totalFail += xf;
+
         Console.WriteLine("========================================");
-        int totalPass = jp + ep + np + sp + tp + ip + pp;
+        int totalPass = jp + ep + np + sp + tp + ip + pp + xp;
         Console.WriteLine($"TOTAL: pass={totalPass}, fail={totalFail}");
         Console.WriteLine(totalFail == 0 ? "ALL TESTS PASSED!" : "SOME TESTS FAILED!");
         Console.WriteLine("========================================");

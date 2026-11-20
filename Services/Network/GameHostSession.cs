@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Threading;
 using System.Threading.Tasks;
 using DTTS.Core.Ai;
 using DTTS.Core.Enums;
@@ -41,11 +43,17 @@ public sealed record HostOptions
     /// <summary>NPCの思考時間。</summary>
     public NpcTimingOptions NpcTiming { get; init; } = new();
 
+    /// <summary>ホスト（座席0）のアイコンID。</summary>
+    public string? HostAvatarIcon { get; init; }
+
     /// <summary>
-    /// ホスト（座席0）には、止められる手を持っていなくても割り込み（4止め・砂嵐）の確認を出す
-    /// （操作ガイド「初心者用」）。false なら止められる手を持つときだけ確認する。
+    /// ホスト（座席0）には、止められる手を持っていなくても割り込み（4止め・砂嵐）の確認を出す（既定）。
+    /// false なら止められる手を持つときだけ確認する（NPC と同じ扱い。自動テスト用）。
     /// </summary>
-    public bool HostAlwaysAskInterrupt { get; init; }
+    public bool HostAlwaysAskInterrupt { get; init; } = true;
+
+    /// <summary>部屋参加時のPINコード（null または空ならPINなし）。</summary>
+    public string? JoinPin { get; init; }
 }
 
 /// <summary>
@@ -62,19 +70,53 @@ public sealed class GameHostSession : IAsyncDisposable
     private readonly HostOptions _options;
     private readonly ISerialDispatcher _dispatcher;
     private readonly INpcScheduler _npcScheduler;
+    private readonly DispatcherNpcScheduler? _ownedNpcScheduler;
     private readonly Seat[] _seats;
-    private readonly List<MessageConnection> _pending = new();
+    private readonly List<IMessageConnection> _pending = new();
+    private const int MaxPendingConnections = 16;
+    private int _pendingAcceptCount;
+    private readonly List<IAsyncDisposable> _auxTransports = new();
     private TcpMessageServer? _server;
     private LanDiscoveryResponder? _discovery;
     private long _viewSequence;
+    private int _disposedFlag;
+
+    private bool IsDisposed => Volatile.Read(ref _disposedFlag) != 0;
+
+    // --- ロビー管理 ---
+    /// <summary>ホストが外した端末（この部屋には入り直せない）。</summary>
+    private readonly HashSet<string> _kickedClientIds = new(StringComparer.Ordinal);
+
+    // --- PIN・再接続トークンの総当たり対策：接続元単位＋部屋全体で一定回数まちがえたら、しばらく参加を受け付けない ---
+    private const int AuthFailureLimit = 5;
+    private const int GlobalAuthFailureLimit = 15;
+    private const int MaxTrackedAuthSources = 256;
+    private static readonly TimeSpan AuthLockout = TimeSpan.FromSeconds(30);
+    private readonly Dictionary<string, (int Failures, DateTime LockedUntil)> _authFailures = new(StringComparer.Ordinal);
+    private int _globalAuthFailures;
+    private DateTime _globalAuthLockedUntil = DateTime.MinValue;
+
+    // --- 1接続あたりの受信メッセージレート制限（高速連打による DoS / UI 飢餓を防止） ---
+    private const int MaxMessagesPerSecond = 200;
+    private readonly Dictionary<IMessageConnection, (DateTime WindowStart, int Count)> _messageRates = new();
+
+    // --- 定型リアクション：同じ席からの連打は間引く ---
+    private static readonly TimeSpan ReactionInterval = TimeSpan.FromMilliseconds(1200);
+    private readonly Dictionary<int, DateTime> _lastReaction = new();
 
     private sealed class Seat
     {
         public required int Id { get; init; }
         public required string Name { get; set; }
         public required PlayerKind Kind { get; set; }
-        public MessageConnection? Connection { get; set; }
+        public IMessageConnection? Connection { get; set; }
         public string? ClientId { get; set; }
+        public string? ReconnectToken { get; set; }
+        public string? AvatarIcon { get; set; }
+        /// <summary>参加者が準備完了にしているか。</summary>
+        public bool IsReady { get; set; }
+        /// <summary>ホストが NPC 専用にした席か（参加者は座れない）。</summary>
+        public bool IsLocked { get; set; }
         /// <summary>止められる手がなくても割り込みの確認を受けたい（参加者の操作ガイドが「初心者用」）。</summary>
         public bool AlwaysAskInterrupt { get; set; }
         public required NpcProfile NpcProfile { get; init; }
@@ -89,7 +131,15 @@ public sealed class GameHostSession : IAsyncDisposable
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
-        _npcScheduler = npcScheduler ?? new DispatcherNpcScheduler(dispatcher);
+        if (npcScheduler is null)
+        {
+            _ownedNpcScheduler = new DispatcherNpcScheduler(dispatcher);
+            _npcScheduler = _ownedNpcScheduler;
+        }
+        else
+        {
+            _npcScheduler = npcScheduler;
+        }
         if (options.SeatCount < 2 || options.SeatCount > 8)
         {
             throw new ArgumentOutOfRangeException(nameof(options), "席数は2〜8です。");
@@ -99,6 +149,7 @@ public sealed class GameHostSession : IAsyncDisposable
             Id = i,
             Name = i == 0 ? options.HostPlayerName : (options.NpcNames.TryGetValue(i, out var n) ? n : $"NPC{i}"),
             Kind = i == 0 ? PlayerKind.Human : PlayerKind.Npc,
+            AvatarIcon = i == 0 ? options.HostAvatarIcon : "bot",
             NpcProfile = options.NpcProfiles.TryGetValue(i, out var p) ? p : NpcProfile.Default,
             NpcName = options.NpcNames.TryGetValue(i, out var nn) ? nn : $"NPC{i}",
         }).ToArray();
@@ -119,10 +170,75 @@ public sealed class GameHostSession : IAsyncDisposable
     /// <summary>ゲームが作成された（ディスパッチャ上で呼ばれる。UIはここでエンジンのイベントを購読する）。</summary>
     public event EventHandler<GameEngine>? GameCreated;
 
+    /// <summary>定型リアクションが届いた（ディスパッチャ上で呼ばれる。席番号とリアクションのコード）。ホスト自身の送信も含む。</summary>
+    public event EventHandler<(int SeatId, string Code)>? ReactionReceived;
+
     /// <summary>現在の席の状況。</summary>
     public IReadOnlyList<SeatInfo> Seats => _seats
-        .Select(s => new SeatInfo(s.Id, s.Name, s.Kind, s.Connection is not null && !s.Connection.IsClosed, s.Id == 0))
+        .Select(s => new SeatInfo(
+            s.Id, s.Name, s.Kind, s.Connection is not null && !s.Connection.IsClosed, s.Id == 0, s.AvatarIcon,
+            IsReady: s.Kind != PlayerKind.Remote || s.IsReady,
+            IsLocked: s.IsLocked))
         .ToArray();
+
+    /// <summary>接続中の参加者が全員「準備完了」か（参加者がいなければ true）。</summary>
+    public bool AreAllGuestsReady => _seats.Where(s => s.Kind == PlayerKind.Remote && s.Connection is { IsClosed: false }).All(s => s.IsReady);
+
+    /// <summary>参加 PIN が設定されているか。</summary>
+    public bool HasJoinPin => !string.IsNullOrEmpty(_options.JoinPin);
+
+    /// <summary>
+    /// 参加者を部屋から外す（ディスパッチャ上で実行）。その端末はこの部屋には入り直せない。
+    /// 対戦中なら、その席は NPC が引き継ぐ。
+    /// </summary>
+    public void KickSeat(int seatId)
+    {
+        _dispatcher.Post(() =>
+        {
+            if (seatId <= 0 || seatId >= _seats.Length) return;
+            var seat = _seats[seatId];
+            if (seat.ClientId is { } clientId)
+            {
+                _kickedClientIds.Add(clientId);
+            }
+            var connection = seat.Connection;
+            if (connection is not null && !connection.IsClosed)
+            {
+                connection.Send(new LeaveMessage("ホストにより部屋から外されました"));
+                _ = connection.CloseAsync(); // 席の後始末（NPC への切り替え）は切断の処理で行う
+            }
+            else if (Engine is null || Engine.Phase == GamePhase.GameEnded)
+            {
+                ResetSeatToNpc(seat);
+                NotifyLobby();
+            }
+        });
+    }
+
+    /// <summary>
+    /// 席を NPC 専用にする／参加者に開放する（ディスパッチャ上で実行。ロビーでのみ有効）。
+    /// 参加者が座っている席を NPC 専用にすると、その参加者は外される（入り直しは可能）。
+    /// </summary>
+    public void SetSeatLocked(int seatId, bool locked)
+    {
+        _dispatcher.Post(() =>
+        {
+            if (seatId <= 0 || seatId >= _seats.Length) return;
+            if (Engine is not null && Engine.Phase != GamePhase.GameEnded) return; // 対戦中は席の構成を変えない
+            var seat = _seats[seatId];
+            seat.IsLocked = locked;
+            if (locked && seat.Connection is { IsClosed: false } connection)
+            {
+                connection.Send(new LeaveMessage("ホストがこの席を NPC にしました"));
+                _ = connection.CloseAsync();
+                return; // 切断の処理で NPC 席に戻り、ロビーも更新される
+            }
+            NotifyLobby();
+        });
+    }
+
+    /// <summary>ホスト（座席0）が定型リアクションを送る（ディスパッチャ上で全員へ配る）。</summary>
+    public void SendReaction(string code) => _dispatcher.Post(() => RelayReaction(0, code));
 
     /// <summary>その席の NPC の設定（人が操作している席でも、切断時に引き継ぐ NPC の設定を返す）。</summary>
     public NpcProfile NpcProfileOf(int seatId)
@@ -135,8 +251,12 @@ public sealed class GameHostSession : IAsyncDisposable
     /// 待ち受けと探索応答を開始する。指定ポートが使用中なら空きポートで待ち受け、
     /// 探索用ポートが使えない場合は探索応答なしで続行する。
     /// </summary>
-    public Task StartAsync()
+    public Task StartAsync(bool startTcp = true)
     {
+        if (!startTcp)
+        {
+            return Task.CompletedTask;
+        }
         try
         {
             _server = CreateServer(_options.Port);
@@ -197,36 +317,200 @@ public sealed class GameHostSession : IAsyncDisposable
         });
     }
 
+    /// <summary>対戦途中でホスト（親）がルールを変更し、全ゲストへ反映する。</summary>
+    public void UpdateRules(RuleSettings rules)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+        _dispatcher.Post(() =>
+        {
+            if (Engine is null)
+            {
+                return;
+            }
+            Engine.UpdateRules(rules);
+            Broadcast(_ => new RulesUpdated(Engine.Rules.ToJson()));
+            foreach (var seat in ConnectedSeats())
+            {
+                SendView(seat);
+            }
+        });
+    }
+
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposedFlag, 1) != 0)
+        {
+            return;
+        }
+
+        // 先に新規接続の受付と NPC 遅延スケジュールを止める
+        _ownedNpcScheduler?.Dispose();
         _discovery?.Dispose();
         if (_server is not null)
         {
             await _server.DisposeAsync().ConfigureAwait(false);
         }
-        foreach (var connection in _seats.Select(s => s.Connection).Concat(_pending).Where(c => c is not null).ToList())
+        foreach (var transport in _auxTransports)
         {
-            connection!.Send(new LeaveMessage("ホストが部屋を閉じました"));
+            await transport.DisposeAsync().ConfigureAwait(false);
+        }
+
+        // 共有コレクション（_seats / _pending）と Engine / Npc の解除は _dispatcher 上で直列実行する
+        List<IMessageConnection> connections;
+        var tcs = new TaskCompletionSource<List<IMessageConnection>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            _dispatcher.Post(() =>
+            {
+                try
+                {
+                    if (Engine is not null)
+                    {
+                        Engine.EventOccurred -= OnEngineEvent;
+                    }
+                    Npc?.Dispose();
+                    var list = _seats.Select(s => s.Connection).Concat(_pending).Where(c => c is not null).Cast<IMessageConnection>().Distinct().ToList();
+                    foreach (var seat in _seats)
+                    {
+                        seat.Connection = null;
+                    }
+                    _pending.Clear();
+                    tcs.TrySetResult(list);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+            });
+            var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(2))).ConfigureAwait(false);
+            connections = completed == tcs.Task && tcs.Task.IsCompletedSuccessfully
+                ? tcs.Task.Result
+                : _seats.Select(s => s.Connection).Concat(_pending).Where(c => c is not null).Cast<IMessageConnection>().Distinct().ToList();
+        }
+        catch
+        {
+            connections = _seats.Select(s => s.Connection).Concat(_pending).Where(c => c is not null).Cast<IMessageConnection>().Distinct().ToList();
+        }
+
+        foreach (var connection in connections)
+        {
+            connection.MessageReceived -= OnConnectionMessageReceived;
+            connection.Closed -= OnConnectionClosed;
+            connection.Send(new LeaveMessage("ホストが部屋を閉じました"));
             await connection.CloseAsync().ConfigureAwait(false);
         }
-        Npc?.Dispose();
     }
+
+    /// <summary>現在の部屋情報（探索応答用）。</summary>
+    public RoomInfo CurrentRoomInfo => BuildRoomInfo();
+
+    /// <summary>外部トランスポート（Bluetooth LE 等）を登録する（終了時に自動破棄）。</summary>
+    public void AttachTransport(IAsyncDisposable transport) => _auxTransports.Add(transport);
+
+    /// <summary>接続中の各ゲスト席の確認コード（SAS）一覧を返す（MITM 目視検証用）。</summary>
+    public IReadOnlyList<(int SeatId, string PlayerName, string? ShortAuthCode)> GetGuestAuthCodes()
+    {
+        var list = new List<(int, string, string?)>();
+        foreach (var s in _seats)
+        {
+            if (s.Id != 0 && s.Kind == PlayerKind.Remote && s.Connection is { IsClosed: false } conn)
+            {
+                list.Add((s.Id, s.Name, conn.ShortAuthCode));
+            }
+        }
+        return list;
+    }
+
+    /// <summary>外部トランスポート（Bluetooth LE 等）から受け付けた接続を登録する。</summary>
+    public void AcceptConnection(IMessageConnection connection) => OnConnectionAccepted(connection);
 
     // ------------------------------------------------------------------
     // 接続管理
     // ------------------------------------------------------------------
 
-    private void OnConnectionAccepted(MessageConnection connection)
+    private void OnConnectionAccepted(IMessageConnection connection)
     {
-        connection.MessageReceived += (c, m) => _dispatcher.Post(() => OnMessage(c, m));
-        connection.Closed += (c, _) => _dispatcher.Post(() => OnClosed(c));
-        _dispatcher.Post(() => _pending.Add(connection));
+        if (IsDisposed)
+        {
+            _ = connection.CloseAsync();
+            return;
+        }
+        // ディスパッチャへの Post 前に同期的に未認証接続の上限を検証し、DoS による ECDH 鍵生成の乱発を防ぐ
+        if (Interlocked.Increment(ref _pendingAcceptCount) > MaxPendingConnections)
+        {
+            Interlocked.Decrement(ref _pendingAcceptCount);
+            _ = connection.CloseAsync();
+            return;
+        }
+        connection.MessageReceived += OnConnectionMessageReceived;
+        connection.Closed += OnConnectionClosed;
+        _dispatcher.Post(() =>
+        {
+            Interlocked.Decrement(ref _pendingAcceptCount);
+            if (IsDisposed || _pending.Count >= MaxPendingConnections)
+            {
+                _ = connection.CloseAsync();
+                return;
+            }
+            _pending.Add(connection);
+            // 未認証接続のまま放置する DoS を防ぐため、5秒以内に JoinRequest が来なければ切断する
+            _ = Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ =>
+            {
+                if (IsDisposed) return;
+                _dispatcher.Post(() =>
+                {
+                    if (!IsDisposed && _pending.Remove(connection))
+                    {
+                        _ = connection.CloseAsync();
+                    }
+                });
+            }, TaskScheduler.Default);
+        });
         connection.Start();
     }
 
-    private void OnMessage(MessageConnection connection, NetMessage message)
+    private void OnConnectionMessageReceived(IMessageConnection connection, NetMessage message)
     {
+        if (IsDisposed) return;
+        _dispatcher.Post(() =>
+        {
+            if (!IsDisposed) OnMessage(connection, message);
+        });
+    }
+
+    private void OnConnectionClosed(IMessageConnection connection, Exception? _)
+    {
+        connection.MessageReceived -= OnConnectionMessageReceived;
+        connection.Closed -= OnConnectionClosed;
+        if (IsDisposed) return;
+        _dispatcher.Post(() =>
+        {
+            if (IsDisposed) return;
+            _messageRates.Remove(connection);
+            OnClosed(connection);
+        });
+    }
+
+    private void OnMessage(IMessageConnection connection, NetMessage message)
+    {
+        // 1接続あたりの受信レート制限（1秒間に上限を超える連打は切断）
+        var now = DateTime.UtcNow;
+        if (_messageRates.TryGetValue(connection, out var rate) && (now - rate.WindowStart).TotalSeconds < 1.0)
+        {
+            if (rate.Count + 1 > MaxMessagesPerSecond)
+            {
+                _messageRates.Remove(connection);
+                _ = connection.CloseAsync();
+                return;
+            }
+            _messageRates[connection] = (rate.WindowStart, rate.Count + 1);
+        }
+        else
+        {
+            _messageRates[connection] = (now, 1);
+        }
+
         switch (message)
         {
             case JoinRequest join:
@@ -238,16 +522,93 @@ public sealed class GameHostSession : IAsyncDisposable
             case LeaveMessage:
                 _ = connection.CloseAsync();
                 break;
+            case ReadyRequest ready:
+                HandleReady(connection, ready.IsReady);
+                break;
+            case ReactionRequest reaction:
+                if (_seats.FirstOrDefault(s => ReferenceEquals(s.Connection, connection)) is { } sender)
+                {
+                    RelayReaction(sender.Id, reaction.Code);
+                }
+                break;
         }
     }
 
-    private void HandleJoin(MessageConnection connection, JoinRequest join)
+    private void HandleReady(IMessageConnection connection, bool ready)
+    {
+        var seat = _seats.FirstOrDefault(s => ReferenceEquals(s.Connection, connection));
+        if (seat is null || seat.IsReady == ready) return;
+        seat.IsReady = ready;
+        NotifyLobby();
+    }
+
+    /// <summary>リアクション（定型または自由入力）を確かめて全員へ配る（不正ペイロード・連打は捨てる）。</summary>
+    private void RelayReaction(int seatId, string? code)
+    {
+        if (!DTTS.Services.Presentation.QuickReactions.IsValidPayload(code)) return;
+        // 自由入力の場合はホスト側でもサニタイズし直して長さ上限を強制する
+        string normalized = code!;
+        if (!DTTS.Services.Presentation.QuickReactions.IsKnown(code))
+        {
+            if (!DTTS.Services.Presentation.QuickReactions.TryEncodeCustom(code![1..], out normalized)) return;
+        }
+        var now = DateTime.UtcNow;
+        if (_lastReaction.TryGetValue(seatId, out var last) && now - last < ReactionInterval) return;
+        _lastReaction[seatId] = now;
+        var notice = new NoticeDto("Reaction", seatId, Text: normalized);
+        Broadcast(_ => new GameNotice(notice));
+        ReactionReceived?.Invoke(this, (seatId, normalized));
+    }
+
+    /// <summary>席を空きの NPC 席に戻す（ロビーでの退出・外したとき）。</summary>
+    private static void ResetSeatToNpc(Seat seat)
+    {
+        seat.Kind = PlayerKind.Npc;
+        seat.ClientId = null;
+        seat.ReconnectToken = null;
+        seat.IsReady = false;
+        seat.Name = seat.NpcName;
+        seat.AvatarIcon = "bot";
+    }
+
+    private void HandleJoin(IMessageConnection connection, JoinRequest join)
     {
         _pending.Remove(connection);
+        // すでにいずれかの席へ割り当て済みの接続からの再参加要求（複数席乗っ取り・手札閲覧チート）を拒否する
+        if (_seats.Any(s => ReferenceEquals(s.Connection, connection)))
+        {
+            Reject(connection, "既に参加済みです");
+            return;
+        }
         if (join.ProtocolVersion != NetProtocol.Version)
         {
             Reject(connection, "アプリのバージョンが異なります");
             return;
+        }
+        if (string.IsNullOrWhiteSpace(join.ClientId) || join.ClientId.Length > 64)
+        {
+            Reject(connection, "不正なクライアントIDです");
+            return;
+        }
+        if (_kickedClientIds.Contains(join.ClientId))
+        {
+            Reject(connection, "ホストにより部屋から外されたため、参加できません");
+            return;
+        }
+        string authSource = GetAuthSourceKey(connection);
+        if (IsAuthLocked(authSource))
+        {
+            Reject(connection, "PIN の誤入力が続いたため、しばらく参加を受け付けていません");
+            return;
+        }
+        if (!string.IsNullOrEmpty(_options.JoinPin))
+        {
+            if (!FixedTimeEquals(join.JoinPin, _options.JoinPin))
+            {
+                RecordAuthFailure(authSource);
+                Reject(connection, "参加PINが正しくありません");
+                return;
+            }
         }
 
         bool inGame = Engine is not null && Engine.Phase != GamePhase.GameEnded;
@@ -258,9 +619,17 @@ public sealed class GameHostSession : IAsyncDisposable
             return;
         }
 
-        // 再接続：同じ端末IDの席（切断中）へ戻す
+        // 再接続：同じ端末IDの席（切断中）へ戻す（トークン発行済みの場合は定数時間比較で一致を必須とする）
         var seat = _seats.FirstOrDefault(s => s.Id != 0 && s.ClientId == join.ClientId && (s.Connection is null || s.Connection.IsClosed));
         bool rejoin = seat is not null;
+        if (seat is not null && !string.IsNullOrEmpty(seat.ReconnectToken) &&
+            !FixedTimeEquals(join.ReconnectToken, seat.ReconnectToken))
+        {
+            RecordAuthFailure(authSource);
+            Reject(connection, "再接続トークンが一致しません");
+            return;
+        }
+        ClearAuthFailure(authSource);
         if (seat is null)
         {
             if (inGame)
@@ -268,7 +637,7 @@ public sealed class GameHostSession : IAsyncDisposable
                 Reject(connection, "対戦中のため参加できません");
                 return;
             }
-            seat = _seats.FirstOrDefault(s => s.Id != 0 && s.Kind == PlayerKind.Npc && s.ClientId is null);
+            seat = _seats.FirstOrDefault(s => s.Id != 0 && s.Kind == PlayerKind.Npc && s.ClientId is null && !s.IsLocked);
             if (seat is null)
             {
                 Reject(connection, "満席です");
@@ -278,13 +647,16 @@ public sealed class GameHostSession : IAsyncDisposable
 
         seat.Connection = connection;
         seat.ClientId = join.ClientId;
+        seat.ReconnectToken ??= Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         seat.Kind = PlayerKind.Remote;
+        seat.IsReady = false;
         seat.AlwaysAskInterrupt = join.AlwaysAskInterrupt;
+        seat.AvatarIcon = SanitizeAvatarIcon(join.AvatarIcon) ?? seat.AvatarIcon;
         if (!inGame)
         {
             seat.Name = SanitizeName(join.PlayerName, seat.Id);
         }
-        connection.Send(new JoinAccepted(seat.Id, _options.RoomName, rejoin));
+        connection.Send(new JoinAccepted(seat.Id, _options.RoomName, rejoin, seat.ReconnectToken));
 
         if (inGame)
         {
@@ -296,7 +668,7 @@ public sealed class GameHostSession : IAsyncDisposable
         NotifyLobby();
     }
 
-    private void HandleCommand(MessageConnection connection, CommandRequest request)
+    private void HandleCommand(IMessageConnection connection, CommandRequest request)
     {
         var seat = _seats.FirstOrDefault(s => ReferenceEquals(s.Connection, connection));
         var engine = Engine;
@@ -310,6 +682,11 @@ public sealed class GameHostSession : IAsyncDisposable
         try
         {
             var c = request.Command;
+            if ((c.CardIds is { Length: > 60 }) || (c.Ranks is { Length: > 20 }))
+            {
+                connection.Send(new CommandResponse(request.RequestId, CommandError.IllegalPlay, PlayRejectReason.None));
+                return;
+            }
             var cards = (c.CardIds ?? Array.Empty<int>()).Select(Card.FromId).ToList();
             result = c.Kind switch
             {
@@ -328,7 +705,7 @@ public sealed class GameHostSession : IAsyncDisposable
         connection.Send(new CommandResponse(request.RequestId, result.Error, result.PlayReject));
     }
 
-    private void OnClosed(MessageConnection connection)
+    private void OnClosed(IMessageConnection connection)
     {
         _pending.Remove(connection);
         var seat = _seats.FirstOrDefault(s => ReferenceEquals(s.Connection, connection));
@@ -348,19 +725,20 @@ public sealed class GameHostSession : IAsyncDisposable
         else
         {
             // ロビーでの退出：NPC 席に戻す
-            seat.Kind = PlayerKind.Npc;
-            seat.ClientId = null;
-            seat.Name = seat.NpcName;
+            ResetSeatToNpc(seat);
         }
+        seat.IsReady = false;
         NotifyLobby();
     }
 
     /// <summary>その席に「止められなくても割り込みの確認を出す」かをエンジンへ反映する（人が操作している席だけ）。</summary>
     private void SyncAlwaysAsk(GameEngine engine, Seat seat)
     {
+        // 人が操作している席（ホスト・参加者）には、止め札がなくても必ず確認を出す。
+        // 参加者は旧版（確認の要否を送らない）でも同じ。NPC が引き継いだ席は、止められるときだけ聞く
         bool ask = seat.Id == 0
             ? _options.HostAlwaysAskInterrupt
-            : seat.Kind == PlayerKind.Remote && seat.AlwaysAskInterrupt;
+            : seat.Kind == PlayerKind.Remote;
         if (ask)
         {
             engine.AlwaysAskInterruptPlayerIds.Add(seat.Id);
@@ -371,7 +749,101 @@ public sealed class GameHostSession : IAsyncDisposable
         }
     }
 
-    private static void Reject(MessageConnection connection, string reason)
+    /// <summary>PIN を比べる（文字列の長さも含めて漏れないよう SHA-256 ハッシュ同士を一定時間で比較する）。</summary>
+    private static bool FixedTimeEquals(string? given, string expected)
+    {
+        var a = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(given ?? string.Empty));
+        var b = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(expected));
+        return CryptographicOperations.FixedTimeEquals(a, b);
+    }
+
+    private static string GetAuthSourceKey(IMessageConnection connection)
+        => connection is MessageConnection tcp && tcp.RemoteEndPoint is { } ep
+            ? ep.Address.ToString()
+            : connection.Id;
+
+    private bool IsAuthLocked(string sourceKey)
+    {
+        var now = DateTime.UtcNow;
+        if (_globalAuthLockedUntil != DateTime.MinValue)
+        {
+            if (now < _globalAuthLockedUntil)
+            {
+                return true;
+            }
+            _globalAuthLockedUntil = DateTime.MinValue;
+            _globalAuthFailures = 0;
+        }
+        if (_authFailures.TryGetValue(sourceKey, out var state))
+        {
+            if (now < state.LockedUntil)
+            {
+                return true;
+            }
+            if (state.LockedUntil != DateTime.MinValue)
+            {
+                _authFailures.Remove(sourceKey);
+            }
+        }
+        return false;
+    }
+
+    private void RecordAuthFailure(string sourceKey)
+    {
+        if (!_authFailures.ContainsKey(sourceKey) && _authFailures.Count >= MaxTrackedAuthSources)
+        {
+            var now = DateTime.UtcNow;
+            var expired = _authFailures.Where(kv => kv.Value.LockedUntil != DateTime.MinValue && kv.Value.LockedUntil <= now)
+                .Select(kv => kv.Key).ToList();
+            foreach (var k in expired) _authFailures.Remove(k);
+            // 期限切れ削除後も上限に達している場合は全消去せず、最古の1件のみを追い出して既存のロックアウトを維持する
+            if (_authFailures.Count >= MaxTrackedAuthSources)
+            {
+                string? victimKey = null;
+                DateTime oldestLock = DateTime.MaxValue;
+                foreach (var kv in _authFailures)
+                {
+                    if (kv.Value.LockedUntil == DateTime.MinValue)
+                    {
+                        victimKey = kv.Key;
+                        break;
+                    }
+                    if (kv.Value.LockedUntil < oldestLock)
+                    {
+                        oldestLock = kv.Value.LockedUntil;
+                        victimKey = kv.Key;
+                    }
+                }
+                if (victimKey is not null)
+                {
+                    _authFailures.Remove(victimKey);
+                }
+            }
+        }
+        _authFailures.TryGetValue(sourceKey, out var state);
+        int next = state.Failures + 1;
+        if (next >= AuthFailureLimit)
+        {
+            _authFailures[sourceKey] = (0, DateTime.UtcNow + AuthLockout);
+        }
+        else
+        {
+            _authFailures[sourceKey] = (next, DateTime.MinValue);
+        }
+        if (++_globalAuthFailures >= GlobalAuthFailureLimit)
+        {
+            _globalAuthFailures = 0;
+            _globalAuthLockedUntil = DateTime.UtcNow + AuthLockout;
+        }
+    }
+
+    private void ClearAuthFailure(string sourceKey)
+    {
+        _authFailures.Remove(sourceKey);
+        _globalAuthFailures = 0;
+    }
+
+    private static void Reject(IMessageConnection connection, string reason)
     {
         connection.Send(new JoinRejected(reason));
         _ = connection.CloseAsync();
@@ -421,7 +893,8 @@ public sealed class GameHostSession : IAsyncDisposable
         {
             return;
         }
-        seat.Connection.Send(new ViewUpdate(ClientViewBuilder.Build(Engine, seat.Id, ++_viewSequence)));
+        var avatarMap = _seats.ToDictionary(s => s.Id, s => s.AvatarIcon);
+        seat.Connection.Send(new ViewUpdate(ClientViewBuilder.Build(Engine, seat.Id, ++_viewSequence, avatarMap)));
     }
 
     private void Broadcast(Func<Seat, NetMessage> factory)
@@ -442,9 +915,32 @@ public sealed class GameHostSession : IAsyncDisposable
     private RoomInfo BuildRoomInfo()
     {
         // UDP 応答スレッドから呼ばれるため、読み取りのみ（多少古い値でも問題ない）
-        int open = _seats.Count(s => s.Id != 0 && s.Kind == PlayerKind.Npc && s.ClientId is null);
+        int open = _seats.Count(s => s.Id != 0 && s.Kind == PlayerKind.Npc && s.ClientId is null && !s.IsLocked);
         bool playing = Engine is not null && Engine.Phase != GamePhase.GameEnded;
-        return new RoomInfo(_options.RoomName, _options.HostPlayerName, null, Port, open, playing, NetProtocol.Version);
+        return new RoomInfo(
+            SanitizeText(_options.RoomName, 64, "DTTS の部屋"),
+            SanitizeText(_options.HostPlayerName, 32, "ホスト"),
+            null,
+            Port,
+            open,
+            playing,
+            NetProtocol.Version);
+    }
+
+    private static string? SanitizeAvatarIcon(string? icon)
+    {
+        if (string.IsNullOrWhiteSpace(icon)) return null;
+        var clean = new string(icon.Where(c => !char.IsControl(c)).ToArray()).Trim();
+        if (clean.Length == 0) return null;
+        return clean.Length > 32 ? clean[..32] : clean;
+    }
+
+    private static string SanitizeText(string? raw, int maxLen, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return fallback;
+        var clean = new string(raw.Where(c => !char.IsControl(c)).ToArray()).Trim();
+        if (clean.Length == 0) return fallback;
+        return clean.Length > maxLen ? clean[..maxLen] : clean;
     }
 }
 
@@ -452,9 +948,11 @@ public sealed class GameHostSession : IAsyncDisposable
 /// NPCの思考時間を一回限りの遅延（ワンショットタイマー）で待ってから、ディスパッチャ上で実行するスケジューラー。
 /// 状態を繰り返し確認するポーリングではなく、判断要求1件につきタイマーが1回だけ発火する。
 /// </summary>
-public sealed class DispatcherNpcScheduler : INpcScheduler
+public sealed class DispatcherNpcScheduler : INpcScheduler, IDisposable
 {
     private readonly ISerialDispatcher _dispatcher;
+    private readonly CancellationTokenSource _cts = new();
+    private int _disposed;
 
     /// <summary>スケジューラーを生成する。</summary>
     public DispatcherNpcScheduler(ISerialDispatcher dispatcher)
@@ -465,11 +963,31 @@ public sealed class DispatcherNpcScheduler : INpcScheduler
     /// <inheritdoc />
     public void Schedule(TimeSpan delay, Action action)
     {
+        if (Volatile.Read(ref _disposed) != 0) return;
         if (delay <= TimeSpan.Zero)
         {
-            _dispatcher.Post(action);
+            _dispatcher.Post(() =>
+            {
+                if (Volatile.Read(ref _disposed) == 0) action();
+            });
             return;
         }
-        _ = Task.Delay(delay).ContinueWith(_ => _dispatcher.Post(action), TaskScheduler.Default);
+        var token = _cts.Token;
+        _ = Task.Delay(delay, token).ContinueWith(t =>
+        {
+            if (t.IsCanceled || Volatile.Read(ref _disposed) != 0) return;
+            _dispatcher.Post(() =>
+            {
+                if (Volatile.Read(ref _disposed) == 0) action();
+            });
+        }, TaskScheduler.Default);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        _cts.Cancel();
+        _cts.Dispose();
     }
 }

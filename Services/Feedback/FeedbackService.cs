@@ -73,6 +73,7 @@ public sealed class FeedbackService : IDisposable
     private readonly FeedbackRepository _repository;
     private readonly Func<FeedbackOptions> _optionsProvider;
     private readonly HttpClient _http;
+    private readonly bool _ownsHttpClient;
     private readonly IConnectivityMonitor _connectivity;
     private readonly string? _appVersion;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
@@ -85,16 +86,19 @@ public sealed class FeedbackService : IDisposable
     /// <param name="httpClient">HTTPクライアント（テストではスタブのハンドラを注入）。</param>
     /// <param name="connectivity">接続状態の監視。</param>
     /// <param name="appVersion">アプリのバージョン文字列。</param>
+    /// <param name="ownsHttpClient">Dispose 時に httpClient も破棄するか。</param>
     public FeedbackService(
         FeedbackRepository repository,
         Func<FeedbackOptions> optionsProvider,
         HttpClient httpClient,
         IConnectivityMonitor? connectivity = null,
-        string? appVersion = null)
+        string? appVersion = null,
+        bool ownsHttpClient = false)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _optionsProvider = optionsProvider ?? throw new ArgumentNullException(nameof(optionsProvider));
         _http = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _ownsHttpClient = ownsHttpClient;
         _connectivity = connectivity ?? new AlwaysOnlineMonitor();
         _appVersion = appVersion;
         _connectivity.ConnectivityChanged += OnConnectivityChanged;
@@ -127,10 +131,8 @@ public sealed class FeedbackService : IDisposable
         await _repository.AddAsync(entry, cancellationToken).ConfigureAwait(false);
         EntryAdded?.Invoke(this, entry);
 
-        if (_optionsProvider().AutoSend)
-        {
-            _ = SendInBackgroundAsync();
-        }
+        // UIスレッドで同期設定読み込みが走らないよう、バックグラウンド側で AutoSend を評価する
+        _ = SendInBackgroundIfAutoAsync();
         return entry;
     }
 
@@ -260,13 +262,42 @@ public sealed class FeedbackService : IDisposable
         }
         _disposed = true;
         _connectivity.ConnectivityChanged -= OnConnectivityChanged;
+        if (_ownsHttpClient)
+        {
+            _http.Dispose();
+        }
+        _sendLock.Dispose();
     }
 
     private void OnConnectivityChanged(object? sender, EventArgs e)
     {
-        if (_connectivity.IsOnline && _optionsProvider().AutoSend)
+        if (_disposed) return;
+        try
         {
-            _ = SendInBackgroundAsync();
+            if (_connectivity.IsOnline && _optionsProvider().AutoSend)
+            {
+                _ = SendInBackgroundAsync();
+            }
+        }
+        catch (Exception)
+        {
+            // OS のネットワーク状態通知スレッドで未処理例外を出してアプリを落とさない
+        }
+    }
+
+    private async Task SendInBackgroundIfAutoAsync()
+    {
+        try
+        {
+            await Task.Run(() =>
+            {
+                if (_disposed || !_optionsProvider().AutoSend) return Task.CompletedTask;
+                return SendPendingAsync();
+            }).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // バックグラウンド送信の失敗はアプリを止めない（未送信のまま残り、次の契機で再送）
         }
     }
 

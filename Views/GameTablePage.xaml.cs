@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using DTTS.Common;
 using DTTS.Core.Logic;
 using DTTS.Core.Models;
+using DTTS.Services.Settings;
 using DTTS.ViewModels;
 using DTTS.Views.Controls;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,6 +17,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 using Windows.UI.Core;
 
@@ -49,13 +51,22 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
     private static readonly Windows.UI.Color AuroraViolet = Windows.UI.Color.FromArgb(255, 0x8B, 0x5C, 0xF6);
 
     /// <summary>四辺を走る光（横辺用）：テーマカラー → シアン → バイオレット。</summary>
-    public Brush PrismBrushHorizontal { get; } = CreateGradient(new Windows.Foundation.Point(0, 0.5), new Windows.Foundation.Point(1, 0.5), 255);
+    public LinearGradientBrush PrismBrushHorizontal { get; } = CreateGradient(new Windows.Foundation.Point(0, 0.5), new Windows.Foundation.Point(1, 0.5), 255);
 
     /// <summary>四辺を走る光（縦辺用）。</summary>
-    public Brush PrismBrushVertical { get; } = CreateGradient(new Windows.Foundation.Point(0.5, 0), new Windows.Foundation.Point(0.5, 1), 255);
+    public LinearGradientBrush PrismBrushVertical { get; } = CreateGradient(new Windows.Foundation.Point(0.5, 0), new Windows.Foundation.Point(0.5, 1), 255);
 
     /// <summary>斜めに横切る光の帯（両端は透明）。</summary>
-    public Brush AuroraBrush { get; } = CreateAuroraBrush();
+    public LinearGradientBrush AuroraBrush { get; } = CreateAuroraBrush();
+
+    private void UpdateAccentSweepBrushes()
+    {
+        var accent = AccentColor();
+        PrismBrushHorizontal.GradientStops[0].Color = WithAlpha(accent, 255);
+        PrismBrushVertical.GradientStops[0].Color = WithAlpha(accent, 255);
+        AuroraBrush.GradientStops[3].Color = WithAlpha(accent, 70);
+        AuroraBrush.GradientStops[4].Color = WithAlpha(accent, 0);
+    }
 
     private static Windows.UI.Color AccentColor()
         => Application.Current.Resources.TryGetValue("AppAccentBrush", out var b) && b is SolidColorBrush scb
@@ -130,6 +141,65 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         }
     }
 
+    private void OnToggleHistoryClicked(object sender, RoutedEventArgs e)
+    {
+        bool show = PlayHistoryPanel.Visibility != Visibility.Visible;
+        PlayHistoryPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (show)
+        {
+            CompositionAnimationHelper.AnimatePopIn(PlayHistoryPanel, 160);
+        }
+    }
+
+    private void OnReactionFlyoutOpening(object? sender, object e)
+    {
+        ReactionList.ItemsSource = ViewModel.QuickReactionOptions;
+    }
+
+    private void OnQuickReactionClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string code)
+        {
+            ViewModel.SendReactionCommand.Execute(code);
+            ReactionFlyout.Hide();
+            if (!_isDetached) Focus(FocusState.Programmatic);
+        }
+    }
+
+    private void OnSendCustomReactionClicked(object sender, RoutedEventArgs e)
+    {
+        SendCustomReactionAndClose();
+    }
+
+    private void OnCustomReactionKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Enter)
+        {
+            SendCustomReactionAndClose();
+            e.Handled = true;
+        }
+    }
+
+    private void SendCustomReactionAndClose()
+    {
+        ViewModel.SendCustomReactionCommand.Execute(null);
+        ReactionFlyout.Hide();
+        if (!_isDetached) Focus(FocusState.Programmatic);
+    }
+
+    private void OnFieldDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        FieldContainerTransform.X = 0;
+        FieldContainerTransform.Y = 0;
+    }
+
+    public static string ResultPositionLabel(int position) => $"{position}位";
+
+    public static Brush ResultRowBackground(bool isMe)
+        => isMe
+            ? new SolidColorBrush(Windows.UI.Color.FromArgb(44, 62, 142, 247))
+            : new SolidColorBrush(Windows.UI.Color.FromArgb(18, 255, 255, 255));
+
     public GameTablePage()
     {
         ViewModel = App.Services.GetRequiredService<GameTableViewModel>();
@@ -152,6 +222,54 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         ViewModel.FinishCelebrationTriggered += OnFinishCelebrationTriggered;
         ViewModel.ReactionTriggered += OnReactionTriggered;
         ViewModel.CardsFlightTriggered += OnCardsFlightTriggered;
+        ThemeManager.ThemeChanged += OnThemeChanged;
+        SizeChanged += OnPageSizeChanged;
+    }
+
+    private bool? _lastCompactLayout;
+    private bool _isWindowMinimized;
+
+    private void OnPageSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_isDetached) return;
+        bool compact = OpponentRow.Visibility == Visibility.Visible;
+        if (_lastCompactLayout != compact)
+        {
+            _lastCompactLayout = compact;
+            UpdateAllPanels();
+        }
+    }
+
+    /// <summary>ウィンドウ最小化時に手番脈動の無限ループアニメーションを停止し、復帰時に再開する。</summary>
+    internal void SetWindowMinimized(bool minimized)
+    {
+        if (_isWindowMinimized == minimized || _isDetached) return;
+        _isWindowMinimized = minimized;
+        if (minimized)
+        {
+            Player0Panel.PauseTurnGlow();
+            LeftSeatPanel.PauseTurnGlow();
+            TopSeatPanel.PauseTurnGlow();
+            RightSeatPanel.PauseTurnGlow();
+            LeftSeatSlimPanel.PauseTurnGlow();
+            TopSeatSlimPanel.PauseTurnGlow();
+            RightSeatSlimPanel.PauseTurnGlow();
+        }
+        else
+        {
+            UpdateAllPanels();
+        }
+    }
+
+    private void OnThemeChanged(object? sender, ThemeColor color)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_isDetached)
+            {
+                UpdateAccentSweepBrushes();
+            }
+        });
     }
 
     // ------------------------------------------------------------------
@@ -341,11 +459,17 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
             UpdateAllPanels(); // 席替え・初回の座席順の確定：左・上・右に出す人を並べ直す
         }
 
+        if (e.PropertyName is nameof(GameTableViewModel.IsRevolution) or nameof(GameTableViewModel.RevolutionBgColor))
+        {
+            UpdateTableBackground();
+        }
+
         if (e.PropertyName == nameof(GameTableViewModel.IsRoundResultOpen) && ViewModel.IsRoundResultOpen)
         {
             HideCutIn();
             HideBomberVanish();
             FlightLayer.Children.Clear(); // 飛んでいる途中のカードの写しは、結果の上に残さない
+            CompositionAnimationHelper.AnimatePopIn(RoundResultCard);
             // 最後のあがりの演出は消さず、結果の上（画面上部）へ移して最後まで見せる
             if (FinishOverlay.Visibility == Visibility.Visible)
             {
@@ -539,7 +663,8 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
 
     private void OnFieldFlushedTriggered(object? sender, EventArgs e)
     {
-        CompositionAnimationHelper.AnimateFlushOut(FieldCardsContainer);
+        // マット枠（FieldCardsContainer）自体は中央に固定し、中のカード一覧だけを流す
+        CompositionAnimationHelper.AnimateFlushOut(FieldCardsItemsControl);
     }
 
     private void OnHandDealtTriggered(object? sender, EventArgs e)
@@ -651,9 +776,12 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         var safety = DispatcherQueue.CreateTimer();
         safety.Interval = TimeSpan.FromMilliseconds(delayMs + 1800);
         safety.IsRepeating = false;
+        _flightTimers.Add(safety);
         safety.Tick += (t, _) =>
         {
             t.Stop();
+            _flightTimers.Remove(t);
+            if (_isDetached) return;
             if (FlightLayer.Children.Remove(ghost) && real is not null)
             {
                 Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(real).Opacity = 1f;
@@ -665,7 +793,7 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         {
             DispatcherQueue.TryEnqueue(() =>
             {
-                if (!FlightLayer.Children.Contains(ghost)) return; // 後始末済み
+                if (_isDetached || !FlightLayer.Children.Contains(ghost)) return; // 後始末済み
                 bool stillOnField = real is not null && real.XamlRoot is not null && ViewModel.FieldCards.Contains(card);
                 if (stillOnField)
                 {
@@ -677,10 +805,16 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
                 var hold = DispatcherQueue.CreateTimer();
                 hold.Interval = TimeSpan.FromMilliseconds(260);
                 hold.IsRepeating = false;
+                _flightTimers.Add(hold);
                 hold.Tick += (t, _) =>
                 {
                     t.Stop();
-                    CompositionAnimationHelper.AnimateFlushOut(ghost, () => DispatcherQueue.TryEnqueue(() => FlightLayer.Children.Remove(ghost)));
+                    _flightTimers.Remove(t);
+                    if (_isDetached) return;
+                    CompositionAnimationHelper.AnimateFlushOut(ghost, () => DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (!_isDetached) FlightLayer.Children.Remove(ghost);
+                    }));
                 };
                 hold.Start();
             });
@@ -726,6 +860,7 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         bool compact = OpponentRow.Visibility == Visibility.Visible;
         PlayerPanelControl? panel = ViewModel.SlotOfPlayer(e.PlayerId) switch
         {
+            SeatLayout.Bottom => Player0Panel, // 自分が送った定型リアクション
             SeatLayout.Left => compact ? LeftSeatSlimPanel : LeftSeatPanel,
             SeatLayout.Top => compact ? TopSeatSlimPanel : TopSeatPanel,
             SeatLayout.Right => compact ? RightSeatSlimPanel : RightSeatPanel,
@@ -751,6 +886,7 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
     private NetworkGameParams? _navParams;
     private bool _isLeaveDialogOpen;
     private bool _isDetached;
+    private readonly List<Microsoft.UI.Dispatching.DispatcherQueueTimer> _flightTimers = new();
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
@@ -764,6 +900,13 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         // どの経路で画面を離れても（タイトル・戦績画面）対戦の後始末と購読解除を行う
         DetachFromViewModel();
         _ = ViewModel.ShutdownAsync();
+    }
+
+    /// <summary>ウィンドウ終了時に購読解除と戦績保存・ネットワーク切断の完了を待つ。</summary>
+    internal Task PrepareForWindowCloseAsync()
+    {
+        DetachFromViewModel();
+        return ViewModel.ShutdownAsync();
     }
 
     /// <summary>ViewModel・プレイヤー・場札コレクションへの購読をすべて解除する。</summary>
@@ -786,9 +929,23 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
         ViewModel.FinishCelebrationTriggered -= OnFinishCelebrationTriggered;
         ViewModel.ReactionTriggered -= OnReactionTriggered;
         ViewModel.CardsFlightTriggered -= OnCardsFlightTriggered;
+        ThemeManager.ThemeChanged -= OnThemeChanged;
+        SizeChanged -= OnPageSizeChanged;
+        Player0Panel.PauseTurnGlow();
+        LeftSeatPanel.PauseTurnGlow();
+        TopSeatPanel.PauseTurnGlow();
+        RightSeatPanel.PauseTurnGlow();
+        LeftSeatSlimPanel.PauseTurnGlow();
+        TopSeatSlimPanel.PauseTurnGlow();
+        RightSeatSlimPanel.PauseTurnGlow();
         _cutInTimer?.Stop();
         _bomberTimer?.Stop();
         _finishTimer?.Stop();
+        foreach (var timer in _flightTimers)
+        {
+            timer.Stop();
+        }
+        _flightTimers.Clear();
     }
 
     // ------------------------------------------------------------------
@@ -838,33 +995,227 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
 
     private async void OnPageLoaded(object sender, RoutedEventArgs e)
     {
-        await ViewModel.InitializeAsync(_navParams);
-        UpdateAllPanels();
-        UpdateHandSpacing();
-        Focus(FocusState.Programmatic);
+        try
+        {
+            await ViewModel.InitializeAsync(_navParams);
+            if (_isDetached) return;
+            UpdateAllPanels();
+            UpdateTableBackground();
+            UpdateHandSpacing();
+            Focus(FocusState.Programmatic);
+        }
+        catch (Exception ex)
+        {
+            App.WriteCrashLog("GameTablePage.OnPageLoaded", ex);
+            ViewModel.StatusMessage = $"初期化エラー: {ex.Message}";
+        }
     }
+
+    private bool _panelUpdateQueued;
 
     private void OnPlayerPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        UpdateAllPanels();
+        if (_panelUpdateQueued) return;
+        _panelUpdateQueued = true;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            _panelUpdateQueued = false;
+            UpdateAllPanels();
+        });
     }
 
     private void UpdateAllPanels()
     {
-        Show(ViewModel.Player0, Player0Panel, null);
-        // 座席順で自分の次の人から 左 → 上 → 右（画面上の時計回り）。席替えのたびに並びが変わる
-        Show(ViewModel.SeatSlotPlayer(SeatLayout.Left), LeftSeatPanel, LeftSeatSlimPanel);
-        Show(ViewModel.SeatSlotPlayer(SeatLayout.Top), TopSeatPanel, TopSeatSlimPanel);
-        Show(ViewModel.SeatSlotPlayer(SeatLayout.Right), RightSeatPanel, RightSeatSlimPanel);
+        bool compact = OpponentRow.Visibility == Visibility.Visible;
+        _lastCompactLayout = compact;
 
-        static void Show(PlayerViewModel p, PlayerPanelControl wide, PlayerPanelControl? slim)
+        ShowOne(ViewModel.Player0, Player0Panel, visible: true);
+        // 座席順で自分の次の人から 左 → 上 → 右（画面上の時計回り）。表示中のパネルだけ更新し、非表示側の無限アニメーションを止める
+        ShowPair(ViewModel.SeatSlotPlayer(SeatLayout.Left), LeftSeatPanel, LeftSeatSlimPanel, compact);
+        ShowPair(ViewModel.SeatSlotPlayer(SeatLayout.Top), TopSeatPanel, TopSeatSlimPanel, compact);
+        ShowPair(ViewModel.SeatSlotPlayer(SeatLayout.Right), RightSeatPanel, RightSeatSlimPanel, compact);
+
+        void ShowPair(PlayerViewModel p, PlayerPanelControl wide, PlayerPanelControl slim, bool isCompact)
         {
-            wide.SetPlayerInfo(p.Name, p.HandCount, p.Rank, p.TotalScore, p.IsTurn, p.IsThinking, p.IsPassed, p.FinishPlace);
-            slim?.SetPlayerInfo(p.Name, p.HandCount, p.Rank, p.TotalScore, p.IsTurn, p.IsThinking, p.IsPassed, p.FinishPlace);
-            wide.SetAvatar(p.AvatarGlyph, p.AvatarLabel);
-            slim?.SetAvatar(p.AvatarGlyph, p.AvatarLabel);
+            ShowOne(p, wide, visible: !isCompact);
+            ShowOne(p, slim, visible: isCompact);
+        }
+
+        void ShowOne(PlayerViewModel p, PlayerPanelControl panel, bool visible)
+        {
+            if (!visible)
+            {
+                panel.PauseTurnGlow();
+                return;
+            }
+            panel.SetPlayerInfo(p.Name, p.HandCount, p.Rank, p.TotalScore, p.IsTurn, p.IsThinking, p.IsPassed, p.FinishPlace);
+            panel.SetAvatar(p.AvatarGlyph, p.AvatarLabel, p.AvatarImagePath, p.AvatarAccentHex);
+            if (_isWindowMinimized)
+            {
+                panel.PauseTurnGlow();
+            }
         }
     }
+
+    private void UpdateTableBackground()
+    {
+        var brush = new RadialGradientBrush
+        {
+            Center = new Windows.Foundation.Point(0.5, 0.46),
+            GradientOrigin = new Windows.Foundation.Point(0.5, 0.42),
+            RadiusX = 0.72,
+            RadiusY = 0.78,
+        };
+
+        if (ViewModel.IsRevolution && ViewModel.RevolutionBgColor != RevolutionBgColor.None)
+        {
+            var info = RevolutionBgColorInfo.Get(ViewModel.RevolutionBgColor);
+            brush.GradientStops.Add(new GradientStop { Color = ParseHexColor(info.CenterHex), Offset = 0 });
+            brush.GradientStops.Add(new GradientStop { Color = ParseHexColor(info.MidHex), Offset = 0.38 });
+            brush.GradientStops.Add(new GradientStop { Color = ParseHexColor(info.OuterHex), Offset = 0.78 });
+            brush.GradientStops.Add(new GradientStop { Color = ParseHexColor(info.EdgeHex), Offset = 1 });
+        }
+        else
+        {
+            brush.GradientStops.Add(new GradientStop { Color = ParseHexColor("#FF223047"), Offset = 0 });
+            brush.GradientStops.Add(new GradientStop { Color = ParseHexColor("#FF1D2636"), Offset = 0.38 });
+            brush.GradientStops.Add(new GradientStop { Color = ParseHexColor("#FF151B26"), Offset = 0.78 });
+            brush.GradientStops.Add(new GradientStop { Color = ParseHexColor("#FF0E121A"), Offset = 1 });
+        }
+
+        // WinUI 3 では GradientStop.Color の書き換えだけでは再描画されないことがあるためブラシごと差し替える
+        TableFeltBorder.Background = brush;
+    }
+
+    public static Brush TurnHighlightBorder(bool isMyTurn)
+        => isMyTurn
+            ? (Brush)Application.Current.Resources["AppAccentBrush"]
+            : new SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+
+    public static Brush TurnHighlightBg(bool isMyTurn)
+        => isMyTurn
+            ? new SolidColorBrush(Windows.UI.Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF))
+            : new SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+
+    private CardViewModel? _draggingCard;
+
+    private void OnHandCardDragStarting(UIElement sender, DragStartingEventArgs args)
+    {
+        if (ViewModel.IsSpectating)
+        {
+            args.Cancel = true;
+            return;
+        }
+        if (sender is FrameworkElement { DataContext: CardViewModel vm })
+        {
+            _draggingCard = vm;
+            args.Data.RequestedOperation = DataPackageOperation.Move;
+            args.Data.SetText(vm.Card.Id.ToString());
+        }
+    }
+
+    private void OnHandCardDragOver(object sender, DragEventArgs e)
+    {
+        if (_draggingCard is not null && !ViewModel.IsSpectating)
+        {
+            e.AcceptedOperation = DataPackageOperation.Move;
+        }
+    }
+
+    private void OnHandCardDrop(object sender, DragEventArgs e)
+    {
+        if (_draggingCard is null || ViewModel.IsSpectating) return;
+        if (sender is FrameworkElement { DataContext: CardViewModel target })
+        {
+            int from = ViewModel.HumanHand.IndexOf(_draggingCard);
+            int to = ViewModel.HumanHand.IndexOf(target);
+            if (from >= 0 && to >= 0 && from != to)
+            {
+                ViewModel.MoveHandCard(from, to);
+            }
+        }
+        _draggingCard = null;
+    }
+
+    private void OnFieldDragOver(object sender, DragEventArgs e)
+    {
+        if (_draggingCard is not null && !ViewModel.IsSpectating)
+        {
+            e.AcceptedOperation = DataPackageOperation.Move;
+            e.DragUIOverride.Caption = "場に出す";
+        }
+    }
+
+    private void OnFieldDrop(object sender, DragEventArgs e)
+    {
+        if (_draggingCard is null || ViewModel.IsSpectating) return;
+        var dragged = _draggingCard;
+        _draggingCard = null;
+
+        // 複数選択中かつその中に含まれるなら選択カード全部、それ以外はドラッグした1枚を出す
+        var selected = ViewModel.HumanHand.Where(c => c.IsSelected).Select(c => c.Card).ToList();
+        var toPlay = (dragged.IsSelected && selected.Count > 0) ? selected : new List<Card> { dragged.Card };
+        ViewModel.PlayCardsByDrag(toPlay);
+    }
+
+    private void OnFieldContainerManipulationDelta(object sender, ManipulationDeltaRoutedEventArgs e)
+    {
+        // トランプを置く場札エリアを中央付近で少し移動できるようにする
+        FieldContainerTransform.X = Math.Clamp(FieldContainerTransform.X + e.Delta.Translation.X, -160, 160);
+        FieldContainerTransform.Y = Math.Clamp(FieldContainerTransform.Y + e.Delta.Translation.Y, -60, 60);
+    }
+
+    private static Windows.UI.Color ParseHexColor(string hex)
+    {
+        byte a = 255;
+        int offset = hex.Length == 9 ? 3 : 1;
+        if (hex.Length == 9)
+        {
+            a = Convert.ToByte(hex.Substring(1, 2), 16);
+        }
+        byte r = Convert.ToByte(hex.Substring(offset, 2), 16);
+        byte g = Convert.ToByte(hex.Substring(offset + 2, 2), 16);
+        byte b = Convert.ToByte(hex.Substring(offset + 4, 2), 16);
+        return Windows.UI.Color.FromArgb(a, r, g, b);
+    }
+
+    private void OnSpectateTargetClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: int playerId })
+        {
+            ViewModel.SelectSpectatePlayerCommand.Execute(playerId);
+        }
+    }
+
+    public static Brush SpectateButtonBg(bool isSelected)
+    {
+        if (isSelected)
+        {
+            return (Brush)Application.Current.Resources["AppAccentBrush"];
+        }
+        return new SolidColorBrush(Windows.UI.Color.FromArgb(0x28, 0x1A, 0x20, 0x2C));
+    }
+
+    public static Brush SpectateButtonFg(bool isSelected)
+    {
+        if (isSelected)
+        {
+            return (Brush)Application.Current.Resources["AppOnAccentBrush"];
+        }
+        return (Brush)Application.Current.Resources["AppTextSecondaryBrush"];
+    }
+
+    public static Brush SpectateButtonBorder(bool isSelected)
+    {
+        if (isSelected)
+        {
+            return (Brush)Application.Current.Resources["AppAccentBrush"];
+        }
+        return new SolidColorBrush(Windows.UI.Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF));
+    }
+
+    public static string SpectateButtonText(string name, int handCount)
+        => $"{name} ({handCount}枚)";
 
     private void OnCardClicked(object? sender, Card card)
     {
@@ -902,10 +1253,18 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
 
     private void OnCardDoubleClicked(object? sender, Card card)
     {
-        if (sender is CardControl ctrl && ctrl.DataContext is CardViewModel vm)
+        if (ViewModel.IsCardSelectionMode || !ViewModel.IsMyTurn) return;
+        if (sender is CardControl ctrl && ctrl.DataContext is CardViewModel vm && vm.CanPlay)
         {
-            vm.IsSelected = true;
-            ViewModel.PlaySelectedCardsCommand.Execute(null);
+            // ViewModel の選択切り替えコマンド経由で選択し、CanPlay を確実に最新化してから出す
+            if (!vm.IsSelected)
+            {
+                ViewModel.ToggleCardSelectionCommand.Execute(vm);
+            }
+            if (ViewModel.CanPlay)
+            {
+                ViewModel.PlaySelectedCardsCommand.Execute(null);
+            }
         }
     }
 
@@ -1060,6 +1419,11 @@ public sealed partial class GameTablePage : Page, IBackRequestHandler, IPageKeyH
                     MoveKeyboardCursor(+1);
                     e.Handled = true;
                 }
+                break;
+
+            case VirtualKey.C:
+                ViewModel.ClearSelectionCommand.Execute(null);
+                e.Handled = true;
                 break;
         }
     }

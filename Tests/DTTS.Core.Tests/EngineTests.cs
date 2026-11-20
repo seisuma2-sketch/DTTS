@@ -133,7 +133,9 @@ internal static class EngineTests
                 Check(e.SubmitCardSelection(l, e.GetPlayer(l).Hand.Take(2).ToList()).IsAccepted, "return cards");
                 Check(e.PendingDecision!.PlayerId == (l + 1) % 4 && transfers.Count == 3, "fugo returns next");
                 e.SubmitCardSelection((l + 1) % 4, e.GetPlayer((l + 1) % 4).Hand.Take(1).ToList());
-                Check(e.Phase == GamePhase.Playing && e.PendingDecision!.PlayerId == poor, "play after exchange");
+                var d3Transfer = transfers.LastOrDefault(t => t.Cards.Contains(Card.Of(Suit.Diamond, Rank.Three)));
+                int expectedLeader = d3Transfer is not null ? d3Transfer.ToPlayerId : poor;
+                Check(e.Phase == GamePhase.Playing && e.PendingDecision!.PlayerId == expectedLeader, "play after exchange");
                 Check(e.Players.Sum(p => p.HandCount) == 53, "exchange conserves");
             }
         }
@@ -164,26 +166,6 @@ internal static class EngineTests
             Check(e.Field.CurrentPlay!.Rank == Rank.Four && e.Field.CurrentPlay.Count == 2 && !e.Field.IsEightCutPending, "4stop: the 4-pair stays on the field");
             Check(e.PendingDecision!.Kind == DecisionKind.PlayOrPass && e.PendingDecision.PlayerId == c, "4stop: turn continues after the stopper");
             Check(e.GetLegalPlays(c).Count == 0, "4stop: the next player now needs a stronger pair");
-        }
-        {
-            // 8と同じ枚数の設定：4を1枚で止められる
-            var r = RuleSettings.CreateDefault();
-            r.Flow.FourStopEnabled = true;
-            r.Flow.FourStopCount = FourStopCountRule.SameAsEight;
-            var e = new GameEngine(r, Players(4), new SystemRandomSource(3));
-            e.StartGame();
-            int l = e.PendingDecision!.PlayerId;
-            int a = (l + 1) % 4, b = (l + 2) % 4;
-            e.GetPlayer(l).SetHand(C("D3 H8 S9"));
-            e.GetPlayer(a).SetHand(C("S4 C5"));
-            e.GetPlayer(b).SetHand(C("H6 C6"));
-            e.GetPlayer((l + 3) % 4).SetHand(C("D7 CK"));
-            Play(e, l, "D3", "4stop-same");
-            Pass(e, a, "4stop-same"); Pass(e, b, "4stop-same"); Pass(e, (l + 3) % 4, "4stop-same");
-            Play(e, l, "H8", "4stop-same");
-            Check(e.PendingDecision!.Kind == DecisionKind.FourStopChance && e.PendingDecision.PlayerId == a, "4stop-same: one 4 stops one 8");
-            Play(e, a, "S4", "4stop-same");
-            Check(e.Field.CurrentPlay!.Rank == Rank.Four && !e.Field.IsEightCutPending && e.PendingDecision!.PlayerId == b, "4stop-same: play continues");
         }
         {
             // 8が2枚なら4は4枚。4を4枚出すと、革命の条件も満たすので革命も起きる
@@ -447,7 +429,7 @@ internal static class EngineTests
                 "strong 11back reset at the next round");
         }
 
-        // ---- 11バック「次の手番だけ」：Jの次の人がパスしたら、その次の人からは通常の強さ ----
+        // ---- 11バック「次の手番だけ」：Jの次の人がパスしても継続し、誰かが出したら解除 ----
         {
             var r = RuleSettings.CreateDefault();
             r.Lock.SuitLockEnabled = false;
@@ -465,12 +447,14 @@ internal static class EngineTests
                 "one-turn 11back on");
             Check(e.SubmitPlay(b, C("DK")).Error == CommandError.IllegalPlay, "one-turn 11back: b plays under the reversal (K rejected)");
             Pass(e, b, "1turn-pass");
-            Check(!e.Field.IsElevenBack && !e.Field.IsElevenBackOneTurn && !e.Field.IsStrengthReversed && !e.Field.IsEmpty,
-                "one-turn 11back ends when b passes (the J stays on the field)");
-            Check(expired.SequenceEqual(new[] { b }), "one-turn 11back: expiry event for b");
+            Check(e.Field.IsElevenBack && e.Field.IsElevenBackOneTurn && e.Field.IsStrengthReversed,
+                "one-turn 11back stays on when b passes");
             Check(e.PendingDecision!.PlayerId == c, "one-turn 11back: c's turn");
-            Check(e.SubmitPlay(c, C("D4")).Error == CommandError.IllegalPlay, "one-turn 11back: c is back to normal strength (4 rejected)");
-            Play(e, c, "CK", "1turn-pass");
+            Check(e.SubmitPlay(c, C("CK")).Error == CommandError.IllegalPlay, "one-turn 11back: c is still under reversal (K rejected)");
+            Play(e, c, "D4", "1turn-pass");
+            Check(!e.Field.IsElevenBack && !e.Field.IsElevenBackOneTurn && !e.Field.IsStrengthReversed,
+                "one-turn 11back ends after c plays");
+            Check(expired.SequenceEqual(new[] { c }), "one-turn 11back: expiry event for c");
         }
         // ---- 11バック「次の手番だけ」：Jの次の人が出したら解除（場はそのまま続く）----
         {
@@ -1001,6 +985,186 @@ internal static class EngineTests
             Play(e, a, "S2", "foul-place");
             Check(finishes.Count == 1 && finishes[0].Kind == FinishKind.Foul && finishes[0].Place == 4, "foul finish takes the last place");
         }
+
+        // ---- v1.1.2 / v1.1.3 追加ルールの実動作検証 ----
+        {
+            // 1. UpdateRules した設定が StartNextRound 後も戻らない
+            var r = RuleSettings.CreateDefault();
+            r.Progress.RoundCount = 3;
+            var e = new GameEngine(r, Players(4), new SystemRandomSource(7));
+            e.StartGame();
+            var updated = r.Clone();
+            updated.ElevenBack.Duration = ElevenBackDuration.NextTurnOnly;
+            updated.SkipReverse.ThirteenSkipEnabled = true;
+            updated.ForbiddenFinish.ForbidSevenPass = true;
+            e.UpdateRules(updated);
+            // ラウンド1を最後まで流して次ラウンドへ
+            for (int i = 0; i < 4; i++) e.GetPlayer(i).SetHand(C($"S{3 + i}"));
+            int cur = e.PendingDecision!.PlayerId;
+            Play(e, cur, e.GetPlayer(cur).Hand[0].ToString(), "upd-1");
+            e.GetPlayer(e.PendingDecision!.PlayerId).SetHand(C("H4"));
+            for (int step = 0; step < 30 && e.Phase == GamePhase.Playing; step++)
+            {
+                var d = e.PendingDecision!;
+                var legal = e.GetLegalPlays(d.PlayerId);
+                if (legal.Count > 0) e.SubmitPlay(d.PlayerId, legal[0].Play!.Cards);
+                else e.SubmitPass(d.PlayerId);
+            }
+            if (e.Phase == GamePhase.RoundEnded)
+            {
+                e.StartNextRound();
+                Check(e.Rules.ElevenBack.Duration == ElevenBackDuration.NextTurnOnly
+                    && e.Rules.SkipReverse.ThirteenSkipEnabled
+                    && e.Rules.ForbiddenFinish.ForbidSevenPass,
+                    "UpdateRules persists across StartNextRound");
+            }
+        }
+        {
+            // 2. ♥13（13スキップ）で他がパス済み＋残り全員がスキップされたら場が流れて親になる
+            var r = RuleSettings.CreateDefault();
+            r.SkipReverse.ThirteenSkipEnabled = true;
+            r.Progress.PassLocksUntilFlush = true;
+            r.Lock.SuitLockEnabled = false;
+            var (e, l, a, b, c) = Start(r);
+            e.GetPlayer(l).SetHand(C("D3 S4"));
+            e.GetPlayer(a).SetHand(C("H5 S6"));
+            e.GetPlayer(b).SetHand(C("C5 H6"));
+            e.GetPlayer(c).SetHand(C("HK D4"));
+            Play(e, l, "D3", "kskip-flush");
+            Pass(e, a, "kskip-flush");
+            Pass(e, b, "kskip-flush");
+            Play(e, c, "HK", "kskip-flush");
+            Check(e.Field.IsEmpty && e.PendingDecision!.PlayerId == c, "13skip: skipping all remaining players flushes field to leader");
+        }
+        {
+            // 3. 7渡しの枚数選択 OFF（強制）と 7渡し禁止あがり
+            var r = RuleSettings.CreateDefault();
+            r.Special.SevenPassEnabled = true;
+            r.Special.SevenPassAllowZero = false;
+            r.ForbiddenFinish.ForbidSevenPass = true;
+            var (e, l, a, b, c) = Start(r);
+            e.GetPlayer(l).SetHand(C("D3"));
+            e.GetPlayer(a).SetHand(C("S7 D4"));
+            e.GetPlayer(b).SetHand(C("H8 H9"));
+            e.GetPlayer(c).SetHand(C("C8 C9"));
+            var finishes7 = new List<PlayerFinishedEvent>();
+            e.EventOccurred += (_, ev) => { if (ev is PlayerFinishedEvent pf) finishes7.Add(pf); };
+            Play(e, l, "D3", "7pass-strict");
+            Play(e, a, "S7", "7pass-strict");
+            Check(e.SubmitCardSelection(a, Array.Empty<Card>()).Error == CommandError.InvalidSelection, "7pass AllowZero=false rejects 0 cards");
+            e.SubmitCardSelection(a, C("D4"));
+            Check(e.GetPlayer(a).IsFinished && finishes7.Any(f => f.PlayerId == a && f.Kind == FinishKind.Foul), "7pass forbid finish sets foul");
+        }
+        {
+            // 4. Qボンバーで相手最後の1枚を当てたときの Gentle vs Strict
+            var r = RuleSettings.CreateDefault();
+            r.Special.TwelveBomberEnabled = true;
+            r.ForbiddenFinish.TwelveBomberFinishRule = GentleStrictRule.Strict;
+            var (e, l, a, b, c) = Start(r);
+            e.GetPlayer(l).SetHand(C("D3 S9"));
+            e.GetPlayer(a).SetHand(C("SQ H9"));
+            e.GetPlayer(b).SetHand(C("C4"));
+            e.GetPlayer(c).SetHand(C("D5 C6"));
+            var finishesB = new List<PlayerFinishedEvent>();
+            e.EventOccurred += (_, ev) => { if (ev is PlayerFinishedEvent pf) finishesB.Add(pf); };
+            Play(e, l, "D3", "bomber-strict");
+            Play(e, a, "SQ", "bomber-strict");
+            e.SubmitRankDeclaration(a, new[] { Rank.Four });
+            Check(e.GetPlayer(b).IsFinished && finishesB.Any(f => f.PlayerId == b && f.Kind == FinishKind.Foul), "12bomber Strict: victim hitting last card becomes foul");
+        }
+        {
+            // 5. 複数枚リバース1回扱い & 4止め場流し
+            var r = RuleSettings.CreateDefault();
+            r.SkipReverse.NineReverseEnabled = true;
+            r.SkipReverse.ReverseMultipleCountsAsOne = true;
+            r.Flow.FourStopEnabled = true;
+            r.Flow.FourStopFlushesField = true;
+            var (e, l, a, b, c) = Start(r);
+            e.GetPlayer(l).SetHand(C("D3 C3 S8"));
+            e.GetPlayer(a).SetHand(C("H9 D9 S5 D8"));
+            e.GetPlayer(b).SetHand(C("S4 H4 C6"));
+            e.GetPlayer(c).SetHand(C("D6 C7"));
+            Play(e, l, "D3 C3", "rev-multi");
+            Play(e, a, "H9 D9", "rev-multi");
+            Check(e.Field.Direction == PlayDirection.CounterClockwise, "reverse multiple counts as 1");
+            Pass(e, l, "4stop-flush"); Pass(e, c, "4stop-flush"); Pass(e, b, "4stop-flush");
+            Play(e, a, "D8", "4stop-flush");
+            Play(e, b, "S4 H4", "4stop-flush");
+            Check(e.Field.IsEmpty && e.PendingDecision!.PlayerId == b, "4stop flushes field and stopper leads");
+        }
+        {
+            // 6. ジョーカー限定効果・禁止あがり3段階・新配牌オプション & Clone 往復
+            var r = RuleSettings.CreateDefault();
+            r.Joker.JokerCount = 2;
+            r.Joker.EffectMode = JokerEffectMode.Limited;
+            r.Special.SevenPassEnabled = true;
+            r.Flow.EightCutEnabled = true;
+            r.ForbiddenFinish.JokerFinishRule = GentleStrictRule.Gentle;
+            r.ForbiddenFinish.SpadeThreeFinishRule = GentleStrictRule.Strict;
+            r.ForbiddenFinish.SequenceFinishRule = GentleStrictRule.Strict;
+            r.Progress.FirstRoundStartCard = StartCardRule.SpadeThree;
+            r.Progress.SeatShuffleMode = SeatShuffleMode.FromDaifugo;
+            r.Progress.ShuffleMode = ShuffleMode.Separate2;
+            r.Progress.BlindCardMode = BlindCardMode.Max13;
+            var cloned = r.Clone();
+            Check(cloned.Joker.EffectMode == JokerEffectMode.Limited
+                && cloned.ForbiddenFinish.JokerFinishRule == GentleStrictRule.Gentle
+                && cloned.ForbiddenFinish.SpadeThreeFinishRule == GentleStrictRule.Strict
+                && cloned.ForbiddenFinish.SequenceFinishRule == GentleStrictRule.Strict
+                && cloned.Progress.FirstRoundStartCard == StartCardRule.SpadeThree
+                && cloned.Progress.SeatShuffleMode == SeatShuffleMode.FromDaifugo
+                && cloned.Progress.ShuffleMode == ShuffleMode.Separate2
+                && cloned.Progress.BlindCardMode == BlindCardMode.Max13,
+                "all new rule properties survive Clone");
+            var j = new JudgeLogic(cloned);
+            var j7 = j.Judge(C("S7 JK0"), FieldState.CreateInitial());
+            Check(j7.HasEffect(SpecialEffectType.SevenPass) && j7.GetEffect(SpecialEffectType.SevenPass)!.Magnitude == 2,
+                "joker Limited triggers 7pass x2");
+            var j8 = j.Judge(C("S8 JK0"), FieldState.CreateInitial());
+            Check(j8.GetEffect(SpecialEffectType.EightCut)!.Magnitude == 1, "joker Limited does NOT add joker to 8cut");
+            var e = new GameEngine(cloned, Players(4), new SystemRandomSource(11));
+            e.StartGame();
+            Check(e.Players.All(p => p.HandCount <= 13), "BlindCardMode.Max13 caps hands at 13");
+        }
+        {
+            // 7. 5スキップ後のパスで1周したときに場が流れ、5を出した本人が親になること
+            var r = RuleSettings.CreateDefault();
+            r.SkipReverse.FiveSkipEnabled = true;
+            r.Exchange.Enabled = false;
+            r.Progress.DiamondThreeStarts = false;
+            var e = new GameEngine(r, Players(3), new SystemRandomSource(1));
+            e.StartGame();
+            int l = e.PendingDecision!.PlayerId;
+            int a = (l + 1) % 3;
+            int b = (l + 2) % 3;
+            e.GetPlayer(l).SetHand(C("S5 H9"));
+            e.GetPlayer(a).SetHand(C("D6 C7"));
+            e.GetPlayer(b).SetHand(C("C4 H6"));
+            Play(e, l, "S5", "5skip-pass-flush");
+            Check(e.PendingDecision!.PlayerId == b, "5skip skips A and moves turn to B");
+            Pass(e, b, "5skip-pass-flush");
+            Check(e.Field.IsEmpty && e.PendingDecision!.PlayerId == l, "5skip + B pass flushes field and L leads");
+        }
+        {
+            // 8. あがり札残留（KeepFieldOnPlayerFinish=true）＋5スキップであがり後、全員パスで場が流れて次の生存者が親になること
+            var r = RuleSettings.CreateDefault();
+            r.SkipReverse.FiveSkipEnabled = true;
+            r.Progress.KeepFieldOnPlayerFinish = true;
+            r.Exchange.Enabled = false;
+            r.Progress.DiamondThreeStarts = false;
+            var (e, l, a, b, c) = Start(r);
+            e.GetPlayer(l).SetHand(C("S5"));          // l は 5 で即あがり（a をスキップ）
+            e.GetPlayer(a).SetHand(C("C4 D4"));
+            e.GetPlayer(b).SetHand(C("H4 C6"));
+            e.GetPlayer(c).SetHand(C("D7 CK"));
+            Play(e, l, "S5", "5skip-finish-flush");
+            Check(e.GetPlayer(l).IsFinished && !e.Field.IsEmpty, "5skip-finish: l finished and card stays on field");
+            Check(e.PendingDecision!.PlayerId == b, "5skip-finish: a is skipped, b plays");
+            Pass(e, b, "5skip-finish-flush");
+            Pass(e, c, "5skip-finish-flush");
+            Check(e.Field.IsEmpty && e.PendingDecision!.PlayerId == a,
+                "5skip-finish: all remaining pass -> field flushes and next active (a) leads");
+        }
     }
 
     private static void AttachBot(GameEngine e, Random rnd)
@@ -1073,8 +1237,7 @@ internal static class EngineTests
                 r.Flow.AmbulanceEnabled = true; r.Flow.RokurokubiEnabled = true;
                 r.Special.TwelveBomberEnabled = true; r.Joker.JokerCount = 2;
             }, 4),
-            // 4止め：8と同じ枚数で止められる設定／標準（2倍）＋ジョーカー2枚・ジョーカー効果あり
-            ("fourstop-same", r => { AllSpecials(r); r.Flow.FourStopCount = FourStopCountRule.SameAsEight; }, 4),
+            // 4止め：標準（2倍）＋ジョーカー2枚・ジョーカー効果あり
             ("fourstop-double-jokers", r => { AllSpecials(r); r.Joker.JokerCount = 2; r.Joker.JokerTriggersEffects = true; }, 4),
             // 得点配分 2・1・-1・-2（合計がマイナスになる・延長戦の判定も通る）
             ("points-minus", r =>
@@ -1100,7 +1263,7 @@ internal static class EngineTests
             {
                 AllSpecials(r); r.Sequence.EmperorEnabled = true; r.Sequence.EmperorFlushesField = true;
                 r.Flow.SandstormEnabled = true; r.Flow.SandstormCount = 2; r.Flow.FourStopEnabled = true;
-                r.Flow.FourStopCount = FourStopCountRule.SameAsEight; r.Progress.PassLocksUntilFlush = true;
+                r.Progress.PassLocksUntilFlush = true;
             }, 3),
         };
 
@@ -1169,7 +1332,7 @@ internal static class EngineTests
     private static void PresetContents()
     {
         // 設定画面のボタンは CommandParameter に名前を書いて Enum.TryParse で探すため、名前が変わるとボタンが無反応になる
-        Check(Enum.GetNames<RulePreset>().SequenceEqual(new[] { "Beginner", "Intermediate", "Expert" }), "preset names match the settings page buttons");
+        Check(Enum.GetNames<RulePreset>().SequenceEqual(new[] { "Beginner", "Intermediate", "Expert", "Developer" }), "preset names match the settings page buttons");
         foreach (var preset in Enum.GetValues<RulePreset>())
         {
             Check(!string.IsNullOrWhiteSpace(RulePresets.DisplayName(preset)) && RulePresets.DisplayName(preset) != preset.ToString(), $"preset {preset} has a display name");
@@ -1191,12 +1354,24 @@ internal static class EngineTests
             "intermediate: popular rules are on");
         Check(!m.Special.TwelveBomberEnabled && !m.Flow.SandstormEnabled && !m.RankChange.GekokujoEnabled, "intermediate: advanced rules stay off");
 
-        // 完全上級者：すべての ON/OFF 項目が有効（項目を増やしたらここで気付けるよう、全項目を列挙して調べる）
+        // 完全上級者：仕様上オフ固定（貧民選択なし・ジョーカー保護なし・永続11バックなし）以外のすべての ON/OFF 項目が有効
         var x = RulePresets.Create(RulePreset.Expert);
-        var off = BoolRules(x).Where(t => !t.Value).Select(t => t.Name).ToList();
+        var allowedOff = new HashSet<string>
+        {
+            "ElevenBack.StrongElevenBackEnabled",
+            "Exchange.PoorCanChooseCards",
+            "Exchange.JokerProtected",
+        };
+        var off = BoolRules(x).Where(t => !t.Value && !allowedOff.Contains(t.Name)).Select(t => t.Name).ToList();
         Check(off.Count == 0, "expert: every on/off rule is enabled (off: " + string.Join(", ", off) + ")");
         Check(BoolRules(x).Count() >= 55, $"expert: the bool rule scan found {BoolRules(x).Count()} rules");
-        Check(x.ElevenBack.Duration == ElevenBackDuration.Persistent && x.Joker.JokerCount == 2, "expert: strong 11-back and two jokers");
+        Check(x.ElevenBack.Duration == ElevenBackDuration.UntilFlush && x.Joker.JokerCount == 2, "expert: until-flush 11-back and two jokers");
+
+        // 開発者用ルール：オーメン以外の全ルール有効・11バックは次の手番だけ・10ラウンド
+        var dev = RulePresets.Create(RulePreset.Developer);
+        Check(!dev.Revolution.OmenEnabled && dev.Revolution.CoupEnabled && dev.Revolution.NanasanEnabled, "developer: omen off, others on");
+        Check(dev.ElevenBack.Duration == ElevenBackDuration.NextTurnOnly && dev.Progress.RoundCount == 10 && dev.Joker.JokerCount == 2,
+            "developer: next-turn 11-back, 10 rounds, 2 jokers");
 
         // 既定値（新規インストール時）はプリセットに合わせて変わっていない
         var d = RuleSettings.CreateDefault();
@@ -1324,11 +1499,7 @@ internal static class EngineTests
                 Cover(engine.Field.IsElevenBackPersistent ? "eleven-back-persistent"
                     : engine.Field.IsElevenBackOneTurn ? "eleven-back-one-turn" : "eleven-back");
             }
-            // 不変条件：「次の手番だけ」の11バックは、その設定のときだけ立ち、Jの後の1人の手番が終わったら解除される
-            if (engine.Field.IsElevenBackOneTurn && engine.Rules.ElevenBack.Duration != ElevenBackDuration.NextTurnOnly)
-            {
-                Fail("one-turn eleven back without the next-turn-only rule");
-            }
+            // 強化11バック（Jが3枚）または「次の手番だけ」設定のときに IsElevenBackOneTurn が立つ
             if (engine.Field.IsElevenBackOneTurn && engine.Field.IsElevenBackPersistent)
             {
                 Fail("eleven back is both one-turn and persistent");
@@ -1336,17 +1507,15 @@ internal static class EngineTests
             switch (e)
             {
                 case EffectAppliedEvent { Effect.Type: SpecialEffectType.ElevenBack or SpecialEffectType.StrongElevenBack }:
-                    oneTurnHolder = null; // Jが出るたびに「次の1人」を数え直す
+                    oneTurnHolder = e is EffectAppliedEvent ea ? ea.PlayerId : null;
                     break;
-                case DecisionRequestedEvent { Decision.Kind: DecisionKind.PlayOrPass } dr when engine.Field.IsElevenBackOneTurn:
-                    if (oneTurnHolder is null)
+                case CardsPlayedEvent cp when oneTurnHolder is not null && cp.PlayerId != oneTurnHolder
+                    && !cp.Judgement.Effects.Any(ef => ef.Type is SpecialEffectType.ElevenBack or SpecialEffectType.StrongElevenBack):
+                    if (engine.Field.IsElevenBackOneTurn)
                     {
-                        oneTurnHolder = dr.Decision.PlayerId;
+                        Fail($"one-turn eleven back still on after play by {cp.PlayerId}");
                     }
-                    else if (oneTurnHolder != dr.Decision.PlayerId)
-                    {
-                        Fail($"one-turn eleven back still on for the next player ({oneTurnHolder} -> {dr.Decision.PlayerId})");
-                    }
+                    oneTurnHolder = null;
                     break;
             }
             switch (e)
@@ -1551,8 +1720,8 @@ internal static class EngineTests
         int other = (leader + 1) % 4;
         Check(engine.SubmitPlay(other, engine.GetPlayer(other).Hand.Take(1)).Error == CommandError.NotYourTurn, "not your turn");
         var nonD3 = engine.GetPlayer(leader).Hand.First(c => c != d3 && !c.IsJoker);
-        var bad = engine.SubmitPlay(leader, new[] { nonD3 });
-        Check(bad.Error == CommandError.IllegalPlay && bad.PlayReject == PlayRejectReason.MissingRequiredCard, "D3 required");
+        Check(engine.Field.RequiredCard is null && engine.GetLegalPlays(leader).Any(p => p.Play!.Cards.Contains(nonD3)),
+            "D3 holder leads, D3 not required");
         Check(engine.SubmitPlay(leader, new[] { engine.GetPlayer(other).Hand[0] }).Error == CommandError.CardsNotInHand, "not in hand");
 
         Check(engine.SubmitPlay(leader, new[] { d3 }).IsAccepted, "play D3");
@@ -1587,5 +1756,79 @@ internal static class EngineTests
         // ルールは開始時に複製される（外部での変更が進行中のゲームに影響しない）
         rules.Flow.EightCutEnabled = false;
         Check(engine.Rules.Flow.EightCutEnabled, "rules snapshot");
+
+        // 1. Qであがる時は12ボンバーの宣言が発生せず、他人のカードも消えない
+        {
+            var r = RuleSettings.CreateDefault();
+            r.Special.TwelveBomberEnabled = true;
+            r.ForbiddenFinish.Enabled = false;
+            var e = new GameEngine(r, Players(4), new SystemRandomSource(1));
+            e.StartGame();
+            int l = e.PendingDecision!.PlayerId;
+            int next = (l + 1) % 4;
+            e.GetPlayer(l).SetHand(C("D3 SQ"));
+            e.GetPlayer(next).SetHand(C("S4 H4 C5 D5"));
+            e.GetPlayer((l + 2) % 4).SetHand(C("S6 H6"));
+            e.GetPlayer((l + 3) % 4).SetHand(C("S7 H7"));
+            Play(e, l, "D3", "q-finish");
+            Pass(e, next, "q-finish");
+            Pass(e, (l + 2) % 4, "q-finish");
+            Pass(e, (l + 3) % 4, "q-finish");
+            Play(e, l, "SQ", "q-finish");
+            Check(e.GetPlayer(l).IsFinished, "q-finish: player finished");
+            Check(e.PendingDecision!.Kind != DecisionKind.DeclareRanks, "q-finish: no 12-bomber declaration");
+            Check(e.GetPlayer(next).HandCount == 4, "q-finish: others keep all cards");
+        }
+
+        // 2. クーデター（9を3枚）の後は、場が流れるまで6・7（3枚）または砂嵐（3を3枚）のみ出せる
+        {
+            var r = RuleSettings.CreateDefault();
+            r.Revolution.CoupEnabled = true;
+            r.Flow.SandstormEnabled = true;
+            r.Progress.DiamondThreeStarts = false;
+            var e = new GameEngine(r, Players(4), new SystemRandomSource(2));
+            e.StartGame();
+            int l = e.PendingDecision!.PlayerId;
+            int a = (l + 1) % 4, b = (l + 2) % 4, c = (l + 3) % 4;
+            e.GetPlayer(l).SetHand(C("S9 H9 D9 CK"));
+            e.GetPlayer(a).SetHand(C("S4 H4 D4 S6 H6 D6"));
+            e.GetPlayer(b).SetHand(C("S5 H5 D5 S7 H7 D7"));
+            e.GetPlayer(c).SetHand(C("S3 H3 D3 SA"));
+            Play(e, l, "S9 H9 D9", "coup");
+            Check(e.Field.IsRevolution && e.Field.IsCoupLocked, "coup: revolution & coup lock active");
+            // 4の3枚は通常なら革命中に9より強いが、クーデターロック中は出せない
+            Check(e.SubmitPlay(a, C("S4 H4 D4")).Error == CommandError.IllegalPlay, "coup: 4x3 rejected");
+            Check(e.Judge.Judge(C("S4 H4 D4"), e.Field).RejectReason == PlayRejectReason.CoupLocked, "coup: reject reason is CoupLocked");
+            // 6の3枚は出せる
+            Play(e, a, "S6 H6 D6", "coup");
+            // 5の3枚は出せない、7の3枚は出せる
+            Check(e.SubmitPlay(b, C("S5 H5 D5")).Error == CommandError.IllegalPlay, "coup: 5x3 rejected");
+            Play(e, b, "S7 H7 D7", "coup");
+            // 砂嵐（3を3枚）は出せて、場が流れクーデターロックも解除される
+            Play(e, c, "S3 H3 D3", "coup");
+            Check(e.Field.IsEmpty && !e.Field.IsCoupLocked, "coup: sandstorm flushes and unlocks");
+        }
+
+        // 3. Jを3枚以外（1枚・2枚）で出したターンも11バックが機能する（UntilFlush）
+        {
+            var r = RuleSettings.CreateDefault();
+            r.ElevenBack.Enabled = true;
+            r.ElevenBack.Duration = ElevenBackDuration.UntilFlush;
+            r.Lock.SuitLockEnabled = false;
+            r.Progress.DiamondThreeStarts = false;
+            var e = new GameEngine(r, Players(4), new SystemRandomSource(3));
+            e.StartGame();
+            int l = e.PendingDecision!.PlayerId;
+            int a = (l + 1) % 4, b = (l + 2) % 4;
+            e.GetPlayer(l).SetHand(C("SJ SA"));
+            e.GetPlayer(a).SetHand(C("S4 SK"));
+            e.GetPlayer(b).SetHand(C("S5 S2"));
+            e.GetPlayer((l + 3) % 4).SetHand(C("S6"));
+            Play(e, l, "SJ", "eb-single");
+            Check(e.Field.IsElevenBack && e.Field.IsStrengthReversed, "eb-single: 11back active after 1 Jack");
+            Play(e, a, "S4", "eb-single"); // 逆転中なので4がJに勝てる
+            Check(e.Field.IsElevenBack, "eb-single: 11back stays active until flush");
+            Check(e.SubmitPlay(b, C("S2")).Error == CommandError.IllegalPlay, "eb-single: 2 cannot beat 4 during 11back");
+        }
     }
 }

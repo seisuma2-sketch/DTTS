@@ -81,19 +81,35 @@ public sealed partial class FeedbackViewModel : ViewModelBase
         string text = InputMessage.Trim();
         if (string.IsNullOrEmpty(text)) return;
 
-        InputMessage = "";
-        await _feedbackService.SubmitAsync(text, SelectedCategory);
-        await ReloadMessagesAsync();
-        StatusMessage = "フィードバックを保存しました";
+        try
+        {
+            await _feedbackService.SubmitAsync(text, SelectedCategory);
+            InputMessage = "";
+            await ReloadMessagesAsync();
+            StatusMessage = "フィードバックを保存しました";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"保存エラー: {ex.Message}";
+        }
     }
 
     [RelayCommand]
     private async Task SyncPendingAsync()
     {
         StatusMessage = "送信中...";
-        var result = await _feedbackService.SendPendingAsync();
-        await ReloadMessagesAsync();
-        StatusMessage = $"送信完了: {result.Sent}件成功, {result.Failed}件失敗";
+        try
+        {
+            var result = await _feedbackService.SendPendingAsync();
+            await ReloadMessagesAsync();
+            StatusMessage = result.Skipped is { Length: > 0 } reason
+                ? $"同期をスキップしました: {reason}"
+                : $"送信完了: {result.Sent}件成功, {result.Failed}件失敗";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"同期エラー: {ex.Message}";
+        }
     }
 
     [RelayCommand]
@@ -114,10 +130,23 @@ public sealed partial class FeedbackViewModel : ViewModelBase
     [RelayCommand]
     private async Task SaveWebhookUrlAsync()
     {
-        var options = await _settingsRepo.LoadFeedbackOptionsAsync();
-        options.WebhookUrl = string.IsNullOrWhiteSpace(WebhookUrl) ? null : WebhookUrl.Trim();
-        await _settingsRepo.SaveFeedbackOptionsAsync(options);
-        StatusMessage = "Webhook URLを保存しました";
+        try
+        {
+            string? trimmed = string.IsNullOrWhiteSpace(WebhookUrl) ? null : WebhookUrl.Trim();
+            if (trimmed is not null && !FeedbackService.TryGetWebhookUri(trimmed, out _))
+            {
+                StatusMessage = "Webhook URL は https://（または開発用の http://localhost）形式で入力してください";
+                return;
+            }
+            var options = await _settingsRepo.LoadFeedbackOptionsAsync();
+            options.WebhookUrl = trimmed;
+            await _settingsRepo.SaveFeedbackOptionsAsync(options);
+            StatusMessage = trimmed is null ? "Webhook URL をクリアしました" : "Webhook URL を保存しました";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"URL 保存エラー: {ex.Message}";
+        }
     }
 
     [RelayCommand]

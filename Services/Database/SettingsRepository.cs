@@ -8,6 +8,15 @@ using DTTS.Services.Settings;
 namespace DTTS.Services.Database;
 
 /// <summary>
+/// 設定値に含まれる機密文字列（Webhook URL 等）を保存時に暗号化・読み込み時に復号する抽象化。
+/// </summary>
+public interface ISettingsSecretProtector
+{
+    string Protect(string plainText);
+    string Unprotect(string storedText);
+}
+
+/// <summary>
 /// キー・値形式の設定保存（ルール設定・外見・NPC設定・フィードバック設定）。
 /// 値はJSONで保存し、破損・旧形式のデータは既定値へフォールバックする。
 /// </summary>
@@ -25,14 +34,16 @@ public sealed class SettingsRepository
     public const string RulePresetsKey = "rule_presets";
 
     private readonly AppDatabaseContext _db;
+    private readonly ISettingsSecretProtector? _secretProtector;
 
     // 外見設定の「読み込み → 一部変更 → 保存」を直列にする（サウンド切替と進行スピード切替が互いの変更を消さないように）
     private readonly SemaphoreSlim _appearanceUpdateLock = new(1, 1);
 
     /// <summary>リポジトリを生成する。</summary>
-    public SettingsRepository(AppDatabaseContext db)
+    public SettingsRepository(AppDatabaseContext db, ISettingsSecretProtector? secretProtector = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
+        _secretProtector = secretProtector;
     }
 
     /// <summary>設定値を読み込む（なければ null）。</summary>
@@ -168,12 +179,28 @@ public sealed class SettingsRepository
     public async Task<FeedbackOptions> LoadFeedbackOptionsAsync(CancellationToken cancellationToken = default)
     {
         var json = await GetAsync(FeedbackKey, cancellationToken).ConfigureAwait(false);
-        return Deserialize(json, SettingsJsonContext.Default.FeedbackOptions) ?? new FeedbackOptions();
+        var options = Deserialize(json, SettingsJsonContext.Default.FeedbackOptions) ?? new FeedbackOptions();
+        if (!string.IsNullOrEmpty(options.WebhookUrl) && _secretProtector is not null)
+        {
+            options.WebhookUrl = _secretProtector.Unprotect(options.WebhookUrl);
+        }
+        return options;
     }
 
     /// <summary>フィードバック設定を保存する。</summary>
     public Task SaveFeedbackOptionsAsync(FeedbackOptions options, CancellationToken cancellationToken = default)
-        => SetAsync(FeedbackKey, JsonSerializer.Serialize(options, SettingsJsonContext.Default.FeedbackOptions), cancellationToken);
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var toStore = new FeedbackOptions
+        {
+            WebhookUrl = !string.IsNullOrEmpty(options.WebhookUrl) && _secretProtector is not null
+                ? _secretProtector.Protect(options.WebhookUrl)
+                : options.WebhookUrl,
+            AutoSend = options.AutoSend,
+            IncludeDiagnostics = options.IncludeDiagnostics,
+        };
+        return SetAsync(FeedbackKey, JsonSerializer.Serialize(toStore, SettingsJsonContext.Default.FeedbackOptions), cancellationToken);
+    }
 
     private static T? Deserialize<T>(string? json, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
         where T : class

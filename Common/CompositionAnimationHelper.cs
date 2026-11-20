@@ -208,22 +208,26 @@ public static class CompositionAnimationHelper
         var compositor = visual.Compositor;
 
         ElementCompositionPreview.SetIsTranslationEnabled(element, true);
+        visual.StopAnimation("Translation");
+        visual.Properties.InsertVector3("Translation", Vector3.Zero);
 
         var scopedBatch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
 
         var slideAnim = compositor.CreateVector3KeyFrameAnimation();
         slideAnim.Target = "Translation";
-        slideAnim.InsertKeyFrame(1.0f, new Vector3(160f, 10f, 0f));
-        slideAnim.Duration = TimeSpan.FromMilliseconds(320);
+        slideAnim.InsertKeyFrame(1.0f, new Vector3(0f, -14f, 0f));
+        slideAnim.Duration = TimeSpan.FromMilliseconds(260);
 
         var fadeAnim = compositor.CreateScalarKeyFrameAnimation();
         fadeAnim.Target = "Opacity";
         fadeAnim.InsertKeyFrame(1.0f, 0f);
-        fadeAnim.Duration = TimeSpan.FromMilliseconds(300);
+        fadeAnim.Duration = TimeSpan.FromMilliseconds(250);
 
         scopedBatch.Completed += (s, e) =>
         {
-            // 位置をリセット
+            // 位置を確実にリセット（右にずれたまま残らないように）
+            visual.StopAnimation("Translation");
+            visual.Properties.InsertVector3("Translation", Vector3.Zero);
             ElementCompositionPreview.SetIsTranslationEnabled(element, false);
             visual.Opacity = 1f;
             onCompleted?.Invoke();
@@ -565,6 +569,57 @@ public static class CompositionAnimationHelper
         visual.StopAnimation("Scale");
         visual.StopAnimation("Opacity");
         visual.StopAnimation("Translation");
+    }
+
+    /// <summary>手番枠などの呼吸するような脈動アニメーションを開始または停止する。</summary>
+    public static void AnimateTurnPulse(UIElement element, bool on, float minOpacity = 0.45f, float maxOpacity = 1.0f)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(element);
+        visual.StopAnimation("Opacity");
+
+        if (!on)
+        {
+            var fadeOut = visual.Compositor.CreateScalarKeyFrameAnimation();
+            fadeOut.InsertKeyFrame(1.0f, 0f);
+            fadeOut.Duration = TimeSpan.FromMilliseconds(180);
+            visual.StartAnimation("Opacity", fadeOut);
+            return;
+        }
+
+        var ease = visual.Compositor.CreateCubicBezierEasingFunction(new Vector2(0.4f, 0f), new Vector2(0.6f, 1f));
+        var pulse = visual.Compositor.CreateScalarKeyFrameAnimation();
+        pulse.InsertKeyFrame(0.0f, minOpacity, ease);
+        pulse.InsertKeyFrame(0.5f, maxOpacity, ease);
+        pulse.InsertKeyFrame(1.0f, minOpacity, ease);
+        pulse.Duration = TimeSpan.FromMilliseconds(1600);
+        pulse.IterationBehavior = AnimationIterationBehavior.Forever;
+        visual.StartAnimation("Opacity", pulse);
+    }
+
+    /// <summary>ダイアログ・オーバーレイの滑らかなポップイン（フェード＋拡大）。</summary>
+    public static void AnimatePopIn(UIElement element, int durationMs = 200)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(element);
+        var compositor = visual.Compositor;
+
+        if (element is FrameworkElement fe && fe.ActualWidth > 0 && fe.ActualHeight > 0)
+        {
+            visual.CenterPoint = new Vector3((float)fe.ActualWidth / 2f, (float)fe.ActualHeight / 2f, 0f);
+        }
+
+        var easeOut = compositor.CreateCubicBezierEasingFunction(new Vector2(0.16f, 1f), new Vector2(0.3f, 1f));
+        var fade = compositor.CreateScalarKeyFrameAnimation();
+        fade.InsertKeyFrame(0.0f, 0f);
+        fade.InsertKeyFrame(1.0f, 1f, easeOut);
+        fade.Duration = TimeSpan.FromMilliseconds(durationMs);
+
+        var scale = compositor.CreateVector3KeyFrameAnimation();
+        scale.InsertKeyFrame(0.0f, new Vector3(0.94f, 0.94f, 1f));
+        scale.InsertKeyFrame(1.0f, Vector3.One, easeOut);
+        scale.Duration = TimeSpan.FromMilliseconds(durationMs);
+
+        visual.StartAnimation("Opacity", fade);
+        visual.StartAnimation("Scale", scale);
     }
 }
 

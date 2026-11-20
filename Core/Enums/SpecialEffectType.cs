@@ -33,9 +33,9 @@ public enum SpecialEffectType : byte
     EightCut,
     /// <summary>4止め。直前の8切りを無効化する。</summary>
     FourStop,
-    /// <summary>砂嵐（既定：3を3枚）。同枚数の何にでも勝ち、場を流す。</summary>
+    /// <summary>砂嵐（既定：3を3枚）。どんな場でも出せ、場を流す（誰にも止められない）。</summary>
     Sandstorm,
-    /// <summary>99車（救急車、既定：9を2枚）。同枚数の何にでも勝ち、場を流す。</summary>
+    /// <summary>99車（救急車、既定：9を2枚）。通常どおり場に勝って出せたとき、場を流す。</summary>
     Ambulance,
     /// <summary>ろくろ首（既定：6を2枚）。場を流す。</summary>
     Rokurokubi,

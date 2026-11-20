@@ -159,6 +159,7 @@ public sealed class AppDatabaseContext
     {
         var connection = new SqliteConnection(ConnectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await ExecuteAsync(connection, "PRAGMA busy_timeout = 5000;", cancellationToken).ConfigureAwait(false);
         await ExecuteAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken).ConfigureAwait(false);
         return connection;
     }
@@ -182,5 +183,7 @@ public sealed class AppDatabaseContext
 
     /// <summary>DB保存用の文字列から日時を復元する。</summary>
     internal static DateTimeOffset FromDbTime(string value)
-        => DateTimeOffset.Parse(value, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
+        => DateTimeOffset.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed)
+            ? parsed
+            : DateTimeOffset.MinValue;
 }

@@ -243,18 +243,24 @@ public sealed class JudgeLogic : IJudgeLogic
         var ordered = OrderByPreference(legal, field);
         var alternatives = ordered.Select(x => x.Play).ToArray();
 
-        // 禁止あがりで拒否される解釈があれば、拒否されない解釈を優先して採用する
+        // 禁止あがりになる解釈（拒否または最下位ペナルティ）よりも、正常にあがれる解釈を優先して採用する
+        PlayJudgement? forbiddenLegal = null;
         PlayJudgement? rejected = null;
         foreach (var (play, method) in ordered)
         {
             var judgement = BuildJudgement(play, method, field, isFinishingPlay, alternatives);
             if (judgement.IsLegal)
             {
-                return judgement;
+                if (!judgement.IsForbiddenFinish)
+                {
+                    return judgement;
+                }
+                forbiddenLegal ??= judgement;
+                continue;
             }
             rejected ??= judgement;
         }
-        return rejected!;
+        return forbiddenLegal ?? rejected!;
     }
 
     /// <inheritdoc />
@@ -352,6 +358,36 @@ public sealed class JudgeLogic : IJudgeLogic
             return field.IsEightCutPending ? PlayRejectReason.FourStopOnly : PlayRejectReason.SandstormStopOnly;
         }
 
+        // --- 4止めの成立後：場が流れるまで、砂嵐しか出せない ---
+        if (field.IsFourStopLocked && current is not null)
+        {
+            if (IsSandstorm(play))
+            {
+                method = BeatMethod.Sandstorm;
+                return PlayRejectReason.None;
+            }
+            return PlayRejectReason.FourStopLocked;
+        }
+
+        // --- クーデターの成立後：場が流れるまで、6（3枚）・7（3枚）・砂嵐（3を3枚）しか出せない ---
+        if (field.IsCoupLocked && current is not null)
+        {
+            if (IsSandstorm(play))
+            {
+                method = BeatMethod.Sandstorm;
+                return PlayRejectReason.None;
+            }
+            if (play.Type == HandType.Multiple
+                && play.Count == 3
+                && !play.IsJokerOnly
+                && (play.Rank == Rank.Six || play.Rank == Rank.Seven))
+            {
+                method = BeatMethod.Stronger;
+                return PlayRejectReason.None;
+            }
+            return PlayRejectReason.CoupLocked;
+        }
+
         // --- 親出し ---
         if (current is null)
         {
@@ -362,6 +398,13 @@ public sealed class JudgeLogic : IJudgeLogic
         if (IsSpadeThreeReturn(play, current))
         {
             method = BeatMethod.SpadeThreeReturn;
+            return PlayRejectReason.None;
+        }
+
+        // --- 砂嵐（3を3枚）：どんな場でも出せる（枚数・種別・縛り・革命を問わない）。出すとすぐに場が流れる ---
+        if (IsSandstorm(play))
+        {
+            method = BeatMethod.Sandstorm;
             return PlayRejectReason.None;
         }
 
@@ -403,17 +446,7 @@ public sealed class JudgeLogic : IJudgeLogic
             return PlayRejectReason.NumberLockViolation;
         }
 
-        // --- 砂嵐・99車（同枚数に無条件勝ち。スート縛り・数しばには従う） ---
-        if (IsSandstorm(play))
-        {
-            method = BeatMethod.Sandstorm;
-            return PlayRejectReason.None;
-        }
-        if (IsAmbulance(play))
-        {
-            method = BeatMethod.Ambulance;
-            return PlayRejectReason.None;
-        }
+        // ※ 99車（9を2枚）は、ろくろ首と同じく通常どおり場に勝てるときだけ出せる（出せば場流しの効果が起きる）
 
         // --- 通常の強さ比較 ---
         if (playLow > currentHigh)
@@ -464,11 +497,11 @@ public sealed class JudgeLogic : IJudgeLogic
             && play.Cards[0].Suit == Suit.Spade && play.Cards[0].Rank == j.SpadeThreeReturnRank;
     }
 
-    /// <summary>4止めに必要な4の枚数（標準は8の枚数の2倍）。</summary>
+    /// <summary>4止めに必要な4の枚数（8の枚数の2倍）。</summary>
     public int FourStopRequiredCount(CardPlay eightPlay)
     {
         ArgumentNullException.ThrowIfNull(eightPlay);
-        return _rules.Flow.FourStopCount == FourStopCountRule.SameAsEight ? eightPlay.Count : eightPlay.Count * 2;
+        return eightPlay.Count * 2;
     }
 
     private bool IsFourStop(CardPlay play, CardPlay eightPlay)
@@ -482,6 +515,22 @@ public sealed class JudgeLogic : IJudgeLogic
             && play.Count == FourStopRequiredCount(eightPlay)
             && play.Rank == f.FourStopRank
             && (play.JokerCount == 0 || _rules.Joker.JokerTriggersEffects);
+    }
+
+    /// <summary>カードの組が砂嵐になり得るか（合法手の列挙で、枚数違いでも捨てずに判定へ回すため）。</summary>
+    private bool MaySandstorm(IReadOnlyCollection<Card> cards)
+    {
+        var f = _rules.Flow;
+        if (!f.SandstormEnabled || cards.Count != f.SandstormCount)
+        {
+            return false;
+        }
+        int jokers = cards.Count(c => c.IsJoker);
+        if (jokers > 0 && !_rules.Joker.JokerTriggersEffects)
+        {
+            return false;
+        }
+        return jokers < cards.Count && cards.Where(c => !c.IsJoker).All(c => c.Rank == f.SandstormRank);
     }
 
     private bool IsSandstorm(CardPlay play)
@@ -712,11 +761,12 @@ public sealed class JudgeLogic : IJudgeLogic
             effects.Add(new TriggeredEffect(revType, 1, _rules.Revolution.RevolutionIsOptional));
         }
 
-        // --- 11バック ---
+        // --- 11バック（Jがちょうど3枚のときだけ強化11バック＝次の手番が11バックの効果になる） ---
         var eb = _rules.ElevenBack;
-        if (eb.Enabled && EffectCount(play, eb.TriggerRank) > 0)
+        int ebCount = eb.Enabled ? EffectCount(play, eb.TriggerRank, SpecialEffectType.ElevenBack) : 0;
+        if (ebCount > 0)
         {
-            effects.Add(new TriggeredEffect(eb.StrongElevenBackEnabled ? SpecialEffectType.StrongElevenBack : SpecialEffectType.ElevenBack));
+            effects.Add(new TriggeredEffect(ebCount == 3 ? SpecialEffectType.StrongElevenBack : SpecialEffectType.ElevenBack));
         }
 
         // --- 縛りの新規成立 ---
@@ -826,7 +876,7 @@ public sealed class JudgeLogic : IJudgeLogic
     /// 数字効果の発動枚数を数える。階段は「階段中効果」有効時のみ、
     /// ジョーカー代用分は「ジョーカー効果発動」有効時のみカウントする。
     /// </summary>
-    private int EffectCount(CardPlay play, Rank rank)
+    private int EffectCount(CardPlay play, Rank rank, SpecialEffectType? effectType = null)
     {
         if (play.IsJokerOnly)
         {
@@ -836,7 +886,15 @@ public sealed class JudgeLogic : IJudgeLogic
         {
             return 0;
         }
-        return play.CountRank(rank, _rules.Joker.JokerTriggersEffects);
+        bool countJoker = _rules.Joker.EffectMode switch
+        {
+            JokerEffectMode.All => true,
+            JokerEffectMode.Limited => !play.IsSequenceLike && effectType is
+                SpecialEffectType.FiveSkip or SpecialEffectType.ThirteenSkip or
+                SpecialEffectType.SevenPass or SpecialEffectType.TenDiscard or SpecialEffectType.TwelveBomber,
+            _ => false,
+        };
+        return play.CountRank(rank, countJoker);
     }
 
     private void AddCountEffect(List<TriggeredEffect> effects, CardPlay play, bool enabled, Rank rank, SpecialEffectType type)
@@ -845,7 +903,7 @@ public sealed class JudgeLogic : IJudgeLogic
         {
             return;
         }
-        int count = EffectCount(play, rank);
+        int count = EffectCount(play, rank, type);
         if (count > 0)
         {
             effects.Add(new TriggeredEffect(type, count));
@@ -871,18 +929,33 @@ public sealed class JudgeLogic : IJudgeLogic
         }
 
         var reasons = ForbiddenFinishReason.None;
+        bool isSequence = play.Type == HandType.Sequence;
 
-        if (f.ForbidStrongestNumber)
+        // 階段あがり禁止が「優しい」の場合は、階段で上がったときに通常の数字・役での禁止あがり対象から外す
+        if (f.SequenceFinishRule == GentleStrictRule.Gentle && isSequence)
         {
-            bool reversed = f.StrongestFollowsReversal && field.IsStrengthReversed;
-            // 反転中は基本強さ最小の数字（3）、通常時は最大の数字（2）が最強
+            return ForbiddenFinishReason.None;
+        }
+        if (f.SequenceFinishRule == GentleStrictRule.Strict && isSequence)
+        {
+            reasons |= ForbiddenFinishReason.Sequence;
+        }
+
+        if (f.ForbidStrongestNumber && !field.IsElevenBack)
+        {
+            bool reversed = f.StrongestFollowsReversal && field.IsRevolution;
+            // 革命中は基本強さ最小の数字（3）、通常時は最大の数字（2）が最強（11バック中は3・2ともに禁止あがりにしない）
             Rank strongest = Card.GetRankFromBaseStrength(reversed ? Card.MinStrength : Card.MaxNaturalStrength);
             if (play.NaturalCards.Any(c => c.Rank == strongest))
             {
                 reasons |= ForbiddenFinishReason.StrongestNumber;
             }
         }
-        if (f.ForbidJoker && play.JokerCount > 0)
+        if (f.JokerFinishRule == GentleStrictRule.Strict && play.JokerCount > 0)
+        {
+            reasons |= ForbiddenFinishReason.Joker;
+        }
+        else if (f.JokerFinishRule == GentleStrictRule.Gentle && play.JokerCount > 0 && play.NaturalCards.Count == 0)
         {
             reasons |= ForbiddenFinishReason.Joker;
         }
@@ -890,11 +963,17 @@ public sealed class JudgeLogic : IJudgeLogic
         {
             reasons |= ForbiddenFinishReason.EightCut;
         }
-        if (f.ForbidSpadeThree && effects.Any(e => e.Type == SpecialEffectType.SpadeThreeReturn))
+        if (f.SpadeThreeFinishRule == GentleStrictRule.Gentle && effects.Any(e => e.Type == SpecialEffectType.SpadeThreeReturn))
         {
             reasons |= ForbiddenFinishReason.SpadeThree;
         }
-        if (f.ForbidTwelveBomber && effects.Any(e => e.Type == SpecialEffectType.TwelveBomber))
+        else if (f.SpadeThreeFinishRule == GentleStrictRule.Strict &&
+                 (effects.Any(e => e.Type == SpecialEffectType.SpadeThreeReturn) ||
+                  play.NaturalCards.Any(c => c == Card.Of(Suit.Spade, _rules.Joker.SpadeThreeReturnRank))))
+        {
+            reasons |= ForbiddenFinishReason.SpadeThree;
+        }
+        if (f.TwelveBomberFinishRule != GentleStrictRule.Off && effects.Any(e => e.Type == SpecialEffectType.TwelveBomber))
         {
             reasons |= ForbiddenFinishReason.TwelveBomber;
         }
@@ -926,8 +1005,8 @@ public sealed class JudgeLogic : IJudgeLogic
         ArgumentNullException.ThrowIfNull(field);
         var results = new List<PlayJudgement>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        // 砂嵐の割り込み受付中は、場札と枚数が違っても砂嵐を出せる。4止めは8の枚数で必要枚数が決まる
-        int? requiredCount = field.IsSandstormStopPending
+        // 砂嵐の割り込み受付中・4止めの成立後は、場札と枚数が違っても砂嵐を出せる。4止めは8の枚数で必要枚数が決まる
+        int? requiredCount = field.IsSandstormStopPending || field.IsFourStopLocked
             ? null
             : field.IsEightCutPending && field.CurrentPlay is { } eight
                 ? FourStopRequiredCount(eight)
@@ -935,8 +1014,8 @@ public sealed class JudgeLogic : IJudgeLogic
 
         foreach (var candidate in EnumerateCandidates(hand))
         {
-            // 場があり、スペ3返し（単騎）以外で枚数が合わない候補は早期に除外
-            if (requiredCount is { } rc && candidate.Count != rc)
+            // 場があり、スペ3返し（単騎）以外で枚数が合わない候補は早期に除外（砂嵐はどんな場でも出せるので除外しない）
+            if (requiredCount is { } rc && candidate.Count != rc && !MaySandstorm(candidate))
             {
                 continue;
             }

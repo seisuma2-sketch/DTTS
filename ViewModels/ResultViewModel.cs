@@ -96,8 +96,15 @@ public sealed partial class ResultViewModel : ViewModelBase
     [RelayCommand]
     private async Task ClearHistoryAsync()
     {
-        await _historyRepo.ClearAsync();
-        await InitializeAsync();
+        try
+        {
+            await _historyRepo.ClearAsync();
+            await InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            App.WriteCrashLog("ResultViewModel.ClearHistory", ex);
+        }
     }
 
     [RelayCommand]

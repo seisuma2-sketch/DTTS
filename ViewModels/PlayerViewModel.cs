@@ -40,6 +40,14 @@ public sealed partial class PlayerViewModel : ObservableObject
     [ObservableProperty]
     public partial string AvatarLabel { get; set; } = "プレイヤー";
 
+    /// <summary>カスタム画像アバターのファイルパス（任意）。</summary>
+    [ObservableProperty]
+    public partial string? AvatarImagePath { get; set; }
+
+    /// <summary>アイコンのアクセント色（#RRGGBB）。</summary>
+    [ObservableProperty]
+    public partial string? AvatarAccentHex { get; set; }
+
     public PlayerViewModel(int playerId, string name, bool isHuman)
     {
         PlayerId = playerId;

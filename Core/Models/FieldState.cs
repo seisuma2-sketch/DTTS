@@ -136,6 +136,16 @@ public sealed record FieldState
     /// <summary>ろくろ首・99車の発生直後で、砂嵐の割り込みを受付中か。</summary>
     public bool IsSandstormStopPending { get; init; }
 
+    /// <summary>
+    /// 4止めが成立した後か。場が流れるまで、砂嵐以外は出せない（ほかの人はパスするか砂嵐で流すだけ）。
+    /// </summary>
+    public bool IsFourStopLocked { get; init; }
+
+    /// <summary>
+    /// クーデターが成立した後か。場が流れるまで、6（3枚）・7（3枚）・砂嵐（3を3枚）以外は出せない。
+    /// </summary>
+    public bool IsCoupLocked { get; init; }
+
     /// <summary>次の出し札に必ず含めなければならないカード（ダイヤ3初手など）。不要なら null。</summary>
     public Card? RequiredCard { get; init; }
 
@@ -228,6 +238,12 @@ public sealed record FieldState
     /// <summary>ろくろ首・99車への砂嵐の割り込み受付状態を設定した状態を返す。</summary>
     public FieldState WithSandstormStopPending(bool pending) => this with { IsSandstormStopPending = pending };
 
+    /// <summary>4止めの成立（場が流れるまで砂嵐しか出せない）を設定した状態を返す。</summary>
+    public FieldState WithFourStopLocked(bool locked) => this with { IsFourStopLocked = locked };
+
+    /// <summary>クーデターの成立（場が流れるまで6・7・砂嵐しか出せない）を設定した状態を返す。</summary>
+    public FieldState WithCoupLocked(bool locked) => this with { IsCoupLocked = locked };
+
     /// <summary>
     /// 場を流した状態を返す。場札・履歴・縛りはリセットされ、
     /// 11バックは強化11バック（持続）でなければ解除される。革命状態は維持される。
@@ -245,6 +261,8 @@ public sealed record FieldState
             IsElevenBackOneTurn = false,
             IsEightCutPending = false,
             IsSandstormStopPending = false,
+            IsFourStopLocked = false,
+            IsCoupLocked = false,
             TrickNumber = TrickNumber + 1,
         };
 

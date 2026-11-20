@@ -12,6 +12,7 @@ using DTTS.Services;
 using DTTS.Services.Audio;
 using DTTS.Services.Network;
 using DTTS.Services.Presentation;
+using DTTS.Services.Settings;
 using Microsoft.UI.Dispatching;
 
 namespace DTTS.ViewModels;
@@ -60,9 +61,19 @@ public sealed partial class GameTableViewModel
     [ObservableProperty]
     public partial bool HasPlaySuggestions { get; set; }
 
-    /// <summary>候補を作り直す（自分の「出すかパスか」の番でなければ null を渡して消す）。</summary>
+    /// <summary>
+    /// 手番の案内（「あなたのターンです」など）。操作ガイドが「上級者用（ガイドなし）」なら出さない
+    /// （割り込みの確認・10捨てなどの専用の案内は、この関数を通さずにそのまま出す）。
+    /// </summary>
+    private string TurnGuidance(string text) => _guide.Level == DTTS.Services.Settings.GuideLevel.Expert ? "" : text;
+
+    /// <summary>候補を作り直す（自分の「出すかパスか」の番でなければ null を渡して消す）。上級者用では出さない。</summary>
     private void RefreshSuggestions(IEnumerable<IReadOnlyList<Card>>? legalPlays)
     {
+        if (_guide.Level == DTTS.Services.Settings.GuideLevel.Expert)
+        {
+            legalPlays = null; // 上級者用（ガイドなし）：まとめて選ぶ候補も出さない
+        }
         var next = legalPlays is null ? new List<PlaySuggestion>() : PlaySuggestions.Build(legalPlays).ToList();
         // 同じ候補なら作り直さない（カードを選ぶたびに呼ばれるため、ちらつかせない）
         if (next.Select(s => s.Label).SequenceEqual(PlaySuggestionChips.Select(s => s.Label)))
@@ -271,18 +282,27 @@ public sealed partial class GameTableViewModel
         return _npcProfiles.TryGetValue(playerId, out var profile) ? profile.Personality : null;
     }
 
-    /// <summary>アバター（性格の線画アイコン）を全員分そろえる。</summary>
+    /// <summary>アバター（性格またはプレイヤー設定のアイコン）を全員分そろえる。</summary>
     private void UpdateAvatars()
     {
         for (int id = 0; id < 4; id++)
         {
             var vm = GetPlayerVm(id);
+            if (id == _myPlayerId)
+            {
+                var info = PlayerIconInfo.Get(_myIconId);
+                vm.AvatarGlyph = info.Glyph;
+                vm.AvatarAccentHex = info.AccentHex;
+                vm.AvatarImagePath = _myCustomAvatarPath;
+                vm.AvatarLabel = vm.Name;
+                continue;
+            }
             var personality = PersonalityOf(id);
             vm.AvatarGlyph = NpcReactions.AvatarGlyph(personality);
+            vm.AvatarAccentHex = null;
+            vm.AvatarImagePath = null;
             bool isNpc = _client is null && _engine is { } e && e.GetPlayer(id).Kind == PlayerKind.Npc;
-            vm.AvatarLabel = id == _myPlayerId
-                ? "あなた"
-                : isNpc ? $"NPC（{NpcReactions.PersonalityName(personality)}）" : "プレイヤー";
+            vm.AvatarLabel = isNpc ? $"NPC（{NpcReactions.PersonalityName(personality)}）" : "プレイヤー";
         }
     }
 

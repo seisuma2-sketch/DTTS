@@ -169,19 +169,19 @@
             x:Name="ReactionBubble"
             HorizontalAlignment="Right"
             VerticalAlignment="Top"
-            Margin="0,-22,6,0"
-            MaxWidth="190"
-            Padding="10,4,10,5"
-            CornerRadius="11"
-            Background="#F2F4F7FB"
-            BorderBrush="#33000000"
+            Margin="0,-16,6,0"
+            MaxWidth="210"
+            Padding="11,5,11,6"
+            CornerRadius="12"
+            Background="#F7F8FCFF"
+            BorderBrush="#55000000"
             BorderThickness="1"
             Opacity="0"
             IsHitTestVisible="False">
             <TextBlock
                 x:Name="ReactionText"
-                FontSize="12"
-                FontWeight="SemiBold"
+                FontSize="13"
+                FontWeight="Bold"
                 Foreground="#FF1B2130"
                 TextTrimming="CharacterEllipsis" />
         </Border>

@@ -28,8 +28,9 @@ public sealed record PlayerSetup(string Name, PlayerKind Kind);
 /// </summary>
 public sealed class GameEngine
 {
-    private readonly RuleSettings _rules;
-    private readonly IJudgeLogic _judge;
+    private RuleSettings _rules;
+    private IJudgeLogic _judge;
+    private readonly Func<RuleSettings, IJudgeLogic>? _judgeFactory;
     private readonly IRandomSource _random;
     private readonly List<Player> _players;
     private readonly List<int> _seatOrder;
@@ -62,9 +63,13 @@ public sealed class GameEngine
     /// <summary>「次の1手番だけ」の11バックが掛かっている手番のプレイヤー（Jの後、最初に手番が来た人。まだ来ていなければ null）。</summary>
     private int? _elevenBackTurnPlayerId;
 
+    /// <summary>カード交換（天変地異を含む）で♦3を渡されたプレイヤーのID（いれば、その人から開始する）。</summary>
+    private int? _diamondThreeRecipientId;
+
     // --- ラウンド間状態 ---
     private readonly List<RoundResult> _roundResults = new();
     private Dictionary<int, PlayerRank> _previousRanks = new();
+    private readonly Dictionary<int, int> _consecutiveDaihinmin = new();
     private int? _lastRoundMiyakoOchiPlayerId;
 
     /// <summary>
@@ -89,7 +94,8 @@ public sealed class GameEngine
 
         _rules = rules.Clone();
         _rules.Normalize();
-        _judge = judgeFactory?.Invoke(_rules) ?? new JudgeLogic(_rules);
+        _judgeFactory = judgeFactory;
+        _judge = _judgeFactory?.Invoke(_rules) ?? new JudgeLogic(_rules);
         _random = random ?? new SystemRandomSource();
         _players = players.Select((p, i) => new Player(i, p.Name, p.Kind)).ToList();
         _seatOrder = _players.Select(p => p.Id).ToList();
@@ -105,8 +111,23 @@ public sealed class GameEngine
     // 公開状態
     // ======================================================================
 
-    /// <summary>このゲームで使用しているルール（開始時のスナップショット）。</summary>
+    /// <summary>このゲームで使用しているルール（開始時または途中変更後のスナップショット）。</summary>
     public RuleSettings Rules => _rules;
+
+    /// <summary>対戦途中でルールを変更し、判定ロジックを差し替える。</summary>
+    public void UpdateRules(RuleSettings newRules)
+    {
+        ArgumentNullException.ThrowIfNull(newRules);
+        var cloned = newRules.Clone();
+        cloned.Normalize();
+        // イベント発火中の再入による判定器差し替えを防ぐため Run 経由で直列化する
+        Run(() =>
+        {
+            _rules = cloned;
+            _judge = _judgeFactory?.Invoke(_rules) ?? new JudgeLogic(_rules);
+            return Ok();
+        });
+    }
 
     /// <summary>判定ロジック。</summary>
     public IJudgeLogic Judge => _judge;
@@ -182,6 +203,7 @@ public sealed class GameEngine
         _roundResults.Clear();
         _previousRanks = new Dictionary<int, PlayerRank>();
         _lastRoundMiyakoOchiPlayerId = null;
+        _consecutiveDaihinmin.Clear();
         RoundNumber = 0;
         StartRound();
         RunSteps();
@@ -283,10 +305,6 @@ public sealed class GameEngine
         Field = Field.WithPass(playerId);
         _passesSinceLastPlay.Add(playerId);
         Emit(new PlayerPassedEvent(playerId, false));
-        if (ExpireOneTurnElevenBack(playerId))
-        {
-            Emit(new ElevenBackExpiredEvent(playerId, Field));
-        }
 
         if (AllOthersPassed())
         {
@@ -294,7 +312,16 @@ public sealed class GameEngine
         }
         else
         {
-            StartTurn(NextEligible(playerId) ?? playerId);
+            var next = NextEligible(playerId);
+            if (next is null || (Field.LastPlayerId is { } lastPlayer && next.Value == lastPlayer))
+            {
+                // 他の全員がパス済みまたはスキップされて最後に出した本人へ1周した（または本人があがり済みで他に誰も残っていない）ため、場を流して親にする
+                FlushAndLead(null);
+            }
+            else
+            {
+                StartTurn(next.Value);
+            }
         }
         RunSteps();
         return Ok(playerId);
@@ -523,15 +550,28 @@ public sealed class GameEngine
         _miyakoOchiPlayerId = null;
         _gekokujo = false;
         _elevenBackTurnPlayerId = null;
+        _diamondThreeRecipientId = null;
         CurrentPlayerId = null;
         foreach (var p in _players)
         {
             p.ResetForRound();
         }
 
-        if (_rules.Progress.SeatShuffleEachRound)
+        switch (_rules.Progress.SeatShuffleMode)
         {
-            _random.Shuffle(_seatOrder);
+            case SeatShuffleMode.Random:
+                _random.Shuffle(_seatOrder);
+                break;
+            case SeatShuffleMode.FromDaifugo when _previousRanks.Count > 0:
+                _seatOrder.Sort((a, b) =>
+                    ((int)_previousRanks.GetValueOrDefault(a, PlayerRank.Heimin))
+                    .CompareTo((int)_previousRanks.GetValueOrDefault(b, PlayerRank.Heimin)));
+                break;
+            case SeatShuffleMode.FromDaihinmin when _previousRanks.Count > 0:
+                _seatOrder.Sort((a, b) =>
+                    ((int)_previousRanks.GetValueOrDefault(b, PlayerRank.Heimin))
+                    .CompareTo((int)_previousRanks.GetValueOrDefault(a, PlayerRank.Heimin)));
+                break;
         }
 
         Field = FieldState.CreateInitial();
@@ -550,13 +590,102 @@ public sealed class GameEngine
     private void Deal()
     {
         var deck = Card.CreateDeck(_rules.Joker.JokerCount).ToList();
-        _random.Shuffle(deck);
+
+        // シャッフル方式
+        switch (_rules.Progress.ShuffleMode)
+        {
+            case ShuffleMode.Separate2:
+            {
+                var low = deck.Where(c => !c.IsJoker && c.BaseStrength <= Card.GetBaseStrength(Rank.Nine)).ToList();
+                var high = deck.Where(c => c.IsJoker || c.BaseStrength > Card.GetBaseStrength(Rank.Nine)).ToList();
+                _random.Shuffle(low);
+                _random.Shuffle(high);
+                deck = new List<Card>(low.Count + high.Count);
+                int max = Math.Max(low.Count, high.Count);
+                for (int i = 0; i < max; i++)
+                {
+                    if (i < low.Count) deck.Add(low[i]);
+                    if (i < high.Count) deck.Add(high[i]);
+                }
+                break;
+            }
+            case ShuffleMode.Separate3:
+            {
+                var g1 = deck.Where(c => !c.IsJoker && c.BaseStrength <= Card.GetBaseStrength(Rank.Six)).ToList();
+                var g2 = deck.Where(c => !c.IsJoker && c.BaseStrength > Card.GetBaseStrength(Rank.Six) && c.BaseStrength <= Card.GetBaseStrength(Rank.Jack)).ToList();
+                var g3 = deck.Where(c => c.IsJoker || c.BaseStrength > Card.GetBaseStrength(Rank.Jack)).ToList();
+                _random.Shuffle(g1);
+                _random.Shuffle(g2);
+                _random.Shuffle(g3);
+                deck = new List<Card>(g1.Count + g2.Count + g3.Count);
+                int max = Math.Max(g1.Count, Math.Max(g2.Count, g3.Count));
+                for (int i = 0; i < max; i++)
+                {
+                    if (i < g1.Count) deck.Add(g1[i]);
+                    if (i < g2.Count) deck.Add(g2[i]);
+                    if (i < g3.Count) deck.Add(g3[i]);
+                }
+                break;
+            }
+            case ShuffleMode.Reality:
+            {
+                // 同ランクの固まりを分散させるため、まず数字順に並べてからリフル混ぜ＋軽シャッフル
+                var sorted = deck.OrderBy(c => c.IsJoker ? 99 : c.BaseStrength).ThenBy(c => (int)c.Suit).ToList();
+                int half = sorted.Count / 2;
+                var mixed = new List<Card>(sorted.Count);
+                for (int i = 0; i < half; i++)
+                {
+                    mixed.Add(sorted[i]);
+                    if (i + half < sorted.Count) mixed.Add(sorted[i + half]);
+                }
+                if (sorted.Count % 2 == 1) mixed.Add(sorted[^1]);
+                // 局所的に入れ替えて自然な偏りを作る
+                for (int i = 0; i < mixed.Count; i++)
+                {
+                    int j = Math.Clamp(i + _random.Next(5) - 2, 0, mixed.Count - 1);
+                    (mixed[i], mixed[j]) = (mixed[j], mixed[i]);
+                }
+                deck = mixed;
+                break;
+            }
+            default:
+                _random.Shuffle(deck);
+                break;
+        }
+
+        // ブラインドカード（枚数調整のため一部を除く）
+        int seatCount = _seatOrder.Count;
+        int removeCount = _rules.Progress.BlindCardMode switch
+        {
+            BlindCardMode.Remainder => deck.Count % seatCount,
+            BlindCardMode.Max13 => Math.Max(0, deck.Count - (Math.Min(13, deck.Count / seatCount) * seatCount)),
+            _ => 0,
+        };
+        if (removeCount > 0 && removeCount < deck.Count)
+        {
+            Card? protectedCard = _rules.Progress.FirstRoundStartCard switch
+            {
+                StartCardRule.DiamondThree => Card.Of(Suit.Diamond, Rank.Three),
+                StartCardRule.SpadeThree => Card.Of(Suit.Spade, Rank.Three),
+                StartCardRule.HeartThree => Card.Of(Suit.Heart, Rank.Three),
+                StartCardRule.ClubThree => Card.Of(Suit.Club, Rank.Three),
+                _ => null,
+            };
+            int removed = 0;
+            for (int i = deck.Count - 1; i >= 0 && removed < removeCount; i--)
+            {
+                if (protectedCard is { } pc && deck[i] == pc) continue;
+                deck.RemoveAt(i);
+                removed++;
+            }
+        }
+
         var hands = _seatOrder.ToDictionary(id => id, _ => new List<Card>());
         // 配り始めの席をランダムにし、端数の1枚多い手札が特定の席に偏らないようにする
-        int start = _random.Next(_seatOrder.Count);
+        int start = _random.Next(seatCount);
         for (int i = 0; i < deck.Count; i++)
         {
-            hands[_seatOrder[(start + i) % _seatOrder.Count]].Add(deck[i]);
+            hands[_seatOrder[(start + i) % seatCount]].Add(deck[i]);
         }
         foreach (var (id, cards) in hands)
         {
@@ -586,13 +715,19 @@ public sealed class GameEngine
         var fugo = FindByPreviousRank(PlayerRank.Fugo);
         var hinmin = FindByPreviousRank(PlayerRank.Hinmin);
 
-        // --- 天変地異 ---
-        if (ex.TenpenChiiEnabled && daifugo is not null && daihinmin is not null && QualifiesForTenpenChii(daihinmin))
+        // --- 天変地異（10以下条件、または5連続大貧民） ---
+        bool fiveConsecutive = ex.FiveConsecutiveDaihinminTenpenChii
+            && daihinmin is not null
+            && _consecutiveDaihinmin.GetValueOrDefault(daihinmin.Id) >= 5;
+        if (daifugo is not null && daihinmin is not null && ((ex.TenpenChiiEnabled && QualifiesForTenpenChii(daihinmin)) || fiveConsecutive))
         {
+            var d3 = Card.Of(Suit.Diamond, Rank.Three);
             var richCards = daifugo.TakeAll();
             var poorCards = daihinmin.TakeAll();
             daifugo.SetHand(poorCards);
             daihinmin.SetHand(richCards);
+            if (poorCards.Contains(d3)) _diamondThreeRecipientId = daifugo.Id;
+            else if (richCards.Contains(d3)) _diamondThreeRecipientId = daihinmin.Id;
             Emit(new CardsTransferredEvent(daihinmin.Id, daifugo.Id, poorCards, CardTransferReason.TenpenChii));
             Emit(new CardsTransferredEvent(daifugo.Id, daihinmin.Id, richCards, CardTransferReason.TenpenChii));
             return; // 通常の交換は行わない
@@ -674,6 +809,10 @@ public sealed class GameEngine
         }
         from.RemoveCards(cards);
         to.AddCards(cards);
+        if (reason == CardTransferReason.Exchange && cards.Contains(Card.Of(Suit.Diamond, Rank.Three)))
+        {
+            _diamondThreeRecipientId = to.Id;
+        }
         Emit(new CardsTransferredEvent(from.Id, to.Id, cards.ToArray(), reason));
     }
 
@@ -703,11 +842,19 @@ public sealed class GameEngine
         if (_previousRanks.Count == 0)
         {
             // 第1ラウンド
-            var holder = _players.FirstOrDefault(p => p.Hand.Contains(diamondThree));
-            if (_rules.Progress.DiamondThreeStarts && holder is not null)
+            Card? startCard = _rules.Progress.FirstRoundStartCard switch
+            {
+                StartCardRule.DiamondThree => diamondThree,
+                StartCardRule.SpadeThree => Card.Of(Suit.Spade, Rank.Three),
+                StartCardRule.HeartThree => Card.Of(Suit.Heart, Rank.Three),
+                StartCardRule.ClubThree => Card.Of(Suit.Club, Rank.Three),
+                _ => null,
+            };
+            var holder = startCard is { } sc ? _players.FirstOrDefault(p => p.Hand.Contains(sc)) : null;
+            if (holder is not null)
             {
                 leader = holder.Id;
-                Field = FieldState.CreateInitial(PlayDirection.Clockwise, diamondThree);
+                Field = FieldState.CreateInitial(PlayDirection.Clockwise);
             }
             else
             {
@@ -716,13 +863,13 @@ public sealed class GameEngine
         }
         else
         {
-            leader = _rules.Progress.LaterRoundLeader switch
+            leader = _diamondThreeRecipientId ?? (_rules.Progress.LaterRoundLeader switch
             {
                 RoundLeaderRule.Daifugo => FindByPreviousRank(PlayerRank.Daifugo)?.Id,
                 RoundLeaderRule.Daihinmin => FindByPreviousRank(PlayerRank.Daihinmin)?.Id,
                 RoundLeaderRule.DiamondThreeHolder => _players.FirstOrDefault(p => p.Hand.Contains(diamondThree))?.Id,
                 _ => null,
-            } ?? _seatOrder[_random.Next(_seatOrder.Count)];
+            }) ?? _seatOrder[_random.Next(_seatOrder.Count)];
         }
 
         StartTurn(leader);
@@ -776,11 +923,13 @@ public sealed class GameEngine
     /// このプレイヤーが現在の場でパス扱いか。
     /// パスはパス固定ルール時は場が流れるまで、通常は直前の出し以降。スキップは常に直前の出し以降のみ。
     /// </summary>
-    private bool IsPassedForTurn(int playerId)
-        => _skippedSinceLastPlay.Contains(playerId)
-            || (_rules.Progress.PassLocksUntilFlush ? Field.HasPassed(playerId) : _passesSinceLastPlay.Contains(playerId));
+    private bool HasRealPassed(int playerId)
+        => _rules.Progress.PassLocksUntilFlush ? Field.HasPassed(playerId) : _passesSinceLastPlay.Contains(playerId);
 
-    /// <summary>最後に出したプレイヤー以外の、残っている全員がパス扱いか。</summary>
+    private bool IsPassedForTurn(int playerId)
+        => _skippedSinceLastPlay.Contains(playerId) || HasRealPassed(playerId);
+
+    /// <summary>最後に出したプレイヤー以外の、残っている全員が実際にパスしたか（スキップは含めない）。</summary>
     private bool AllOthersPassed()
     {
         int? last = Field.LastPlayerId;
@@ -788,7 +937,7 @@ public sealed class GameEngine
         {
             return false;
         }
-        return _players.Where(p => !p.IsFinished && p.Id != last).All(p => IsPassedForTurn(p.Id));
+        return _players.Where(p => !p.IsFinished && p.Id != last).All(p => HasRealPassed(p.Id));
     }
 
     /// <summary>進行方向に沿って、from の次に位置する（あがっていない）プレイヤーを列挙する。</summary>
@@ -834,12 +983,12 @@ public sealed class GameEngine
     }
 
     /// <summary>
-    /// 「次の1手番だけ」の11バックで、その手番の人が行動（出す・パス）を終えたら解除する。
+    /// 「次の手番だけ」の11バックで、誰かがカードを出し終えたら解除する（パスでは消えない）。
     /// </summary>
     /// <returns>解除したら true。</returns>
     private bool ExpireOneTurnElevenBack(int playerId)
     {
-        if (!Field.IsElevenBackOneTurn || _elevenBackTurnPlayerId != playerId)
+        if (!Field.IsElevenBackOneTurn)
         {
             return false;
         }
@@ -888,6 +1037,11 @@ public sealed class GameEngine
             // 割り込みが成立：止められた効果（8切り・ろくろ首・99車）は発動しない
             ClearInterrupt();
         }
+        if (judgement.BeatMethod == BeatMethod.FourStop && !_rules.Flow.FourStopFlushesField)
+        {
+            // 4止めの後は、場が流れるまで砂嵐しか出せない（ほかの人はパスするか砂嵐で流す）
+            Field = Field.WithFourStopLocked(true);
+        }
         // 「次の1手番だけ」の11バック：この人が出し終えたので解除する（出した札は反転中の強さで判定済み）。
         // この出し札にJが含まれていれば、下の効果処理で改めて「次の人だけ」の11バックが掛かる
         bool elevenBackExpired = ExpireOneTurnElevenBack(playerId);
@@ -925,12 +1079,22 @@ public sealed class GameEngine
             switch (e.Type)
             {
                 case SpecialEffectType.ElevenBack:
-                case SpecialEffectType.StrongElevenBack:
                     steps.Add(() =>
                     {
                         Field = Field.WithElevenBackToggled(
-                            e.Type == SpecialEffectType.StrongElevenBack,
+                            _rules.ElevenBack.Duration == ElevenBackDuration.Persistent,
                             oneTurn: _rules.ElevenBack.Duration == ElevenBackDuration.NextTurnOnly);
+                        _elevenBackTurnPlayerId = null;
+                        Emit(new EffectAppliedEvent(playerId, e, true, Field));
+                    });
+                    break;
+                case SpecialEffectType.StrongElevenBack:
+                    steps.Add(() =>
+                    {
+                        // 強化11バック（Jが3枚）：次の手番が11バックの効果になる
+                        Field = Field.WithElevenBackToggled(
+                            persistent: false,
+                            oneTurn: true);
                         _elevenBackTurnPlayerId = null;
                         Emit(new EffectAppliedEvent(playerId, e, true, Field));
                     });
@@ -954,7 +1118,7 @@ public sealed class GameEngine
                     reverseCount += e.Magnitude;
                     break;
                 default:
-                    if (e.FlushesField)
+                    if (e.FlushesField || (e.Type == SpecialEffectType.FourStop && _rules.Flow.FourStopFlushesField))
                     {
                         flushEffect ??= e;
                     }
@@ -999,6 +1163,11 @@ public sealed class GameEngine
     private void ApplyRevolution(int playerId, TriggeredEffect effect)
     {
         Field = Field.WithRevolutionToggled(effect.Type == SpecialEffectType.Omen);
+        if (effect.Type == SpecialEffectType.Coup)
+        {
+            // クーデター成立後は場が流れるまで6・7・砂嵐のみ出せるようにロックする
+            Field = Field.WithCoupLocked(true);
+        }
         Emit(new EffectAppliedEvent(playerId, effect, true, Field));
     }
 
@@ -1012,13 +1181,18 @@ public sealed class GameEngine
             return;
         }
         var receiver = GetPlayer(target.Value);
-        RequestCardSelection(playerId, CardSelectionPurpose.SevenPass, n, n, receiver.Id, cards =>
+        int min = _rules.Special.SevenPassAllowZero ? 0 : n;
+        RequestCardSelection(playerId, CardSelectionPurpose.SevenPass, min, n, receiver.Id, cards =>
         {
-            Transfer(player, receiver, cards, CardTransferReason.SevenPass);
-            Emit(new EffectAppliedEvent(playerId, effect, true, Field));
+            if (cards.Count > 0)
+            {
+                Transfer(player, receiver, cards, CardTransferReason.SevenPass);
+            }
+            Emit(new EffectAppliedEvent(playerId, effect, cards.Count > 0, Field));
             if (player.HandCount == 0)
             {
-                FinishPlayer(playerId, FinishKind.Normal);
+                bool foul = _rules.ForbiddenFinish.Enabled && _rules.ForbiddenFinish.ForbidSevenPass;
+                FinishPlayer(playerId, foul ? FinishKind.Foul : FinishKind.Normal);
             }
         });
     }
@@ -1031,17 +1205,19 @@ public sealed class GameEngine
         {
             return;
         }
-        RequestCardSelection(playerId, CardSelectionPurpose.TenDiscard, 0, n, null, cards =>
+        int min = _rules.Special.TenDiscardAllowZero ? 0 : n;
+        RequestCardSelection(playerId, CardSelectionPurpose.TenDiscard, min, n, null, cards =>
         {
             if (cards.Count > 0)
             {
                 player.RemoveCards(cards);
                 Emit(new CardsDiscardedEvent(playerId, cards.ToArray(), CardDiscardReason.TenDiscard));
             }
-            Emit(new EffectAppliedEvent(playerId, effect, true, Field));
+            Emit(new EffectAppliedEvent(playerId, effect, cards.Count > 0, Field));
             if (player.HandCount == 0)
             {
-                FinishPlayer(playerId, FinishKind.Normal);
+                bool foul = _rules.ForbiddenFinish.Enabled && _rules.ForbiddenFinish.ForbidTenDiscard;
+                FinishPlayer(playerId, foul ? FinishKind.Foul : FinishKind.Normal);
             }
         });
     }
@@ -1051,6 +1227,11 @@ public sealed class GameEngine
 
     private void RequestTwelveBomber(int playerId, TriggeredEffect effect)
     {
+        // Qを出してそのままあがった場合は宣言・カード消去を行わない
+        if (GetPlayer(playerId).IsFinished)
+        {
+            return;
+        }
         // 宣言できるのは 13種の数字＋ジョーカーの最大14種
         int n = Math.Min(effect.Magnitude, MaxDeclarableRanks);
         _rankDeclarationHandler = ranks =>
@@ -1085,7 +1266,10 @@ public sealed class GameEngine
                 var p = GetPlayer(id);
                 if (!p.IsFinished && p.HandCount == 0)
                 {
-                    FinishPlayer(id, FinishKind.Normal);
+                    bool foul = id != playerId
+                        && _rules.ForbiddenFinish.Enabled
+                        && _rules.ForbiddenFinish.TwelveBomberFinishRule == GentleStrictRule.Strict;
+                    FinishPlayer(id, foul ? FinishKind.Foul : FinishKind.Normal);
                 }
             }
         };
@@ -1100,13 +1284,16 @@ public sealed class GameEngine
     /// <summary>出し札の後処理：リバース → 場流し（または4止め・砂嵐の割り込み受付）→ スキップ → 次の手番。</summary>
     private void ConcludePlay(int playerId, TriggeredEffect? flushEffect, int skipCount, int reverseCount, TriggeredEffect? reverseEffect)
     {
-        if (reverseCount % 2 == 1)
+        bool doReverse = _rules.SkipReverse.ReverseMultipleCountsAsOne
+            ? reverseCount > 0
+            : reverseCount % 2 == 1;
+        if (doReverse)
         {
             Field = Field.WithDirectionReversed();
         }
         if (reverseEffect is not null)
         {
-            Emit(new EffectAppliedEvent(playerId, reverseEffect, reverseCount % 2 == 1, Field));
+            Emit(new EffectAppliedEvent(playerId, reverseEffect, doReverse, Field));
         }
 
         if (flushEffect is not null)
@@ -1152,8 +1339,9 @@ public sealed class GameEngine
             return;
         }
         var next = NextEligible(playerId);
-        if (next is null)
+        if (next is null || next.Value == playerId)
         {
+            // 他の全員がパス済みまたは今回スキップされて手番が1周したため、場を流して自分が親になる
             FlushAndLead(null);
             return;
         }
@@ -1375,6 +1563,12 @@ public sealed class GameEngine
         }
 
         _previousRanks = _players.ToDictionary(p => p.Id, p => p.Rank);
+        foreach (var p in _players)
+        {
+            _consecutiveDaihinmin[p.Id] = p.Rank == PlayerRank.Daihinmin
+                ? _consecutiveDaihinmin.GetValueOrDefault(p.Id) + 1
+                : 0;
+        }
         _lastRoundMiyakoOchiPlayerId = _miyakoOchiPlayerId;
 
         var result = new RoundResult(RoundNumber, IsExtraRound, standings, _gekokujo, _miyakoOchiPlayerId);

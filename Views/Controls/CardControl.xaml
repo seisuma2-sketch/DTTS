@@ -184,12 +184,12 @@
                         Background="{StaticResource AppAccentSubtleBrush}"
                         Visibility="Collapsed" />
 
-                    <!-- 5. キーボード操作中のカーソル枠（←/→ で移動、Space で選択） -->
+                    <!-- 5. キーボード操作中のカーソル枠（←/→ で移動、Space で選択。選択枠と重ならないよう外側に表示） -->
                     <Border
                         x:Name="KeyboardCursorOverlay"
-                        Margin="-1"
-                        CornerRadius="7"
-                        BorderThickness="3"
+                        Margin="-3.5"
+                        CornerRadius="9"
+                        BorderThickness="2"
                         BorderBrush="#FFF2C94C"
                         Visibility="Collapsed" />
                 </Grid>

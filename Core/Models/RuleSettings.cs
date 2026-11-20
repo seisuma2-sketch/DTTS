@@ -171,9 +171,43 @@ public sealed class RuleSettings
         {
             ElevenBack.Duration = ElevenBackDuration.UntilFlush;
         }
-        if (!Enum.IsDefined(Flow.FourStopCount))
+        // 4止めは常に8の2倍のみ（旧設定の SameAsEight も DoubleEight へ正規化）
+        Flow.FourStopCount = FourStopCountRule.DoubleEight;
+        if (!Enum.IsDefined(Joker.EffectMode))
         {
-            Flow.FourStopCount = FourStopCountRule.DoubleEight;
+            Joker.EffectMode = JokerEffectMode.Off;
+        }
+        if (!Enum.IsDefined(ForbiddenFinish.JokerFinishRule))
+        {
+            ForbiddenFinish.JokerFinishRule = GentleStrictRule.Strict;
+        }
+        if (!Enum.IsDefined(ForbiddenFinish.SpadeThreeFinishRule))
+        {
+            ForbiddenFinish.SpadeThreeFinishRule = GentleStrictRule.Gentle;
+        }
+        if (!Enum.IsDefined(ForbiddenFinish.TwelveBomberFinishRule))
+        {
+            ForbiddenFinish.TwelveBomberFinishRule = GentleStrictRule.Strict;
+        }
+        if (!Enum.IsDefined(ForbiddenFinish.SequenceFinishRule))
+        {
+            ForbiddenFinish.SequenceFinishRule = GentleStrictRule.Off;
+        }
+        if (!Enum.IsDefined(Progress.FirstRoundStartCard))
+        {
+            Progress.FirstRoundStartCard = StartCardRule.DiamondThree;
+        }
+        if (!Enum.IsDefined(Progress.SeatShuffleMode))
+        {
+            Progress.SeatShuffleMode = SeatShuffleMode.Off;
+        }
+        if (!Enum.IsDefined(Progress.ShuffleMode))
+        {
+            Progress.ShuffleMode = ShuffleMode.Random;
+        }
+        if (!Enum.IsDefined(Progress.BlindCardMode))
+        {
+            Progress.BlindCardMode = BlindCardMode.Off;
         }
 
         // トリガー数字が Joker 等の不正値になっていたら既定値へ戻す
@@ -374,10 +408,14 @@ public sealed class FlowRules
     /// <summary>4止めに必要な枚数（標準は8の枚数の2倍：8が1枚なら4が2枚）。</summary>
     public FourStopCountRule FourStopCount { get; set; } = FourStopCountRule.DoubleEight;
 
+    /// <summary>4止めの後に場を流して自分のターンにする（無効時は砂嵐しか出せないロック状態）。</summary>
+    public bool FourStopFlushesField { get; set; } = false;
+
     /// <summary>
     /// 砂嵐：<see cref="SandstormRank"/> をちょうど <see cref="SandstormCount"/> 枚出すと、
-    /// 同枚数のどんな組にも強さに関係なく勝ち、場を流す（既定：3を3枚）。縛りには従う。
-    /// 有効時は、ろくろ首・99車が出た直後に砂嵐を割り込みで出して流しを止められる（枚数・縛りは問わない）。
+    /// どんな場でも（枚数・種別・縛り・革命を問わず）出せて、すぐに場を流す（既定：3を3枚）。
+    /// 有効時は、8切り・ろくろ首・99車・エンペラーが出た直後に砂嵐を割り込みで出して流しを止められ、
+    /// 4止めの成立後も砂嵐だけは出せる。
     /// </summary>
     public bool SandstormEnabled { get; set; } = false;
 
@@ -389,7 +427,7 @@ public sealed class FlowRules
 
     /// <summary>
     /// 99車（救急車）：<see cref="AmbulanceRank"/> をちょうど <see cref="AmbulanceCount"/> 枚出すと、
-    /// 同枚数のどんな組にも勝ち、場を流す（既定：9を2枚）。縛りには従う。
+    /// 通常どおり場に勝って出せたとき、場を流す（既定：9を2枚）。ろくろ首と同じく、強さ・縛りの判定はふつうの出し札と同じ。
     /// </summary>
     public bool AmbulanceEnabled { get; set; } = false;
 
@@ -489,6 +527,9 @@ public sealed class SkipReverseRules
 
     /// <summary>12リバースのトリガー数字。</summary>
     public Rank TwelveReverseRank { get; set; } = Rank.Queen;
+
+    /// <summary>複数枚の9/12を同時に出してもリバース効果は1回分（1枚と同じ）にする。</summary>
+    public bool ReverseMultipleCountsAsOne { get; set; } = true;
 }
 
 // ======================================================================
@@ -501,11 +542,17 @@ public sealed class SpecialEffectRules
     /// <summary>7渡し：出した枚数分、次のプレイヤーへ好きな手札を渡す。</summary>
     public bool SevenPassEnabled { get; set; } = false;
 
+    /// <summary>7渡しの枚数選択（ON：0枚〜出した枚数まで自由 / OFF：出した枚数分を必ず渡す）。</summary>
+    public bool SevenPassAllowZero { get; set; } = true;
+
     /// <summary>7渡しのトリガー数字。</summary>
     public Rank SevenPassRank { get; set; } = Rank.Seven;
 
     /// <summary>10捨て：出した枚数分、好きな手札を捨てる。</summary>
     public bool TenDiscardEnabled { get; set; } = false;
+
+    /// <summary>10捨ての枚数選択（ON：0枚〜出した枚数まで自由 / OFF：出した枚数分を必ず捨てる）。</summary>
+    public bool TenDiscardAllowZero { get; set; } = true;
 
     /// <summary>10捨てのトリガー数字。</summary>
     public Rank TenDiscardRank { get; set; } = Rank.Ten;
@@ -541,10 +588,27 @@ public sealed class JokerRules
     public Rank SpadeThreeReturnRank { get; set; } = Rank.Three;
 
     /// <summary>
-    /// ジョーカーが代用した数字の効果を発動させる（例：8の代わりのジョーカーで8切り）。
-    /// 砂嵐・99車などの「特定数字×枚数」役にも適用される。
+    /// ジョーカーが代用した数字の効果を発動させる（旧互換：true で All、false で Off）。
     /// </summary>
-    public bool JokerTriggersEffects { get; set; } = false;
+    public bool JokerTriggersEffects
+    {
+        get => EffectMode != JokerEffectMode.Off;
+        set
+        {
+            if (value && EffectMode == JokerEffectMode.Off)
+            {
+                EffectMode = JokerEffectMode.All;
+            }
+            else if (!value)
+            {
+                EffectMode = JokerEffectMode.Off;
+            }
+        }
+    }
+
+    /// <summary>ジョーカー代用時の効果発動範囲（OFF / 限定 / 全て）。</summary>
+    [JsonPropertyOrder(1)]
+    public JokerEffectMode EffectMode { get; set; } = JokerEffectMode.Off;
 }
 
 // ======================================================================
@@ -589,14 +653,59 @@ public sealed class ForbiddenFinishRules
     /// <summary>8切りが発動する出し札であがれない。</summary>
     public bool ForbidEightCut { get; set; } = true;
 
-    /// <summary>ジョーカーを含む出し札であがれない。</summary>
-    public bool ForbidJoker { get; set; } = true;
+    /// <summary>ジョーカーを含む出し札であがれない（旧互換）。</summary>
+    public bool ForbidJoker
+    {
+        get => JokerFinishRule != GentleStrictRule.Off;
+        set
+        {
+            if (value && JokerFinishRule == GentleStrictRule.Off) JokerFinishRule = GentleStrictRule.Strict;
+            else if (!value) JokerFinishRule = GentleStrictRule.Off;
+        }
+    }
 
-    /// <summary>スペ3返しであがれない。</summary>
-    public bool ForbidSpadeThree { get; set; } = true;
+    /// <summary>ジョーカーあがり禁止（OFF / 優しい＝単騎のみ禁止 / 厳しい＝複数枚も禁止）。</summary>
+    [JsonPropertyOrder(1)]
+    public GentleStrictRule JokerFinishRule { get; set; } = GentleStrictRule.Strict;
 
-    /// <summary>12ボンバーが発動する出し札であがれない。</summary>
-    public bool ForbidTwelveBomber { get; set; } = false;
+    /// <summary>スペ3返しであがれない（旧互換）。</summary>
+    public bool ForbidSpadeThree
+    {
+        get => SpadeThreeFinishRule != GentleStrictRule.Off;
+        set
+        {
+            if (value && SpadeThreeFinishRule == GentleStrictRule.Off) SpadeThreeFinishRule = GentleStrictRule.Gentle;
+            else if (!value) SpadeThreeFinishRule = GentleStrictRule.Off;
+        }
+    }
+
+    /// <summary>スペ3あがり禁止（OFF / 優しい＝スペ3返しのみ禁止 / 厳しい＝単なる♠3出しも禁止）。</summary>
+    [JsonPropertyOrder(1)]
+    public GentleStrictRule SpadeThreeFinishRule { get; set; } = GentleStrictRule.Gentle;
+
+    /// <summary>12ボンバーが発動する出し札であがれない（旧互換）。</summary>
+    public bool ForbidTwelveBomber
+    {
+        get => TwelveBomberFinishRule != GentleStrictRule.Off;
+        set
+        {
+            if (value && TwelveBomberFinishRule == GentleStrictRule.Off) TwelveBomberFinishRule = GentleStrictRule.Strict;
+            else if (!value) TwelveBomberFinishRule = GentleStrictRule.Off;
+        }
+    }
+
+    /// <summary>Qボンバーあがり禁止（OFF / 優しい＝宣言者のみ / 厳しい＝当てられた相手も禁止）。</summary>
+    [JsonPropertyOrder(1)]
+    public GentleStrictRule TwelveBomberFinishRule { get; set; } = GentleStrictRule.Strict;
+
+    /// <summary>階段あがり禁止（OFF / 優しい＝階段なら2等が含まれても禁止にしない / 厳しい＝階段あがり自体を禁止）。</summary>
+    public GentleStrictRule SequenceFinishRule { get; set; } = GentleStrictRule.Off;
+
+    /// <summary>7渡しで手札を0枚にしてあがれない。</summary>
+    public bool ForbidSevenPass { get; set; } = false;
+
+    /// <summary>10捨てで手札を0枚にしてあがれない。</summary>
+    public bool ForbidTenDiscard { get; set; } = false;
 
     /// <summary>11バックが発動する出し札であがれない。</summary>
     public bool ForbidElevenBack { get; set; } = false;
@@ -647,6 +756,9 @@ public sealed class ExchangeRules
 
     /// <summary>天変地異の判定基準数字（既定10：手札が10以下のみ）。</summary>
     public Rank TenpenChiiMaxRank { get; set; } = Rank.Ten;
+
+    /// <summary>5ラウンド連続で大貧民だった場合、次のラウンド開始時に強制的に天変地異を起こす。</summary>
+    public bool FiveConsecutiveDaihinminTenpenChii { get; set; } = false;
 }
 
 // ======================================================================
@@ -656,11 +768,41 @@ public sealed class ExchangeRules
 /// <summary>12. 進行・配牌ルール。</summary>
 public sealed class ProgressRules
 {
-    /// <summary>ダイヤ3初手：第1ラウンドは♦3を持つプレイヤーが親となり、初手に♦3を含めなければならない。</summary>
-    public bool DiamondThreeStarts { get; set; } = true;
+    /// <summary>ダイヤ3初手（旧互換）。</summary>
+    public bool DiamondThreeStarts
+    {
+        get => FirstRoundStartCard != StartCardRule.Free;
+        set
+        {
+            if (value && FirstRoundStartCard == StartCardRule.Free) FirstRoundStartCard = StartCardRule.DiamondThree;
+            else if (!value) FirstRoundStartCard = StartCardRule.Free;
+        }
+    }
 
-    /// <summary>席替え：ラウンドごとに座席順をシャッフルする。</summary>
-    public bool SeatShuffleEachRound { get; set; } = false;
+    /// <summary>第1ラウンドのスタート札（♦3 / ♠3 / ♥3 / ♣3 / 自由）。</summary>
+    [JsonPropertyOrder(1)]
+    public StartCardRule FirstRoundStartCard { get; set; } = StartCardRule.DiamondThree;
+
+    /// <summary>席替え（旧互換）。</summary>
+    public bool SeatShuffleEachRound
+    {
+        get => SeatShuffleMode != SeatShuffleMode.Off;
+        set
+        {
+            if (value && SeatShuffleMode == SeatShuffleMode.Off) SeatShuffleMode = SeatShuffleMode.Random;
+            else if (!value) SeatShuffleMode = SeatShuffleMode.Off;
+        }
+    }
+
+    /// <summary>ラウンド終了後の席替え方式（OFF / ランダム / 大富豪から / 大貧民から）。</summary>
+    [JsonPropertyOrder(1)]
+    public SeatShuffleMode SeatShuffleMode { get; set; } = SeatShuffleMode.Off;
+
+    /// <summary>配牌時のシャッフル方式。</summary>
+    public ShuffleMode ShuffleMode { get; set; } = ShuffleMode.Random;
+
+    /// <summary>配牌時のブラインドカード方式。</summary>
+    public BlindCardMode BlindCardMode { get; set; } = BlindCardMode.Off;
 
     /// <summary>
     /// パス制限：1ラウンドでパスできる回数の上限（0＝無制限）。

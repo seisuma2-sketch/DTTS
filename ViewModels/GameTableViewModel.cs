@@ -19,6 +19,8 @@ using Microsoft.UI.Dispatching;
 
 namespace DTTS.ViewModels;
 
+public sealed record SpectateTargetItem(int PlayerId, string Name, int HandCount, bool IsSelected);
+
 public sealed partial class GameTableViewModel : ViewModelBase
 {
     private readonly INavigationService _navigation;
@@ -46,6 +48,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private Task _saveTask = Task.CompletedTask;
     private int _guestResultRound;
     private bool _guestDecisionInFlight;
+    private bool _isSendingGuestCommand;
     private List<List<Card>> _guestLegalPlays = new();
 
     // --- プレイヤー ---
@@ -102,6 +105,31 @@ public sealed partial class GameTableViewModel : ViewModelBase
     // --- 手札と場 ---
     public ObservableCollection<CardViewModel> HumanHand { get; } = new();
     public ObservableCollection<Card> FieldCards { get; } = new();
+    private int _lastPlayedCardsCount;
+    private int[] _lastGuestFieldIds = Array.Empty<int>();
+
+    [ObservableProperty]
+    public partial bool IsMyTurn { get; set; }
+
+    // --- 革命時背景・プレイヤーアバター ---
+    [ObservableProperty]
+    public partial RevolutionBgColor RevolutionBgColor { get; set; } = RevolutionBgColor.DeepCrimson;
+
+    private string _myIconId = "default";
+    private string? _myCustomAvatarPath;
+    private ClientView? _latestClientView;
+
+    // --- 観戦モード（自分があがった後に他プレイヤーの手札を見る） ---
+    [ObservableProperty]
+    public partial bool IsSpectating { get; set; }
+
+    [ObservableProperty]
+    public partial int? SpectateTargetId { get; set; }
+
+    [ObservableProperty]
+    public partial string SpectatingTitle { get; set; } = "";
+
+    public ObservableCollection<SpectateTargetItem> SpectatablePlayers { get; } = new();
 
     // --- 状態プロパティ ---
     [ObservableProperty]
@@ -254,6 +282,185 @@ public sealed partial class GameTableViewModel : ViewModelBase
     /// <summary>進行スピードを変えられるか（ゲストは変えられない。NPCはホスト側で動いている）。</summary>
     public bool CanChangeSpeed => !IsGuest;
 
+    // ------------------------------------------------------------------
+    // 自動パス（出せる手がないとき・割り込みで止め札がないときに自動で流す）
+    // ------------------------------------------------------------------
+
+    /// <summary>出せる手がないときに自動でパスするか（対戦中も切り替え・保存可能）。</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(AutoPassLabel))]
+    [NotifyPropertyChangedFor(nameof(AutoPassToolTip))]
+    public partial bool AutoPassWhenCannotPlay { get; set; }
+
+    public string AutoPassLabel => AutoPassWhenCannotPlay ? "自動パス: ON" : "自動パス: OFF";
+
+    public string AutoPassToolTip => AutoPassWhenCannotPlay
+        ? "出せる手がないときは自動でパスします（クリックで OFF）"
+        : "出せる手がないときも手動でパスします（クリックで ON）";
+
+    private bool _autoPassQueued;
+
+    [RelayCommand]
+    private void ToggleAutoPass()
+    {
+        bool next = !AutoPassWhenCannotPlay;
+        AutoPassWhenCannotPlay = next;
+        _ = SaveAutoPassAsync(next);
+        if (next)
+        {
+            TryTriggerAutoPassNow();
+        }
+    }
+
+    private async Task SaveAutoPassAsync(bool enabled)
+    {
+        try
+        {
+            await _settingsRepo.UpdateAppearanceAsync(a => a.AutoPassWhenCannotPlay = enabled);
+        }
+        catch (Exception ex)
+        {
+            App.WriteCrashLog("GameTable.SaveAutoPass", ex);
+        }
+    }
+
+    private void ScheduleAutoPass()
+    {
+        if (_autoPassQueued || _isShutDown || (_autoplay && _client is null))
+        {
+            return;
+        }
+        _autoPassQueued = true;
+        _dispatcherQueue.TryEnqueue(() =>
+        {
+            _autoPassQueued = false;
+            if (_isShutDown || !CanPass)
+            {
+                return;
+            }
+            if (PassCommand.CanExecute(null))
+            {
+                PassCommand.Execute(null);
+            }
+        });
+    }
+
+    private void TryTriggerAutoPassNow()
+    {
+        if (!AutoPassWhenCannotPlay || !CanPass)
+        {
+            return;
+        }
+        if (_client != null)
+        {
+            if (_client.View?.Decision is { } d && d.PlayerId == _myPlayerId && d.Kind.IsPlayDecision() && _guestLegalPlays.Count == 0)
+            {
+                ScheduleAutoPass();
+            }
+            return;
+        }
+        if (_engine?.PendingDecision is { } pd && pd.PlayerId == _myPlayerId && pd.Kind.IsPlayDecision()
+            && _engine.GetLegalPlays(_myPlayerId).Count == 0)
+        {
+            ScheduleAutoPass();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 親による対戦中のルール変更
+    // ------------------------------------------------------------------
+
+    /// <summary>対戦中にルールを変更できるか（1人プレイまたはホストのみ）。</summary>
+    public bool CanEditRulesInMatch => !IsGuest;
+
+    [ObservableProperty]
+    public partial bool IsInMatchRulesOpen { get; set; }
+
+    public ObservableCollection<RuleCategoryViewModel> InMatchRuleCategories { get; } = new();
+
+    private RuleSettings? _editingRules;
+
+    [RelayCommand]
+    private void OpenInMatchRules()
+    {
+        if (!CanEditRulesInMatch) return;
+        _editingRules = _rules.Clone();
+        RebuildInMatchRuleCategories();
+        IsInMatchRulesOpen = true;
+    }
+
+    [RelayCommand]
+    private void ApplyInMatchPreset(string? presetName)
+    {
+        if (_editingRules is null) return;
+        var preset = presetName switch
+        {
+            "simple" => RulePreset.Beginner,
+            "all" => RulePreset.Expert,
+            "dev" => RulePreset.Developer,
+            _ => RulePreset.Intermediate,
+        };
+        _editingRules = RulePresets.Create(preset, _editingRules);
+        RebuildInMatchRuleCategories();
+    }
+
+    [RelayCommand]
+    private async Task SaveInMatchRulesAsync()
+    {
+        if (_editingRules is null || !CanEditRulesInMatch)
+        {
+            IsInMatchRulesOpen = false;
+            return;
+        }
+        _editingRules.Normalize();
+        _rules = _editingRules.Clone();
+        _engine?.UpdateRules(_rules);
+        _hostSession?.UpdateRules(_rules);
+        IsInMatchRulesOpen = false;
+        UpdateHumanHandVisuals();
+        NoticeMessage = "ルールを変更して記録しました";
+        await SaveRulesInMatchAsync(_rules);
+    }
+
+    [RelayCommand]
+    private void CancelInMatchRules()
+    {
+        IsInMatchRulesOpen = false;
+    }
+
+    private void RebuildInMatchRuleCategories()
+    {
+        InMatchRuleCategories.Clear();
+        if (_editingRules is null) return;
+        foreach (var cat in RuleCatalog.Build(_editingRules, () => { }))
+        {
+            InMatchRuleCategories.Add(cat);
+        }
+    }
+
+    private async Task SaveRulesInMatchAsync(RuleSettings rules)
+    {
+        try
+        {
+            await _settingsRepo.SaveRulesAsync(rules);
+        }
+        catch (Exception ex)
+        {
+            App.WriteCrashLog("GameTable.SaveRules", ex);
+        }
+    }
+
+    private void OnClientRulesUpdated(object? sender, RuleSettings newRules)
+    {
+        _dispatcherQueue.TryEnqueue(() =>
+        {
+            if (_isShutDown) return;
+            _rules = newRules;
+            NoticeMessage = "親がルールを変更しました";
+            UpdateGuestCanPlay();
+        });
+    }
+
     partial void OnSpeedChanged(GameSpeed value)
     {
         OnPropertyChanged(nameof(SpeedLabel));
@@ -389,12 +596,33 @@ public sealed partial class GameTableViewModel : ViewModelBase
         try
         {
             var appearance = await _settingsRepo.LoadAppearanceAsync();
+            DTTS.Views.Controls.CardControl.GlobalHoverEnabled = appearance.CardHoverEnabled;
             Speed = appearance.GameSpeed;
+            AutoPassWhenCannotPlay = appearance.AutoPassWhenCannotPlay;
+            RevolutionBgColor = appearance.RevolutionBgColor;
+            _myIconId = appearance.PlayerIconId;
+            _myCustomAvatarPath = appearance.CustomAvatarPath;
             _guide = new GuideHints(appearance.GuideLevel); // 操作ガイドのレベル（ヒントの量・割り込み確認の出し方）
         }
         catch (Exception ex)
         {
             App.WriteCrashLog("GameTable.LoadSpeed", ex);
+        }
+
+        // 初期化待機中に画面離脱（ShutdownAsync）された場合は引き継いだ通信セッションも破棄して終了する
+        if (_isShutDown)
+        {
+            if (netParams?.Client != null)
+            {
+                try { await netParams.Client.DisposeAsync(); }
+                catch (Exception ex) { App.WriteCrashLog("GameTable.ShutdownClient", ex); }
+            }
+            if (netParams?.HostSession != null)
+            {
+                try { await netParams.HostSession.DisposeAsync(); }
+                catch (Exception ex) { App.WriteCrashLog("GameTable.ShutdownHost", ex); }
+            }
+            return;
         }
 
         if (netParams?.Client != null)
@@ -403,9 +631,11 @@ public sealed partial class GameTableViewModel : ViewModelBase
             _client = netParams.Client;
             _rules = netParams.Rules;
             IsGuest = true;
+            OnPropertyChanged(nameof(CanEditRulesInMatch));
             _client.ViewUpdated += OnClientViewUpdated;
             _client.Disconnected += OnClientDisconnected;
             _client.NoticeReceived += OnClientNoticeReceived;
+            _client.RulesUpdated += OnClientRulesUpdated;
 
             if (_client.View != null)
             {
@@ -418,6 +648,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
         {
             // ホストモード
             _hostSession = netParams.HostSession;
+            _hostSession.ReactionReceived += OnHostReactionReceived; // 定型リアクション（参加者・自分）
             _engine = _hostSession.Engine ?? throw new InvalidOperationException("Host Engine is null");
             _rules = netParams.Rules;
             _myPlayerId = 0;
@@ -452,7 +683,9 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         // 1人用モード
         _rules = await _settingsRepo.LoadRulesAsync();
+        if (_isShutDown) return;
         var npcSettings = await _settingsRepo.LoadNpcAsync();
+        if (_isShutDown) return;
 
         // プレイヤー設定
         Player0.Name = npcSettings.PlayerName;
@@ -515,6 +748,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
         // 後始末の後に、UIスレッドの待ち行列に残っていたイベントが届いても無視する
         if (_engine == null || _isShutDown) return;
 
+        RecordHistory(ev); // プレイ履歴（ログ）
+
         switch (ev)
         {
             case RoundStartedEvent rs:
@@ -549,12 +784,17 @@ public sealed partial class GameTableViewModel : ViewModelBase
                 break;
 
             case CardsPlayedEvent cp:
-                FieldPlayedBy = cp.PlayerId; // 場へ飛ぶ演出の出どころ（FieldCards を入れ替える前に決める）
-                if (cp.Judgement.Play != null) RaiseCardsFlight(cp.PlayerId, cp.Judgement.Play.Cards);
-                FieldCards.Clear();
+                FieldPlayedBy = cp.PlayerId; // 場へ飛ぶ演出の出どころ（FieldCards を追加する前に決める）
                 if (cp.Judgement.Play != null)
                 {
+                    RaiseCardsFlight(cp.PlayerId, cp.Judgement.Play.Cards);
+                    _lastPlayedCardsCount = cp.Judgement.Play.Count;
+                    // 場が流れるまで出されたカードを場にとどめる
                     foreach (var c in cp.Judgement.Play.Cards) FieldCards.Add(c);
+                }
+                else
+                {
+                    _lastPlayedCardsCount = 0;
                 }
                 GetPlayerVm(cp.PlayerId).IsPassed = false;
                 ApplyFieldBadges(cp.Field);
@@ -592,6 +832,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
             case FieldFlushedEvent ff:
                 FieldPlayedBy = null;
                 FieldCards.Clear();
+                _lastPlayedCardsCount = 0;
                 ApplyFieldBadges(ff.Field); // 11バック・縛りは場が流れると解除される
                 StatusMessage = ff.Cause.HasValue ? $"場が流れました（{ff.Cause.Value}）" : "場が流れました";
                 for (int i = 0; i < 4; i++) GetPlayerVm(i).IsPassed = false;
@@ -630,6 +871,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         UpdateHumanHandVisuals();
         UpdateSkipToResultAvailability();
+        UpdateSpectationState();
         UpdateBgm();
     }
 
@@ -673,6 +915,89 @@ public sealed partial class GameTableViewModel : ViewModelBase
         if (_npcController is not null) _npcController.Timing = NpcTimingOptions.Instant;
         if (_hostSession?.Npc is { } hostNpc) hostNpc.Timing = NpcTimingOptions.Instant;
         StatusMessage = "残りの対戦をスキップしています...";
+    }
+
+    /// <summary>観戦対象のプレイヤーを切り替える。</summary>
+    [RelayCommand]
+    private void SelectSpectatePlayer(int playerId)
+    {
+        SpectateTargetId = playerId;
+        UpdateSpectationState();
+    }
+
+    /// <summary>自分があがっていて未あがりプレイヤーがいる場合、観戦モードとして対象の手札を表示する。</summary>
+    private void UpdateSpectationState()
+    {
+        if (_isShutDown) return;
+
+        var candidates = new List<(int Id, string Name, IReadOnlyList<Card> Hand)>();
+
+        if (_client is null && _engine is { Phase: GamePhase.Playing } engine)
+        {
+            var me = engine.GetPlayer(_myPlayerId);
+            bool myDecisionPending = engine.PendingDecision is { } pending && pending.PlayerId == _myPlayerId;
+            if (me.IsFinished && !myDecisionPending && !IsDecisionDialogOpen)
+            {
+                foreach (var p in engine.Players.Where(p => p.Id != _myPlayerId && !p.IsFinished))
+                {
+                    candidates.Add((p.Id, DisplayName(p.Id, p.Name), p.Hand));
+                }
+            }
+        }
+        else if (_client is not null && _latestClientView is { Phase: GamePhase.Playing } cv)
+        {
+            var me = cv.Players.FirstOrDefault(p => p.Id == _myPlayerId);
+            if (me is { IsFinished: true } && cv.SpectatableHands is { Length: > 0 } hands)
+            {
+                foreach (var sh in hands)
+                {
+                    var pDto = cv.Players.FirstOrDefault(p => p.Id == sh.PlayerId);
+                    if (pDto is { IsFinished: false })
+                    {
+                        candidates.Add((sh.PlayerId, DisplayName(sh.PlayerId, pDto.Name), sh.CardIds.Select(Card.FromId).ToList()));
+                    }
+                }
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            if (IsSpectating)
+            {
+                IsSpectating = false;
+                SpectateTargetId = null;
+                SpectatingTitle = "";
+                SpectatablePlayers.Clear();
+            }
+            return;
+        }
+
+        IsSpectating = true;
+        if (SpectateTargetId is null || candidates.All(c => c.Id != SpectateTargetId.Value))
+        {
+            SpectateTargetId = candidates[0].Id;
+        }
+
+        SpectatablePlayers.Clear();
+        foreach (var c in candidates)
+        {
+            SpectatablePlayers.Add(new SpectateTargetItem(c.Id, c.Name, c.Hand.Count, c.Id == SpectateTargetId.Value));
+        }
+
+        var target = candidates.First(c => c.Id == SpectateTargetId.Value);
+        SpectatingTitle = $"観戦中：{target.Name} の手札（{target.Hand.Count}枚）";
+
+        var currentCards = HumanHand.Select(vm => vm.Card).ToList();
+        if (!currentCards.SequenceEqual(target.Hand))
+        {
+            HumanHand.Clear();
+            foreach (var card in target.Hand)
+            {
+                HumanHand.Add(new CardViewModel(card) { CanPlay = true });
+            }
+        }
+        CanPlay = false;
+        CanPass = false;
     }
 
     /// <summary>早送りをやめ、NPC の考える時間を進行スピードの設定へ戻す。</summary>
@@ -897,12 +1222,13 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         UpdateAllPlayersInfo();
 
-        bool isMyTurn = (activePlayerId == 0);
+        bool isMyTurn = (activePlayerId == _myPlayerId) && !IsSpectating;
+        IsMyTurn = isMyTurn;
         CanPass = isMyTurn && (_engine.PendingDecision?.CanPass ?? !_engine.Field.IsEmpty);
         bool interrupt = _engine.PendingDecision is { } pd && pd.Kind.IsInterruptChance();
         StatusMessage = isMyTurn
-            ? (interrupt ? InterruptStatus(_engine.PendingDecision!.Kind) : "あなたのターンです")
-            : (interrupt ? $"{GetPlayerVm(activePlayerId).Name} が割り込むか考えています..." : $"{GetPlayerVm(activePlayerId).Name} のターン...");
+            ? (interrupt ? TurnGuidance(InterruptStatus(_engine.PendingDecision!.Kind)) : TurnGuidance("あなたのターンです"))
+            : (interrupt ? TurnGuidance($"{GetPlayerVm(activePlayerId).Name} が割り込むか考えています...") : TurnGuidance($"{GetPlayerVm(activePlayerId).Name} のターン..."));
     }
 
     private void UpdateAllPlayersInfo()
@@ -920,51 +1246,123 @@ public sealed partial class GameTableViewModel : ViewModelBase
         }
     }
 
-    /// <summary>革命・11バック・縛りの表示を場の状態に合わせる。</summary>
+    /// <summary>革命・11バック・縛りの表示を場の状態に合わせる（1人用・ホスト／ゲスト共通）。</summary>
     private void ApplyFieldBadges(FieldState field)
+        => ApplyFieldBadgesCore(
+            field.IsRevolution,
+            field.IsElevenBackPersistent,
+            field.IsElevenBackOneTurn,
+            field.IsElevenBack,
+            field.IsStrengthReversed,
+            field.Direction,
+            field.Lock.IsSuitLocked ? field.Lock.LockedSuits : null,
+            field.Lock.IsNumberLocked,
+            field.IsFourStopLocked,
+            field.IsCoupLocked);
+
+    private void ApplyFieldBadgesCore(
+        bool isRevolution,
+        bool isElevenBackPersistent,
+        bool isElevenBackOneTurn,
+        bool isElevenBack,
+        bool isStrengthReversed,
+        PlayDirection direction,
+        IEnumerable<Suit>? lockedSuits,
+        bool isNumberLocked,
+        bool isFourStopLocked,
+        bool isCoupLocked = false)
     {
-        IsRevolution = field.IsRevolution;
-        ElevenBackBadgeText = ElevenBackLabel(field.IsElevenBackPersistent, field.IsElevenBackOneTurn);
-        IsElevenBack = field.IsElevenBack;
-        IsStrengthReversed = field.IsStrengthReversed;
-        IsCounterClockwise = field.Direction == PlayDirection.CounterClockwise;
-        UpdateLockState(field.Lock);
+        IsRevolution = isRevolution;
+        ElevenBackBadgeText = ElevenBackLabel(isElevenBackPersistent, isElevenBackOneTurn);
+        IsElevenBack = isElevenBack;
+        IsStrengthReversed = isStrengthReversed;
+        IsCounterClockwise = direction == PlayDirection.CounterClockwise;
+
+        var list = new List<string>();
+        if (lockedSuits != null)
+        {
+            var suitsArr = lockedSuits as Suit[] ?? lockedSuits.ToArray();
+            if (suitsArr.Length > 0)
+            {
+                var suits = string.Join("", suitsArr.Select(Card.SuitSymbol));
+                list.Add(suits.Length > 0 ? $"スート縛り[{suits}]" : "スート縛り");
+            }
+        }
+        if (isNumberLocked) list.Add("数しば");
+        if (isFourStopLocked) list.Add("4止め：砂嵐のみ");
+        if (isCoupLocked) list.Add("クーデター：6・7・砂嵐のみ");
+        LockDescription = list.Count == 0 ? "" : $"【{string.Join("+", list)}】";
     }
 
-    private void UpdateLockState(LockState lockState)
+    /// <summary>手札コレクションを差分同期し、変化のない CardViewModel / CardControl の破棄・再生成を防ぐ。</summary>
+    private void SyncHumanHand(IReadOnlyList<Card> targetCards)
     {
-        if (!lockState.IsAnyLocked)
+        if (HumanHand.Count == targetCards.Count)
         {
-            LockDescription = "";
+            bool identical = true;
+            for (int i = 0; i < targetCards.Count; i++)
+            {
+                if (HumanHand[i].Card != targetCards[i])
+                {
+                    identical = false;
+                    break;
+                }
+            }
+            if (identical) return;
         }
-        else
+
+        if (targetCards.Count == 0)
         {
-            var list = new List<string>();
-            if (lockState.IsSuitLocked) list.Add("スート縛り");
-            if (lockState.IsNumberLocked) list.Add("数しば");
-            LockDescription = $"【{string.Join("+", list)}】";
+            HumanHand.Clear();
+            return;
+        }
+
+        for (int i = 0; i < targetCards.Count; i++)
+        {
+            var desired = targetCards[i];
+            if (i < HumanHand.Count && HumanHand[i].Card == desired)
+            {
+                continue;
+            }
+            int found = -1;
+            for (int j = i + 1; j < HumanHand.Count; j++)
+            {
+                if (HumanHand[j].Card == desired)
+                {
+                    found = j;
+                    break;
+                }
+            }
+            if (found >= 0)
+            {
+                HumanHand.Move(found, i);
+            }
+            else
+            {
+                HumanHand.Insert(i, new CardViewModel(desired));
+            }
+        }
+        while (HumanHand.Count > targetCards.Count)
+        {
+            HumanHand.RemoveAt(HumanHand.Count - 1);
         }
     }
 
     private void UpdateHumanHandVisuals()
     {
         if (_engine == null) return;
-
-        var myHand = _engine.GetPlayer(0).Hand;
-
-        // 手札カードリストの同期
-        var currentCards = HumanHand.Select(vm => vm.Card).ToList();
-        if (!currentCards.SequenceEqual(myHand))
+        if (_engine.Phase == GamePhase.Playing && _engine.GetPlayer(_myPlayerId).IsFinished)
         {
-            HumanHand.Clear();
-            foreach (var card in myHand)
-            {
-                HumanHand.Add(new CardViewModel(card));
-            }
+            return;
         }
 
+        var myHand = _engine.GetPlayer(_myPlayerId).Hand;
+
+        // 手札カードリストの差分同期（全消去・全再生成による CardControl 破棄と負荷を防ぐ）
+        SyncHumanHand(myHand);
+
         // 合法手チェック
-        var legalPlays = _engine.GetLegalPlays(0);
+        var legalPlays = _engine.GetLegalPlays(_myPlayerId);
         var selected = HumanHand.Where(vm => vm.IsSelected).Select(vm => vm.Card).ToList();
 
         // カード選択中は「出す」の判定をせず、どのカードも選べる表示にする
@@ -981,12 +1379,47 @@ public sealed partial class GameTableViewModel : ViewModelBase
         // まとめて選ぶ候補は、自分の「出すかパスか」の番だけ（割り込みの確認では止め札が選択済みなので出さない）
         bool myPlayTurn = !IsCardSelectionMode && _engine.PendingDecision is { Kind: DecisionKind.PlayOrPass } pd && pd.PlayerId == _myPlayerId;
         RefreshSuggestions(myPlayTurn ? legalPlays.Where(lp => lp.Play != null).Select(lp => lp.Play!.Cards) : null);
+        UpdatePlayBlockedReasonFromEngine(selected);
         UpdateSelectionCount();
+    }
+
+    public void MoveHandCard(int fromIndex, int toIndex)
+    {
+        if (IsSpectating) return;
+        if (fromIndex < 0 || fromIndex >= HumanHand.Count || toIndex < 0 || toIndex >= HumanHand.Count || fromIndex == toIndex)
+        {
+            return;
+        }
+        HumanHand.Move(fromIndex, toIndex);
+    }
+
+    public void PlayCardsByDrag(IReadOnlyList<Card> cards)
+    {
+        if (IsSpectating || cards.Count == 0) return;
+        // ドラッグしたカード群を選択状態にしてそのまま出す判定へ送る
+        foreach (var vm in HumanHand)
+        {
+            vm.IsSelected = cards.Contains(vm.Card);
+        }
+        if (_client != null)
+        {
+            UpdateGuestCanPlay();
+        }
+        else
+        {
+            UpdateHumanHandVisuals();
+        }
+        UpdateSelectionCount();
+        if (CanPlay)
+        {
+            PlaySelectedCardsCommand.Execute(null);
+        }
     }
 
     [RelayCommand]
     private void ToggleCardSelection(CardViewModel cardVm)
     {
+        if (IsSpectating) return;
         cardVm.IsSelected = !cardVm.IsSelected;
         _audio.Play(SoundEffect.CardSelect);
         if (_client != null)
@@ -1000,6 +1433,64 @@ public sealed partial class GameTableViewModel : ViewModelBase
         UpdateSelectionCount();
     }
 
+    private bool _sortBySuit;
+
+    /// <summary>手札を強さ順／スート順で交互に整列する。</summary>
+    [RelayCommand]
+    private void SortHand()
+    {
+        if (HumanHand.Count <= 1) return;
+        _sortBySuit = !_sortBySuit;
+        bool rev = IsStrengthReversed;
+
+        var sorted = _sortBySuit
+            ? HumanHand
+                .OrderBy(vm => vm.Card.IsJoker ? 1 : 0)
+                .ThenBy(vm => (int)vm.Card.Suit)
+                .ThenBy(vm => vm.Card.GetStrength(rev))
+                .ToList()
+            : HumanHand
+                .OrderBy(vm => vm.Card.IsJoker ? 1 : 0)
+                .ThenBy(vm => vm.Card.GetStrength(rev))
+                .ThenBy(vm => (int)vm.Card.Suit)
+                .ToList();
+
+        HumanHand.Clear();
+        foreach (var vm in sorted)
+        {
+            HumanHand.Add(vm);
+        }
+        StatusMessage = _sortBySuit ? "手札をスート順に並べ替えました" : "手札を強さ順に並べ替えました";
+    }
+
+    /// <summary>選択中の手札をすべて解除する。</summary>
+    [RelayCommand]
+    private void ClearSelection()
+    {
+        if (IsSpectating) return;
+        bool any = false;
+        foreach (var vm in HumanHand)
+        {
+            if (vm.IsSelected)
+            {
+                vm.IsSelected = false;
+                any = true;
+            }
+        }
+        if (any)
+        {
+            if (_client != null)
+            {
+                UpdateGuestCanPlay();
+            }
+            else
+            {
+                UpdateHumanHandVisuals();
+            }
+            UpdateSelectionCount();
+        }
+    }
+
     /// <summary>ゲスト：最後に届いた合法手と現在の選択から「出す」可否を決める。</summary>
     private void UpdateGuestCanPlay()
     {
@@ -1007,6 +1498,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
         CanPlay = !IsCardSelectionMode && selected.Count > 0
             && _guestLegalPlays.Any(lp => lp.Count == selected.Count && lp.All(selected.Contains));
         RefreshLegalSelectionGlow();
+        UpdatePlayBlockedReasonForGuest(selected);
     }
 
     // ------------------------------------------------------------------
@@ -1095,15 +1587,19 @@ public sealed partial class GameTableViewModel : ViewModelBase
         _dispatcherQueue.TryEnqueue(() =>
         {
             if (_isShutDown) return;
+            RecordHistory(notice); // プレイ履歴（ログ）
             switch (notice.Kind)
             {
+                case "Reaction" when notice.PlayerId is { } reactor:
+                    ShowReactionBubble(reactor, notice.Text); // 定型リアクション（自分が送ったものも、ホストから戻ってきて表示する）
+                    break;
                 case "RoundEnded" when notice.Standings is { } standings:
+                    BuildRoundResult(notice, standings);
                     // ゲスト：ラウンド結果を表示し、ホストの進行を待つ（Applied はゲーム終了かどうか）
                     _guestResultRound = notice.Count;
                     RoundResultText = string.Join("\n", standings
                         .OrderBy(s => s.Position)
-                        .Select(s => $"{s.Position}位: {GetPlayerVm(s.PlayerId).Name} ({s.Rank}) -> 得点: {SignedPoints(s.Points)}"));
-                    // ※ ラウンド終了の通知には合計点が入っていない（常に 0）ため、ゲストでは合計を出さない
+                        .Select(s => $"{s.Position}位: {GetPlayerVm(s.PlayerId).Name} ({s.Rank}) -> 得点: {SignedPoints(s.Points)}（累計 {GetPlayerVm(s.PlayerId).TotalScore}）"));
                     IsGameOver = notice.Applied;
                     IsRoundResultOpen = true;
                     UpdateRoundResultActions();
@@ -1175,19 +1671,23 @@ public sealed partial class GameTableViewModel : ViewModelBase
 
         if (_client != null)
         {
-            ShowGuestRejected(await SendGuestCommandAsync(_client.PlayAsync(selected)));
+            if (_isSendingGuestCommand) return;
+            _isSendingGuestCommand = true;
+            try
+            {
+                ShowGuestRejected(await SendGuestCommandAsync(_client.PlayAsync(selected)));
+            }
+            finally
+            {
+                _isSendingGuestCommand = false;
+            }
             return;
         }
 
         if (_engine != null)
         {
             var result = _engine.SubmitPlay(_myPlayerId, selected);
-            if (result.IsAccepted)
-            {
-                HumanHand.Clear();
-                UpdateHumanHandVisuals();
-            }
-            else if (!result.IsDeferred)
+            if (!result.IsAccepted && !result.IsDeferred)
             {
                 ShowRejected(result);
             }
@@ -1199,7 +1699,16 @@ public sealed partial class GameTableViewModel : ViewModelBase
     {
         if (_client != null)
         {
-            ShowGuestRejected(await SendGuestCommandAsync(_client.PassAsync()));
+            if (_isSendingGuestCommand) return;
+            _isSendingGuestCommand = true;
+            try
+            {
+                ShowGuestRejected(await SendGuestCommandAsync(_client.PassAsync()));
+            }
+            finally
+            {
+                _isSendingGuestCommand = false;
+            }
             return;
         }
 
@@ -1263,6 +1772,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
     private void ApplyClientView(ClientView view)
     {
         if (_isShutDown) return;
+        _latestClientView = view;
         bool viewerChanged = _myPlayerId != view.MyPlayerId;
         _myPlayerId = view.MyPlayerId;
         ApplySeatOrder(view.SeatOrder);
@@ -1285,24 +1795,36 @@ public sealed partial class GameTableViewModel : ViewModelBase
         }
 
         // 状態バッジ
-        IsRevolution = view.Field.IsRevolution;
-        ElevenBackBadgeText = ElevenBackLabel(view.Field.IsElevenBackPersistent, view.Field.IsElevenBackOneTurn);
-        IsElevenBack = view.Field.IsElevenBack;
-        IsStrengthReversed = view.Field.IsStrengthReversed;
-        IsCounterClockwise = view.Field.Direction == PlayDirection.CounterClockwise;
-        
-        var lockList = new List<string>();
-        if (view.Field.LockedSuits != null && view.Field.LockedSuits.Length > 0) lockList.Add("スート縛り");
-        if (view.Field.IsNumberLocked) lockList.Add("数しば");
-        LockDescription = lockList.Count > 0 ? $"【{string.Join("+", lockList)}】" : "";
+        ApplyFieldBadgesCore(
+            view.Field.IsRevolution,
+            view.Field.IsElevenBackPersistent,
+            view.Field.IsElevenBackOneTurn,
+            view.Field.IsElevenBack,
+            view.Field.IsStrengthReversed,
+            view.Field.Direction,
+            view.Field.LockedSuits,
+            view.Field.IsNumberLocked,
+            view.Field.IsFourStopLocked,
+            view.Field.IsCoupLocked);
 
-        // 場札（変わったときだけ入れ替える。入れ替えると場へ飛ぶ演出が走るため）
-        var fieldNow = (view.Field.CurrentCardIds ?? Array.Empty<int>()).Select(Card.FromId).ToList();
-        if (!fieldNow.SequenceEqual(FieldCards))
+        // 場札（場が流れるまで出されたカードをとどめ、場が空になったら全部消す）
+        var fieldIds = view.Field.CurrentCardIds ?? Array.Empty<int>();
+        if (fieldIds.Length == 0)
         {
+            if (FieldCards.Count > 0)
+            {
+                FieldPlayedBy = null;
+                FieldCards.Clear();
+            }
+            _lastPlayedCardsCount = 0;
+            _lastGuestFieldIds = Array.Empty<int>();
+        }
+        else if (!fieldIds.SequenceEqual(_lastGuestFieldIds))
+        {
+            _lastGuestFieldIds = fieldIds.ToArray();
+            _lastPlayedCardsCount = fieldIds.Length;
             FieldPlayedBy = view.Field.LastPlayerId;
-            FieldCards.Clear();
-            foreach (var card in fieldNow)
+            foreach (var card in fieldIds.Select(Card.FromId))
             {
                 FieldCards.Add(card);
             }
@@ -1312,10 +1834,29 @@ public sealed partial class GameTableViewModel : ViewModelBase
         foreach (var p in view.Players)
         {
             var vm = GetPlayerVm(p.Id);
-            // ゲストには相手の性格が届かないので、NPC の席は共通のアイコン、人の席は人物のアイコン
-            bool npcSeat = p.Kind == PlayerKind.Npc && p.Id != _myPlayerId;
-            vm.AvatarGlyph = npcSeat ? NpcReactions.NpcGlyph : NpcReactions.AvatarGlyph(null);
-            vm.AvatarLabel = p.Id == _myPlayerId ? "あなた" : npcSeat ? "NPC" : "プレイヤー";
+            if (p.Id == _myPlayerId)
+            {
+                var info = PlayerIconInfo.Get(_myIconId);
+                vm.AvatarGlyph = info.Glyph;
+                vm.AvatarAccentHex = info.AccentHex;
+                vm.AvatarImagePath = _myCustomAvatarPath;
+                vm.AvatarLabel = DisplayName(p.Id, p.Name);
+            }
+            else if (p.Kind == PlayerKind.Npc)
+            {
+                vm.AvatarGlyph = NpcReactions.NpcGlyph;
+                vm.AvatarAccentHex = null;
+                vm.AvatarImagePath = null;
+                vm.AvatarLabel = "NPC";
+            }
+            else
+            {
+                var info = PlayerIconInfo.Get(p.AvatarIcon);
+                vm.AvatarGlyph = info.Glyph;
+                vm.AvatarAccentHex = info.AccentHex;
+                vm.AvatarImagePath = null;
+                vm.AvatarLabel = DisplayName(p.Id, p.Name);
+            }
             vm.Name = DisplayName(p.Id, p.Name);
             vm.HandCount = p.HandCount;
             vm.Rank = p.Rank;
@@ -1324,20 +1865,19 @@ public sealed partial class GameTableViewModel : ViewModelBase
             vm.IsThinking = (view.Decision?.PlayerId == p.Id && p.Id != _myPlayerId);
         }
 
-        // 手札
-        var handCards = view.MyHand != null ? view.MyHand.Select(Card.FromId).ToList() : new List<Card>();
-        var currentCards = HumanHand.Select(vm => vm.Card).ToList();
-        if (!currentCards.SequenceEqual(handCards))
+        // 手札（観戦中でなければ自分の手札を同期）
+        bool spectatingNow = view.Phase == GamePhase.Playing
+            && view.Players.FirstOrDefault(p => p.Id == _myPlayerId) is { IsFinished: true }
+            && view.SpectatableHands is { Length: > 0 };
+        if (!spectatingNow)
         {
-            HumanHand.Clear();
-            foreach (var c in handCards)
-            {
-                HumanHand.Add(new CardViewModel(c));
-            }
+            var handCards = view.MyHand != null ? view.MyHand.Select(Card.FromId).ToList() : new List<Card>();
+            SyncHumanHand(handCards);
         }
 
         // 判断・合法手
         bool isMyDecision = (view.Decision?.PlayerId == _myPlayerId);
+        IsMyTurn = isMyDecision && !spectatingNow;
         CanPass = isMyDecision && (view.Decision?.CanPass ?? false);
 
         var legalSet = view.LegalPlays != null
@@ -1350,13 +1890,17 @@ public sealed partial class GameTableViewModel : ViewModelBase
             : null);
         MaybeShowExchangeSummary(view.Decision?.Kind);
         MaybeGuestAutoplay(view);
+        UpdateSpectationState();
 
-        foreach (var cardVm in HumanHand)
+        if (!spectatingNow)
         {
-            cardVm.CanPlay = IsCardSelectionMode || !isMyDecision || legalSet.Any(lp => lp.Contains(cardVm.Card));
+            foreach (var cardVm in HumanHand)
+            {
+                cardVm.CanPlay = IsCardSelectionMode || !isMyDecision || legalSet.Any(lp => lp.Contains(cardVm.Card));
+            }
         }
 
-        StatusMessage = isMyDecision ? "あなたのターンです" : "相手のターンです...";
+        StatusMessage = TurnGuidance(isMyDecision ? "あなたのターンです" : "相手のターンです...");
 
         // 初心者用：自分の手番になったときだけヒントを出す（同じ手番の画面更新では出し直さない）
         bool myTurnNow = isMyDecision && view.Decision?.Kind == DecisionKind.PlayOrPass;
@@ -1373,15 +1917,30 @@ public sealed partial class GameTableViewModel : ViewModelBase
         }
         _guestWasMyTurn = myTurnNow;
 
+        if (myTurnNow && legalSet.Count == 0 && CanPass && AutoPassWhenCannotPlay)
+        {
+            ScheduleAutoPass();
+        }
+
         // 割り込みの確認（4止め・砂嵐）。同じ確認を出している間は、選び直したカードを上書きしない
         if (isMyDecision && view.Decision is { } interrupt && interrupt.Kind.IsInterruptChance())
         {
-            if (!IsInterruptPromptOpen || _interruptPromptKind != interrupt.Kind)
+            bool hasStopper = legalSet.Count > 0;
+            if (!hasStopper && (AutoPassWhenCannotPlay || _guide.Level == GuideLevel.Expert))
             {
-                OpenInterruptPrompt(interrupt.Kind, interrupt.Effect, interrupt.TargetPlayerId, legalSet.FirstOrDefault());
-                UpdateGuestCanPlay();
+                IsInterruptPromptOpen = false;
+                StatusMessage = "";
+                ScheduleAutoPass();
             }
-            StatusMessage = InterruptStatus(interrupt.Kind);
+            else
+            {
+                if (!IsInterruptPromptOpen || _interruptPromptKind != interrupt.Kind)
+                {
+                    OpenInterruptPrompt(interrupt.Kind, interrupt.Effect, interrupt.TargetPlayerId, legalSet.FirstOrDefault());
+                    UpdateGuestCanPlay();
+                }
+                StatusMessage = TurnGuidance(InterruptStatus(interrupt.Kind));
+            }
         }
         else
         {
@@ -1435,16 +1994,28 @@ public sealed partial class GameTableViewModel : ViewModelBase
             case DecisionKind.PlayOrPass when _engine is not null:
                 // 初心者用：自分の手番ごとに、今できることのヒントを出す（ゲストは画面の更新時に出す）
                 var f = _engine.Field;
-                ShowGuideHint(_guide.ForTurn(f.IsEmpty, _engine.GetLegalPlays(_myPlayerId).Count > 0,
+                int legalCount = _engine.GetLegalPlays(_myPlayerId).Count;
+                ShowGuideHint(_guide.ForTurn(f.IsEmpty, legalCount > 0,
                     f.IsStrengthReversed, f.Lock.IsSuitLocked, f.Lock.IsNumberLocked, f.RequiredCard?.ToString()));
+                if (legalCount == 0 && CanPass && AutoPassWhenCannotPlay)
+                {
+                    ScheduleAutoPass();
+                }
                 break;
 
             case DecisionKind.FourStopChance:
             case DecisionKind.SandstormStopChance:
-                // 1人用・ホスト：手札を最新にしてから、止められる札を選択済みにして確認を出す
+                // 1人用・ホスト：止め札が無く「自動パス」または「上級者（ガイドなし）」なら確認を出さずに即流す
+                var stopCards = _engine?.GetLegalPlays(_myPlayerId).FirstOrDefault()?.Play?.Cards;
+                if (stopCards is not { Count: > 0 } && (AutoPassWhenCannotPlay || _guide.Level == GuideLevel.Expert))
+                {
+                    IsInterruptPromptOpen = false;
+                    StatusMessage = "";
+                    ScheduleAutoPass();
+                    break;
+                }
                 UpdateHumanHandVisuals();
-                OpenInterruptPrompt(dec.Kind, dec.Effect, dec.TargetPlayerId,
-                    _engine?.GetLegalPlays(_myPlayerId).FirstOrDefault()?.Play?.Cards);
+                OpenInterruptPrompt(dec.Kind, dec.Effect, dec.TargetPlayerId, stopCards);
                 UpdateHumanHandVisuals();
                 break;
 
@@ -1552,8 +2123,8 @@ public sealed partial class GameTableViewModel : ViewModelBase
         bool fourStopOpen = kind == DecisionKind.FourStopChance;
         bool sandstormOpen = flow.SandstormEnabled && effect is
             SpecialEffectType.EightCut or SpecialEffectType.Rokurokubi or SpecialEffectType.Ambulance or SpecialEffectType.Emperor;
-        int eightCount = Math.Max(1, FieldCards.Count);
-        int fourCount = flow.FourStopCount == FourStopCountRule.SameAsEight ? eightCount : eightCount * 2;
+        int eightCount = Math.Max(1, _lastPlayedCardsCount);
+        int fourCount = eightCount * 2;
         string fourStop = $"4止め（{RankOptionViewModel.LabelOf(flow.FourStopRank)}を{fourCount}枚）";
         string sandstorm = $"砂嵐（{RankOptionViewModel.LabelOf(flow.SandstormRank)}を{flow.SandstormCount}枚）";
         string means = fourStopOpen && sandstormOpen ? $"{fourStop}か{sandstorm}" : fourStopOpen ? fourStop : sandstorm;
@@ -1562,15 +2133,20 @@ public sealed partial class GameTableViewModel : ViewModelBase
         bool stopIsFour = canStop && fourStopOpen && stopCards!.Any(c => c.Rank == flow.FourStopRank);
 
         InterruptTitle = $"{flusher} の{target}：止める？";
-        if (!canStop)
+        if (_guide.Level == GuideLevel.Expert)
         {
-            // 止められる手がないのに確認が出るのは、操作ガイド「初心者用」のときだけ
+            // 上級者用（ガイドなし）：説明文は一切出さず、タイトルとボタンのみにする
+            InterruptMessage = "";
+            InterruptAcceptText = stopIsFour ? "4で止める [Enter]" : canStop ? "砂嵐で止める [Enter]" : "止める [Enter]";
+        }
+        else if (!canStop)
+        {
             InterruptMessage = $"{means}を持っていないので止められません。「パス（流す）」を押すと{target}で場が流れます。";
             InterruptAcceptText = "止める [Enter]";
         }
         else if (stopIsFour)
         {
-            InterruptMessage = $"{fourStop}で止められます。止めると場は流れず、次の人へ続きます。止めなければ「パス（流す）」。";
+            InterruptMessage = $"{fourStop}で止められます。止めると、場が流れるまでほかの人は砂嵐しか出せなくなります。止めなければ「パス（流す）」。";
             InterruptAcceptText = "4で止める [Enter]";
         }
         else
@@ -1767,6 +2343,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
         var lines = result.Standings.Select(s => $"{s.Position}位: {GetPlayerVm(s.PlayerId).Name} ({s.Rank}) -> 得点: {SignedPoints(s.Points)}"
             + (_engine is not null ? $"（合計 {SignedPoints(_engine.GetPlayer(s.PlayerId).TotalScore)}）" : ""));
         RoundResultText = string.Join("\n", lines);
+        BuildRoundResult(result, IsGameOver); // 画面で並べやすい順位表（構造化した結果）
         IsRoundResultOpen = true;
         UpdateRoundResultActions();
         PlayRoundEndSound(result);
@@ -1835,12 +2412,13 @@ public sealed partial class GameTableViewModel : ViewModelBase
             case SpecialEffectType.ElevenBack:
             case SpecialEffectType.StrongElevenBack:
                 bool strong = effectType == SpecialEffectType.StrongElevenBack;
-                bool oneTurn = !strong && _rules.ElevenBack.Duration == ElevenBackDuration.NextTurnOnly;
+                bool oneTurn = strong || _rules.ElevenBack.Duration == ElevenBackDuration.NextTurnOnly;
+                bool persistent = !strong && _rules.ElevenBack.Duration == ElevenBackDuration.Persistent;
                 string backDetail = elevenBackOn switch
                 {
                     false => $"{playerName} のJで反転が解除され、元の強弱に戻りました",
-                    _ when strong => $"{playerName} により強弱が反転（場が流れても、次のJが出るまで続きます）",
                     _ when oneTurn => $"{playerName} により、次の人の手番だけ強弱が反転します",
+                    _ when persistent => $"{playerName} により強弱が反転（場が流れても、次のJが出るまで続きます）",
                     _ => $"{playerName} により、場が流れるまで強弱が反転します",
                 };
                 CutInTriggered?.Invoke(this, new CutInEventArgs(
@@ -2060,6 +2638,10 @@ public sealed partial class GameTableViewModel : ViewModelBase
     {
         _isShutDown = true;
         StopFeelTimers();
+        if (_hostSession is not null)
+        {
+            _hostSession.ReactionReceived -= OnHostReactionReceived;
+        }
         _guideHintTimer?.Stop();
         GuideHint = "";
         IsDecisionDialogOpen = false;
@@ -2083,6 +2665,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
             client.ViewUpdated -= OnClientViewUpdated;
             client.Disconnected -= OnClientDisconnected;
             client.NoticeReceived -= OnClientNoticeReceived;
+            client.RulesUpdated -= OnClientRulesUpdated;
             try
             {
                 if (client.IsConnected)

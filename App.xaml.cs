@@ -21,8 +21,38 @@ namespace DTTS;
 public partial class App : Application
 {
     private Window? _window;
+    private static ServiceProvider? _serviceProvider;
     public static Window MainWindowInstance { get; private set; } = null!;
     public static IServiceProvider Services { get; private set; } = null!;
+
+    /// <summary>アプリ終了時に DI コンテナと登録済みの IDisposable サービス（AudioGraph・FeedbackService 等）を破棄する。</summary>
+    internal static void ShutdownServices()
+    {
+        var sp = System.Threading.Interlocked.Exchange(ref _serviceProvider, null);
+        if (sp is null) return;
+        try
+        {
+            sp.Dispose();
+        }
+        catch (Exception ex)
+        {
+            WriteCrashLog("App.ShutdownServices", ex);
+        }
+    }
+
+    /// <summary>パッケージまたはアセンブリから現在のアプリバージョンを取得する。</summary>
+    internal static string GetAppVersion()
+    {
+        try
+        {
+            var v = Windows.ApplicationModel.Package.Current.Id.Version;
+            return $"{v.Major}.{v.Minor}.{v.Build}";
+        }
+        catch (InvalidOperationException)
+        {
+            return typeof(App).Assembly.GetName().Version?.ToString(3) ?? "1.1.6";
+        }
+    }
 
     public App()
     {
@@ -33,7 +63,10 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += (s, e) => WriteCrashLog("AppDomain", e.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (s, e) => WriteCrashLog("UnobservedTask", e.Exception);    }
 
-    /// <summary>例外の内容を crash.log に追記する（ログ出力自体の失敗は無視する）。</summary>
+    private static readonly object CrashLogLock = new();
+    private const long MaxCrashLogBytes = 1024 * 1024; // 1 MiB
+
+    /// <summary>例外の内容を crash.log に追記する（排他制御・1 MiB ローテーション・ユーザーパスマスク付き）。</summary>
     internal static void WriteCrashLog(string source, Exception? exception)
     {
         try
@@ -41,18 +74,37 @@ public partial class App : Application
             string folder;
             try
             {
+#if DEBUG
                 folder = AppLaunchOptions.DataDirectoryForCurrentProcess() is { } dir
                     ? Path.GetFullPath(dir)
                     : ApplicationData.Current.LocalFolder.Path;
+#else
+                folder = ApplicationData.Current.LocalFolder.Path;
+#endif
             }
             catch
             {
                 folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DTTS");
             }
             Directory.CreateDirectory(folder);
-            File.AppendAllText(
-                Path.Combine(folder, "crash.log"),
-                $"[{DateTimeOffset.Now:O}] {source}: {exception}{Environment.NewLine}{Environment.NewLine}");
+            string logPath = Path.Combine(folder, "crash.log");
+            string text = exception?.ToString() ?? "(null)";
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!string.IsNullOrEmpty(userProfile))
+            {
+                text = text.Replace(userProfile, "%USERPROFILE%", StringComparison.OrdinalIgnoreCase);
+            }
+            lock (CrashLogLock)
+            {
+                if (File.Exists(logPath) && new FileInfo(logPath).Length >= MaxCrashLogBytes)
+                {
+                    string rotated = logPath + ".1";
+                    File.Move(logPath, rotated, overwrite: true);
+                }
+                File.AppendAllText(
+                    logPath,
+                    $"[{DateTimeOffset.Now:O}] {source}: {text}{Environment.NewLine}{Environment.NewLine}");
+            }
         }
         catch
         {
@@ -85,21 +137,34 @@ public partial class App : Application
         {
             appDataPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DTTS");
         }
+#if DEBUG
         // 検証用：--data-dir で保存先を分ける（同じ PC でホストとゲストを2つ起動するときなど）
         if (AppLaunchOptions.DataDirectoryForCurrentProcess() is { } overrideDir)
         {
             appDataPath = Path.GetFullPath(overrideDir);
         }
+#endif
         Directory.CreateDirectory(appDataPath);
 
-        // 2. DIサービスコレクションの構築
+        // 2. データベース初期化と端末IDの先行確定（DI 解決時の同期ブロックと ID 不一致を防ぐ）
+        string dbPath = Path.Combine(appDataPath, AppDatabaseContext.DefaultFileName);
+        var db = new AppDatabaseContext(dbPath);
+        await db.InitializeAsync();
+
+        var settingsRepo = new SettingsRepository(db, new WindowsSettingsSecretProtector());
+        var clientId = await settingsRepo.GetAsync("device_id");
+        if (string.IsNullOrEmpty(clientId))
+        {
+            clientId = Guid.NewGuid().ToString("N");
+            await settingsRepo.SetAsync("device_id", clientId);
+        }
+
+        // 3. DIサービスコレクションの構築
         var services = new ServiceCollection();
 
         // データベース & リポジトリ
-        string dbPath = Path.Combine(appDataPath, AppDatabaseContext.DefaultFileName);
-        var db = new AppDatabaseContext(dbPath);
         services.AddSingleton(db);
-        services.AddSingleton<SettingsRepository>();
+        services.AddSingleton(settingsRepo);
         services.AddSingleton<MatchHistoryRepository>();
         services.AddSingleton<FeedbackRepository>();
 
@@ -115,9 +180,7 @@ public partial class App : Application
         services.AddSingleton<INetworkService>(sp =>
         {
             var dispatcher = new DispatcherQueueSerialDispatcher(DispatcherQueue.GetForCurrentThread());
-            var settingsRepo = sp.GetRequiredService<SettingsRepository>();
-            var clientId = settingsRepo.GetAsync("device_id").GetAwaiter().GetResult() ?? Guid.NewGuid().ToString("N");
-            return new LanNetworkService(dispatcher, clientId);
+            return new BleNetworkService(dispatcher, clientId);
         });
 
         // フィードバックサービス
@@ -126,13 +189,24 @@ public partial class App : Application
             var repo = sp.GetRequiredService<FeedbackRepository>();
             var settings = sp.GetRequiredService<SettingsRepository>();
             var connectivity = sp.GetRequiredService<IConnectivityMonitor>();
-            var http = new HttpClient();
+            // リダイレクトによる HTTPS→HTTP ダウングレードや巨大応答によるメモリ消費を防ぐ
+            var handler = new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+                ConnectTimeout = TimeSpan.FromSeconds(10),
+            };
+            var http = new HttpClient(handler)
+            {
+                Timeout = TimeSpan.FromSeconds(15),
+                MaxResponseContentBufferSize = 64 * 1024,
+            };
             return new FeedbackService(
                 repo,
-                () => settings.LoadFeedbackOptionsAsync().GetAwaiter().GetResult(),
+                () => Task.Run(() => settings.LoadFeedbackOptionsAsync()).GetAwaiter().GetResult(),
                 http,
                 connectivity,
-                "1.0.0"
+                GetAppVersion(),
+                ownsHttpClient: true
             );
         });
 
@@ -152,23 +226,13 @@ public partial class App : Application
         services.AddTransient<HelpViewModel>();
         services.AddTransient<FeedbackViewModel>();
 
-        Services = services.BuildServiceProvider();
+        _serviceProvider = services.BuildServiceProvider();
+        Services = _serviceProvider;
 
-        // 3. データベース初期化
-        await db.InitializeAsync();
-
-        // 4. 初回起動時の端末ID生成と設定ロード
-        var settingsRepo = Services.GetRequiredService<SettingsRepository>();
-        var clientId = await settingsRepo.GetAsync("device_id");
-        if (string.IsNullOrEmpty(clientId))
-        {
-            clientId = Guid.NewGuid().ToString("N");
-            await settingsRepo.SetAsync("device_id", clientId);
-        }
-
-        // 5. 外見設定（テーマカラー・スキン）の適用
+        // 4. 外見設定（テーマカラー・スキン・ホバー）の適用
         var appearance = await settingsRepo.LoadAppearanceAsync();
         ThemeManager.ApplyTheme(appearance.ThemeColor);
+        CardControl.GlobalHoverEnabled = appearance.CardHoverEnabled;
         if (!string.IsNullOrEmpty(appearance.SkinPackId))
         {
             skinManager.SetActivePack(appearance.SkinPackId);

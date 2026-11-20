@@ -22,11 +22,14 @@ namespace DTTS.Services.Network;
 [JsonDerivedType(typeof(JoinRejected), "rejected")]
 [JsonDerivedType(typeof(LobbyUpdate), "lobby")]
 [JsonDerivedType(typeof(GameStarted), "started")]
+[JsonDerivedType(typeof(RulesUpdated), "rules")]
 [JsonDerivedType(typeof(ViewUpdate), "view")]
 [JsonDerivedType(typeof(GameNotice), "notice")]
 [JsonDerivedType(typeof(CommandRequest), "command")]
 [JsonDerivedType(typeof(CommandResponse), "response")]
 [JsonDerivedType(typeof(LeaveMessage), "leave")]
+[JsonDerivedType(typeof(ReadyRequest), "ready")]
+[JsonDerivedType(typeof(ReactionRequest), "reaction")]
 public abstract record NetMessage;
 
 /// <summary>参加要求（クライアント → ホスト）。</summary>
@@ -34,22 +37,43 @@ public abstract record NetMessage;
 /// <param name="PlayerName">表示名。</param>
 /// <param name="ClientId">端末ごとのランダムID（再接続時に同じ席へ戻すため）。</param>
 /// <param name="AlwaysAskInterrupt">止められる手がなくても割り込み（4止め・砂嵐）の確認を受けたい（操作ガイド「初心者用」）。旧版は送らない＝false。</param>
-public sealed record JoinRequest(int ProtocolVersion, string PlayerName, string ClientId, bool AlwaysAskInterrupt = false) : NetMessage;
+/// <param name="AvatarIcon">選択したプレイヤーアイコンID。</param>
+public sealed record JoinRequest(
+    int ProtocolVersion,
+    string PlayerName,
+    string ClientId,
+    bool AlwaysAskInterrupt = false,
+    string? AvatarIcon = null,
+    string? JoinPin = null,
+    string? ReconnectToken = null) : NetMessage;
 
 /// <summary>参加承認（ホスト → クライアント）。</summary>
-public sealed record JoinAccepted(int SeatId, string RoomName, bool IsRejoin) : NetMessage;
+public sealed record JoinAccepted(int SeatId, string RoomName, bool IsRejoin, string? ReconnectToken = null) : NetMessage;
 
 /// <summary>参加拒否。</summary>
 public sealed record JoinRejected(string Reason) : NetMessage;
 
 /// <summary>席の状況。</summary>
-public sealed record SeatInfo(int SeatId, string Name, PlayerKind Kind, bool IsConnected, bool IsHost);
+/// <param name="IsReady">参加者が「準備完了」にしているか（ホスト・NPC の席は常に true）。</param>
+/// <param name="IsLocked">ホストが NPC 専用にした席か（参加者は座れない）。</param>
+public sealed record SeatInfo(
+    int SeatId,
+    string Name,
+    PlayerKind Kind,
+    bool IsConnected,
+    bool IsHost,
+    string? AvatarIcon = null,
+    bool IsReady = false,
+    bool IsLocked = false);
 
 /// <summary>ロビー（席）の更新。</summary>
 public sealed record LobbyUpdate(IReadOnlyList<SeatInfo> Seats) : NetMessage;
 
 /// <summary>ゲーム開始。</summary>
 public sealed record GameStarted(string RulesJson) : NetMessage;
+
+/// <summary>対戦途中のルール更新（親/ホストが変更したルールを配布）。</summary>
+public sealed record RulesUpdated(string RulesJson) : NetMessage;
 
 /// <summary>自分視点の盤面の更新。</summary>
 public sealed record ViewUpdate(ClientView View) : NetMessage;
@@ -65,6 +89,14 @@ public sealed record CommandResponse(int RequestId, CommandError Error, PlayReje
 
 /// <summary>退出・切断の通知。</summary>
 public sealed record LeaveMessage(string Reason) : NetMessage;
+
+/// <summary>準備完了の切り替え（参加者 → ホスト）。</summary>
+public sealed record ReadyRequest(bool IsReady) : NetMessage;
+
+/// <summary>
+/// 定型リアクションの送信（参加者 → ホスト）。自由文ではなく決められたコードだけを送り、ホストが確かめてから全員へ配る。
+/// </summary>
+public sealed record ReactionRequest(string Code) : NetMessage;
 
 /// <summary>コマンドの種類。</summary>
 public enum CommandKind : byte
@@ -85,7 +117,10 @@ public enum CommandKind : byte
 public sealed record CommandDto(CommandKind Kind, int[]? CardIds = null, Rank[]? Ranks = null, bool Flag = false);
 
 /// <summary>プレイヤーの公開情報。</summary>
-public sealed record PlayerViewDto(int Id, string Name, PlayerKind Kind, int HandCount, PlayerRank Rank, int TotalScore, bool IsFinished);
+public sealed record PlayerViewDto(int Id, string Name, PlayerKind Kind, int HandCount, PlayerRank Rank, int TotalScore, bool IsFinished, string? AvatarIcon = null);
+
+/// <summary>観戦モード用の他プレイヤー手札。</summary>
+public sealed record SpectatableHandDto(int PlayerId, int[] CardIds);
 
 /// <summary>場の公開情報。</summary>
 public sealed record FieldViewDto(
@@ -101,7 +136,9 @@ public sealed record FieldViewDto(
     bool IsEightCutPending,
     bool IsElevenBackPersistent = false,
     bool IsSandstormStopPending = false,
-    bool IsElevenBackOneTurn = false);
+    bool IsElevenBackOneTurn = false,
+    bool IsFourStopLocked = false,
+    bool IsCoupLocked = false);
 
 /// <summary>判断要求（誰が何を判断中か。自分宛てなら詳細込み）。</summary>
 public sealed record DecisionViewDto(
@@ -129,7 +166,8 @@ public sealed record ClientView(
     PlayerViewDto[] Players,
     FieldViewDto Field,
     DecisionViewDto? Decision,
-    int[][]? LegalPlays)
+    int[][]? LegalPlays,
+    SpectatableHandDto[]? SpectatableHands = null)
 {
     /// <summary>自分の手札（カード）。</summary>
     [JsonIgnore]
@@ -164,10 +202,13 @@ public sealed record NoticeDto(
     StandingDto[]? Standings = null,
     Rank[]? Ranks = null,
     CardDiscardReason? DiscardReason = null,
-    CardTransferReason? TransferReason = null);
+    CardTransferReason? TransferReason = null,
+    string? Text = null,
+    bool IsExtraRound = false,
+    bool IsGekokujo = false);
 
 /// <summary>順位情報。</summary>
-public sealed record StandingDto(int PlayerId, int Position, PlayerRank Rank, int Points, int TotalScore);
+public sealed record StandingDto(int PlayerId, int Position, PlayerRank Rank, int Points, int TotalScore, FinishKind? FinishKind = null);
 
 /// <summary>プロトコル定数とシリアライズ。</summary>
 public static class NetProtocol
@@ -209,7 +250,7 @@ public static class NetProtocol
 public static class ClientViewBuilder
 {
     /// <summary>指定プレイヤー視点の盤面を作る。</summary>
-    public static ClientView Build(GameEngine engine, int playerId, long sequence)
+    public static ClientView Build(GameEngine engine, int playerId, long sequence, IReadOnlyDictionary<int, string?>? avatarIcons = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
         var field = engine.Field;
@@ -222,6 +263,17 @@ public static class ClientViewBuilder
             legal = engine.GetLegalPlays(playerId).Select(j => j.Play!.Cards.Select(c => c.Id).ToArray()).ToArray();
         }
 
+        // あがったプレイヤーのみ観戦用として他プレイヤーの手札を受け取れる
+        var viewer = engine.GetPlayer(playerId);
+        SpectatableHandDto[]? spectatable = null;
+        if (viewer.IsFinished)
+        {
+            spectatable = engine.Players
+                .Where(p => p.Id != playerId && !p.IsFinished)
+                .Select(p => new SpectatableHandDto(p.Id, p.Hand.Select(c => c.Id).ToArray()))
+                .ToArray();
+        }
+
         return new ClientView(
             sequence,
             engine.Phase,
@@ -230,8 +282,16 @@ public static class ClientViewBuilder
             engine.Rules.Progress.RoundCount,
             engine.SeatOrder.ToArray(),
             playerId,
-            engine.GetPlayer(playerId).Hand.Select(c => c.Id).ToArray(),
-            engine.Players.Select(p => new PlayerViewDto(p.Id, p.Name, p.Kind, p.HandCount, p.Rank, p.TotalScore, p.IsFinished)).ToArray(),
+            viewer.Hand.Select(c => c.Id).ToArray(),
+            engine.Players.Select(p => new PlayerViewDto(
+                p.Id,
+                p.Name,
+                p.Kind,
+                p.HandCount,
+                p.Rank,
+                p.TotalScore,
+                p.IsFinished,
+                avatarIcons is not null && avatarIcons.TryGetValue(p.Id, out var icon) ? icon : null)).ToArray(),
             new FieldViewDto(
                 field.CurrentPlay?.Cards.Select(c => c.Id).ToArray(),
                 field.CurrentPlay?.Type,
@@ -245,7 +305,9 @@ public static class ClientViewBuilder
                 field.IsEightCutPending,
                 field.IsElevenBackPersistent,
                 field.IsSandstormStopPending,
-                field.IsElevenBackOneTurn),
+                field.IsElevenBackOneTurn,
+                field.IsFourStopLocked,
+                field.IsCoupLocked),
             d is null ? null : new DecisionViewDto(
                 d.Kind,
                 d.PlayerId,
@@ -255,7 +317,8 @@ public static class ClientViewBuilder
                 mine || d.Kind.IsInterruptChance() ? d.TargetPlayerId : null,
                 d.Effect,
                 mine && d.CanPass),
-            legal);
+            legal,
+            spectatable);
     }
 
     /// <summary>
@@ -283,8 +346,9 @@ public static class ClientViewBuilder
             RanksDeclaredEvent rd => new NoticeDto("RanksDeclared", rd.PlayerId, Count: rd.Ranks.Count, Ranks: rd.Ranks.ToArray()),
             FieldFlushedEvent ff => new NoticeDto("FieldFlushed", ff.NextLeaderId, Effect: ff.Cause),
             PlayerFinishedEvent pf => new NoticeDto("PlayerFinished", pf.PlayerId, Count: pf.Place, FinishKind: pf.Kind),
-            RoundEndedEvent re => new NoticeDto("RoundEnded", Count: re.Result.RoundNumber, Applied: re.IsGameOver,
-                Standings: re.Result.Standings.Select(s => new StandingDto(s.PlayerId, s.Position, s.Rank, s.Points, 0)).ToArray()),
+            RoundEndedEvent re => new NoticeDto("RoundEnded", OtherPlayerId: re.Result.MiyakoOchiPlayerId, Count: re.Result.RoundNumber, Applied: re.IsGameOver,
+                Standings: re.Result.Standings.Select(s => new StandingDto(s.PlayerId, s.Position, s.Rank, s.Points, 0, s.Kind)).ToArray(),
+                IsExtraRound: re.Result.IsExtraRound, IsGekokujo: re.Result.IsGekokujo),
             GameEndedEvent ge => new NoticeDto("GameEnded", Count: ge.Result.RoundsPlayed,
                 Standings: ge.Result.Standings.Select(s => new StandingDto(s.PlayerId, s.Place, PlayerRank.None, 0, s.TotalScore)).ToArray()),
             _ => null,

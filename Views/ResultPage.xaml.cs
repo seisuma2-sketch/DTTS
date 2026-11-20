@@ -26,7 +26,14 @@ public sealed partial class ResultPage : Page, IBackRequestHandler
 
     private async void OnPageLoaded(object sender, RoutedEventArgs e)
     {
-        await ViewModel.InitializeAsync();
+        try
+        {
+            await ViewModel.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            App.WriteCrashLog("ResultPage.OnPageLoaded", ex);
+        }
     }
 
     /// <summary>戦績のリセットは取り消せないので、確認してから消す。</summary>

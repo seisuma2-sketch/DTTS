@@ -26,7 +26,14 @@ public sealed partial class FeedbackPage : Page, IBackRequestHandler
 
     private async void OnPageLoaded(object sender, RoutedEventArgs e)
     {
-        await ViewModel.InitializeAsync();
+        try
+        {
+            await ViewModel.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            App.WriteCrashLog("FeedbackPage.OnPageLoaded", ex);
+        }
     }
 
     private void OnCategoryChanged(object sender, SelectionChangedEventArgs e)
@@ -53,18 +60,25 @@ public sealed partial class FeedbackPage : Page, IBackRequestHandler
 
     private async void OnExportJsonClicked(object sender, RoutedEventArgs e)
     {
-        var picker = new FileSavePicker();
-        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindowInstance);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-
-        picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
-        picker.FileTypeChoices.Add("JSON File", new[] { ".json" });
-        picker.SuggestedFileName = $"dtts_feedback_{DateTime.Now:yyyyMMdd_HHmm}.json";
-
-        var file = await picker.PickSaveFileAsync();
-        if (file != null)
+        try
         {
-            await ViewModel.ExportJsonCommand.ExecuteAsync(file.Path);
+            var picker = new FileSavePicker();
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindowInstance);
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+
+            picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+            picker.FileTypeChoices.Add("JSON File", new[] { ".json" });
+            picker.SuggestedFileName = $"dtts_feedback_{DateTime.Now:yyyyMMdd_HHmm}.json";
+
+            var file = await picker.PickSaveFileAsync();
+            if (file != null)
+            {
+                await ViewModel.ExportJsonCommand.ExecuteAsync(file.Path);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.WriteCrashLog("FeedbackPage.ExportJson", ex);
         }
     }
 }

@@ -137,8 +137,13 @@ public sealed class FeedbackRepository
         await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
+            var rawId = reader.GetString(reader.GetOrdinal("id"));
+            if (!Guid.TryParseExact(rawId, "N", out var entryId))
+            {
+                entryId = Guid.Empty;
+            }
             list.Add(new FeedbackEntry(
-                Guid.ParseExact(reader.GetString(reader.GetOrdinal("id")), "N"),
+                entryId,
                 AppDatabaseContext.FromDbTime(reader.GetString(reader.GetOrdinal("created_at"))),
                 Enum.TryParse<FeedbackCategory>(reader.GetString(reader.GetOrdinal("category")), out var cat) ? cat : FeedbackCategory.Comment,
                 reader.GetString(reader.GetOrdinal("message")),

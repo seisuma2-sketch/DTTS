@@ -53,15 +53,8 @@
             </VisualStateGroup>
         </VisualStateManager.VisualStateGroups>
 
-        <!-- 背景：左上からテーマカラーがほんのり差し込む、奥行きのあるグラデーション -->
-        <Grid IsHitTestVisible="False">
-            <Grid.Background>
-                <RadialGradientBrush Center="0.28,0.42" GradientOrigin="0.28,0.42" RadiusX="0.75" RadiusY="0.95">
-                    <GradientStop Color="#FF1D2738" Offset="0" />
-                    <GradientStop Color="#FF131925" Offset="0.55" />
-                    <GradientStop Color="#FF0C0F15" Offset="1" />
-                </RadialGradientBrush>
-            </Grid.Background>
+        <!-- 背景：共通ラジアルグラデーション + アクセントカラーの微発光 -->
+        <Grid IsHitTestVisible="False" Background="{StaticResource AppPageBackgroundBrush}">
             <Ellipse Width="520" Height="520" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="40,0,0,40" Fill="{StaticResource AppAccentBrush}" Opacity="0.07" />
         </Grid>
 
@@ -160,13 +153,14 @@
                     <!-- プライマリ：ひとりで対戦（大きなカードボタン） -->
                     <Button
                         Command="{x:Bind ViewModel.StartSinglePlayerCommand}" AutomationProperties.Name="ひとりで対戦"
+                        PointerEntered="OnButtonPointerEntered" PointerExited="OnButtonPointerExited"
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Stretch"
                         Padding="22,20"
                         CornerRadius="20"
                         BorderThickness="1"
                         BorderBrush="#55FFFFFF"
-                        Background="{StaticResource AppAccentBrush}"
+                        Background="{StaticResource AppAccentGradientBrush}"
                         Foreground="{StaticResource AppOnAccentBrush}">
                         <Grid ColumnSpacing="16">
                             <Grid.ColumnDefinitions>
@@ -224,25 +218,25 @@
                             <RowDefinition Height="78" />
                         </Grid.RowDefinitions>
 
-                        <Button Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenRuleSettingsCommand}" AutomationProperties.Name="ルール ＆ 外見設定">
+                        <Button Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenRuleSettingsCommand}" AutomationProperties.Name="ルール ＆ 外見設定" PointerEntered="OnButtonPointerEntered" PointerExited="OnButtonPointerExited">
                             <StackPanel Spacing="4">
                                 <FontIcon Glyph="&#xE713;" FontSize="18" HorizontalAlignment="Left" Foreground="{StaticResource AppAccentBrush}" />
                                 <TextBlock Text="ルール ＆ 外見設定" FontSize="14" FontWeight="SemiBold" />
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="1" Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenResultCommand}" AutomationProperties.Name="通算戦績 ＆ 履歴">
+                        <Button Grid.Column="1" Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenResultCommand}" AutomationProperties.Name="通算戦績 ＆ 履歴" PointerEntered="OnButtonPointerEntered" PointerExited="OnButtonPointerExited">
                             <StackPanel Spacing="4">
                                 <FontIcon Glyph="&#xE9D2;" FontSize="18" HorizontalAlignment="Left" Foreground="{StaticResource AppAccentBrush}" />
                                 <TextBlock Text="通算戦績 ＆ 履歴" FontSize="14" FontWeight="SemiBold" />
                             </StackPanel>
                         </Button>
-                        <Button Grid.Row="1" Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenHelpCommand}" AutomationProperties.Name="遊び方 ＆ ルール解説">
+                        <Button Grid.Row="1" Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenHelpCommand}" AutomationProperties.Name="遊び方 ＆ ルール解説" PointerEntered="OnButtonPointerEntered" PointerExited="OnButtonPointerExited">
                             <StackPanel Spacing="4">
                                 <FontIcon Glyph="&#xE897;" FontSize="18" HorizontalAlignment="Left" Foreground="{StaticResource AppAccentBrush}" />
                                 <TextBlock Text="遊び方 ＆ ルール解説" FontSize="14" FontWeight="SemiBold" />
                             </StackPanel>
                         </Button>
-                        <Button Grid.Row="1" Grid.Column="1" Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenFeedbackCommand}" AutomationProperties.Name="フィードバック ＆ 要望">
+                        <Button Grid.Row="1" Grid.Column="1" Style="{StaticResource TitleTileButtonStyle}" Command="{x:Bind ViewModel.OpenFeedbackCommand}" AutomationProperties.Name="フィードバック ＆ 要望" PointerEntered="OnButtonPointerEntered" PointerExited="OnButtonPointerExited">
                             <StackPanel Spacing="4">
                                 <FontIcon Glyph="&#xE8BD;" FontSize="18" HorizontalAlignment="Left" Foreground="{StaticResource AppAccentBrush}" />
                                 <TextBlock Text="フィードバック ＆ 要望" FontSize="14" FontWeight="SemiBold" />

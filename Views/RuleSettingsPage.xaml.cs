@@ -116,8 +116,12 @@ public sealed partial class RuleSettingsPage : Page, IBackRequestHandler
     /// </summary>
     private static class FrameProbe
     {
+#if DEBUG
         private static readonly bool Enabled = Array.Exists(Environment.GetCommandLineArgs(),
             a => string.Equals(a, "--frame-probe", StringComparison.OrdinalIgnoreCase));
+#else
+        private static readonly bool Enabled = false;
+#endif
 
         private static string _label = "";
         private static System.Diagnostics.Stopwatch? _clock;
@@ -178,7 +182,15 @@ public sealed partial class RuleSettingsPage : Page, IBackRequestHandler
 
     private async void OnPageLoaded(object sender, RoutedEventArgs e)
     {
-        await ViewModel.InitializeAsync();
+        try
+        {
+            await ViewModel.InitializeAsync();
+        }
+        catch (Exception ex)
+        {
+            App.WriteCrashLog("RuleSettings.OnPageLoaded", ex);
+            ViewModel.StatusMessage = $"設定の読み込みに失敗しました: {ex.Message}";
+        }
     }
 
     // ------------------------------------------------------------------
@@ -306,18 +318,26 @@ public sealed partial class RuleSettingsPage : Page, IBackRequestHandler
 
     private async void OnImportZipClicked(object sender, RoutedEventArgs e)
     {
-        var picker = new FileOpenPicker();
-        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindowInstance);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-
-        picker.ViewMode = PickerViewMode.Thumbnail;
-        picker.SuggestedStartLocation = PickerLocationId.Downloads;
-        picker.FileTypeFilter.Add(".zip");
-
-        var file = await picker.PickSingleFileAsync();
-        if (file != null)
+        try
         {
-            await ViewModel.ImportSkinZipCommand.ExecuteAsync(file.Path);
+            var picker = new FileOpenPicker();
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindowInstance);
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+
+            picker.ViewMode = PickerViewMode.Thumbnail;
+            picker.SuggestedStartLocation = PickerLocationId.Downloads;
+            picker.FileTypeFilter.Add(".zip");
+
+            var file = await picker.PickSingleFileAsync();
+            if (file != null)
+            {
+                await ViewModel.ImportSkinZipCommand.ExecuteAsync(file.Path);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.WriteCrashLog("RuleSettings.ImportZip", ex);
+            ViewModel.StatusMessage = $"スキンの読み込みに失敗しました: {ex.Message}";
         }
     }
 }

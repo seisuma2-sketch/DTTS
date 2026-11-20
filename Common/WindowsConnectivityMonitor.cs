@@ -7,8 +7,10 @@ namespace DTTS.Common;
 /// <summary>
 /// Windows の <see cref="NetworkInformation"/> を利用したネットワーク接続状態モニター。
 /// </summary>
-public sealed class WindowsConnectivityMonitor : IConnectivityMonitor
+public sealed class WindowsConnectivityMonitor : IConnectivityMonitor, IDisposable
 {
+    private bool _disposed;
+
     public event EventHandler? ConnectivityChanged;
 
     public WindowsConnectivityMonitor()
@@ -34,7 +36,16 @@ public sealed class WindowsConnectivityMonitor : IConnectivityMonitor
 
     private void OnNetworkStatusChanged(object? sender)
     {
+        if (_disposed) return;
         ConnectivityChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        NetworkInformation.NetworkStatusChanged -= OnNetworkStatusChanged;
     }
 }
 

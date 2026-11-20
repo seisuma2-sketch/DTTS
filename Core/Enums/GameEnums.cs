@@ -164,3 +164,77 @@ public enum CommandError : byte
     /// <summary>プレイヤーIDが存在しない。</summary>
     UnknownPlayer,
 }
+
+/// <summary>ジョーカー代用時の効果発動範囲。</summary>
+public enum JokerEffectMode : byte
+{
+    /// <summary>ジョーカーが代用した数字の効果は発生しない。</summary>
+    Off = 0,
+    /// <summary>限定（5/13スキップ・7渡し・10捨て・12ボンバーのみ追加）。</summary>
+    Limited,
+    /// <summary>全て（階段・砂嵐・4止め・99車等も含めすべて発動）。</summary>
+    All,
+}
+
+/// <summary>禁止あがり等の3段階強度（OFF / 優しい / 厳しい）。</summary>
+public enum GentleStrictRule : byte
+{
+    /// <summary>無効。</summary>
+    Off = 0,
+    /// <summary>優しい。</summary>
+    Gentle,
+    /// <summary>厳しい。</summary>
+    Strict,
+}
+
+/// <summary>第1ラウンドの開始カード（スタート条件）。</summary>
+public enum StartCardRule : byte
+{
+    /// <summary>ダイヤの3を持つプレイヤーから開始。</summary>
+    DiamondThree = 0,
+    /// <summary>スペードの3を持つプレイヤーから開始。</summary>
+    SpadeThree,
+    /// <summary>ハートの3を持つプレイヤーから開始。</summary>
+    HeartThree,
+    /// <summary>クラブの3を持つプレイヤーから開始。</summary>
+    ClubThree,
+    /// <summary>ランダムな親が好きなカードを出して開始。</summary>
+    Free,
+}
+
+/// <summary>ラウンド終了後の席替え方式。</summary>
+public enum SeatShuffleMode : byte
+{
+    /// <summary>席替えを行わない。</summary>
+    Off = 0,
+    /// <summary>ランダムに席替え。</summary>
+    Random,
+    /// <summary>大富豪から順に並べる。</summary>
+    FromDaifugo,
+    /// <summary>大貧民から順に並べる。</summary>
+    FromDaihinmin,
+}
+
+/// <summary>配牌時のシャッフル方式。</summary>
+public enum ShuffleMode : byte
+{
+    /// <summary>完全ランダム。</summary>
+    Random = 0,
+    /// <summary>リアリティ（前のラウンドの捨てられ方・まとまりを分散）。</summary>
+    Reality,
+    /// <summary>セパレート（2グループに分けて均等に配る）。</summary>
+    Separate2,
+    /// <summary>セパレート3（3グループに分けて均等に配る）。</summary>
+    Separate3,
+}
+
+/// <summary>配牌時のブラインドカード（除外カード）方式。</summary>
+public enum BlindCardMode : byte
+{
+    /// <summary>除外しない（すべて配り切る）。</summary>
+    Off = 0,
+    /// <summary>手札が同じ枚数になるように端数のカードを除く。</summary>
+    Remainder,
+    /// <summary>手札が13枚以下で同じ枚数になるようにカードを除く。</summary>
+    Max13,
+}

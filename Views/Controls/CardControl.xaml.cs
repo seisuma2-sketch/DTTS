@@ -31,11 +31,24 @@ public sealed partial class CardControl : UserControl
     public static readonly DependencyProperty IsLegalSelectionProperty =
         DependencyProperty.Register(nameof(IsLegalSelection), typeof(bool), typeof(CardControl), new PropertyMetadata(false, OnIsLegalSelectionChanged));
 
+    public static readonly DependencyProperty IsHoverEnabledProperty =
+        DependencyProperty.Register(nameof(IsHoverEnabled), typeof(bool), typeof(CardControl), new PropertyMetadata(true));
+
+    /// <summary>アプリ全体でのカードホバー演出の有効・無効（外観設定から反映）。</summary>
+    public static bool GlobalHoverEnabled { get; set; } = true;
+
     public event EventHandler<Card>? CardClicked;
     public event EventHandler<Card>? CardDoubleClicked;
 
     /// <summary>右クリック・長押し：同じ数字のカードをまとめて選びたい。</summary>
     public event EventHandler<Card>? SameRankRequested;
+
+    /// <summary>このカードのホバー演出を有効にするか。</summary>
+    public bool IsHoverEnabled
+    {
+        get => (bool)GetValue(IsHoverEnabledProperty);
+        set => SetValue(IsHoverEnabledProperty, value);
+    }
 
     /// <summary>選んでいるカードがそのまま出せる組になっているか（外側を光らせる）。</summary>
     public bool IsLegalSelection
@@ -166,13 +179,11 @@ public sealed partial class CardControl : UserControl
     private void OnPointerEntered(object sender, PointerRoutedEventArgs e)
     {
         _isPointerOver = true;
-        if (!IsFacedDown)
+        // 重なり順（Z-Index）や拡大を変えると隣カードとの境界がちらついて選びづらくなるため、
+        // 控えめに上へ少し浮かせるだけにする（設定で無効化も可能）
+        if (!IsFacedDown && IsHoverEnabled && GlobalHoverEnabled && !IsSelected)
         {
-            CompositionAnimationHelper.AnimateSpringScale(this, 1.05f, dampingRatio: 0.7f, periodMs: 200f);
-            if (!IsSelected)
-            {
-                CompositionAnimationHelper.AnimateSpringTranslationY(this, -5f, dampingRatio: 0.7f, periodMs: 200f);
-            }
+            CompositionAnimationHelper.AnimateSpringTranslationY(this, -4f, dampingRatio: 0.85f, periodMs: 140f);
         }
     }
 
@@ -181,9 +192,21 @@ public sealed partial class CardControl : UserControl
         _isPointerOver = false;
         if (!IsFacedDown)
         {
-            CompositionAnimationHelper.AnimateSpringScale(this, 1.0f, dampingRatio: 0.7f, periodMs: 220f);
             float targetY = IsSelected ? -16f : 0f;
-            CompositionAnimationHelper.AnimateSpringTranslationY(this, targetY, dampingRatio: 0.65f, periodMs: 220f);
+            CompositionAnimationHelper.AnimateSpringTranslationY(this, targetY, dampingRatio: 0.8f, periodMs: 160f);
+        }
+    }
+
+    private void SetHoverZIndex(int z)
+    {
+        Canvas.SetZIndex(this, z);
+        if (Parent is UIElement parent)
+        {
+            Canvas.SetZIndex(parent, z);
+            if (VisualTreeHelper.GetParent(parent) is UIElement container)
+            {
+                Canvas.SetZIndex(container, z);
+            }
         }
     }
 
@@ -362,12 +385,16 @@ public sealed partial class CardControl : UserControl
         };
     }
 
+    private static readonly SolidColorBrush SuitRedBrush = new(ColorHelper.FromArgb(255, 0xD9, 0x38, 0x48));
+    private static readonly SolidColorBrush SuitJokerBrush = new(ColorHelper.FromArgb(255, 0x6D, 0x3F, 0xC8));
+    private static readonly SolidColorBrush SuitBlackBrush = new(ColorHelper.FromArgb(255, 0x1E, 0x22, 0x2B));
+
     /// <summary>明るいカード表面に映える色：♠♣ は深いチャコール、♥♦ はクリムゾン、ジョーカーはパープル（星はゴールド）。</summary>
     private static Brush GetSuitBrush(Suit suit) => suit switch
     {
-        Suit.Heart or Suit.Diamond => new SolidColorBrush(ColorHelper.FromArgb(255, 0xD9, 0x38, 0x48)),
-        Suit.Joker => new SolidColorBrush(ColorHelper.FromArgb(255, 0x6D, 0x3F, 0xC8)),
-        _ => new SolidColorBrush(ColorHelper.FromArgb(255, 0x1E, 0x22, 0x2B))
+        Suit.Heart or Suit.Diamond => SuitRedBrush,
+        Suit.Joker => SuitJokerBrush,
+        _ => SuitBlackBrush
     };
 }
 

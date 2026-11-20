@@ -9,6 +9,8 @@ public enum RulePreset
     Intermediate,
     /// <summary>完全上級者：実装されているすべてのローカルルールを有効にしたフル構成。</summary>
     Expert,
+    /// <summary>開発者用ルール：オーメン以外の全ルール有効・11バックは次の手番だけ・10ラウンド。</summary>
+    Developer,
 }
 
 /// <summary>
@@ -23,6 +25,7 @@ public static class RulePresets
         RulePreset.Beginner => "初心者用",
         RulePreset.Intermediate => "中級者用",
         RulePreset.Expert => "完全上級者（全ルールあり）",
+        RulePreset.Developer => "開発者用ルール",
         _ => preset.ToString(),
     };
 
@@ -41,8 +44,11 @@ public static class RulePresets
             case RulePreset.Expert:
                 ApplyExpert(r);
                 break;
+            case RulePreset.Developer:
+                ApplyDeveloper(r);
+                break;
         }
-        if (keepProgressFrom is not null)
+        if (keepProgressFrom is not null && preset != RulePreset.Developer)
         {
             r.Progress.RoundCount = keepProgressFrom.Progress.RoundCount;
         }
@@ -107,12 +113,13 @@ public static class RulePresets
         var flow = r.Flow;
         flow.EightCutEnabled = true;
         flow.FourStopEnabled = true;
+        flow.FourStopFlushesField = true;
         flow.SandstormEnabled = true;
         flow.AmbulanceEnabled = true;
         flow.RokurokubiEnabled = true;
 
         r.ElevenBack.Enabled = true;
-        r.ElevenBack.Duration = Enums.ElevenBackDuration.Persistent; // 強化11バック
+        r.ElevenBack.Duration = Enums.ElevenBackDuration.UntilFlush;
 
         var sr = r.SkipReverse;
         sr.FiveSkipEnabled = true;
@@ -142,15 +149,18 @@ public static class RulePresets
         ff.ForbidSpadeThree = true;
         ff.ForbidTwelveBomber = true;
         ff.ForbidElevenBack = true;
+        ff.ForbidSevenPass = true;
+        ff.ForbidTenDiscard = true;
         ff.ForbidOtherFlushEffects = true;
         ff.ForbidRevolution = true;
 
         var ex = r.Exchange;
         ex.Enabled = true;
         ex.LinkedToMiyakoOchi = true;
-        ex.PoorCanChooseCards = true;
-        ex.JokerProtected = true;
+        ex.PoorCanChooseCards = false;
+        ex.JokerProtected = false;
         ex.TenpenChiiEnabled = true;
+        ex.FiveConsecutiveDaihinminTenpenChii = true;
 
         var pr = r.Progress;
         pr.DiamondThreeStarts = true;
@@ -158,5 +168,14 @@ public static class RulePresets
         pr.PassLocksUntilFlush = true;
         pr.KeepFieldOnPlayerFinish = true;
         pr.ExtraRoundOnTie = true;
+    }
+
+    /// <summary>開発者用ルール：オーメン以外の全ルール有効、11バックは「次の手番だけ」、10ラウンド。</summary>
+    private static void ApplyDeveloper(RuleSettings r)
+    {
+        ApplyExpert(r);
+        r.Revolution.OmenEnabled = false;
+        r.ElevenBack.Duration = Enums.ElevenBackDuration.NextTurnOnly;
+        r.Progress.RoundCount = 10;
     }
 }

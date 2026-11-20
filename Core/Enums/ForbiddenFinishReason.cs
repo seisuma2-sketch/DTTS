@@ -25,6 +25,8 @@ public enum ForbiddenFinishReason : ushort
     FlushEffect = 1 << 6,
     /// <summary>革命を発生させる出し札。</summary>
     Revolution = 1 << 7,
+    /// <summary>階段であがる。</summary>
+    Sequence = 1 << 8,
 }
 
 /// <summary>禁止あがりをした場合のペナルティ方式。</summary>

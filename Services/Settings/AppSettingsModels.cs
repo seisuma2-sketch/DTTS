@@ -52,14 +52,72 @@ public sealed record ThemeColorInfo(ThemeColor Color, string DisplayName, string
     public static ThemeColorInfo Get(ThemeColor color) => All.FirstOrDefault(t => t.Color == color) ?? All[1];
 }
 
+/// <summary>革命時の卓背景カラー。</summary>
+public enum RevolutionBgColor : byte
+{
+    /// <summary>深紅（クリムゾン）</summary>
+    DeepCrimson = 0,
+    /// <summary>バイオレット</summary>
+    VioletNight,
+    /// <summary>アンバーゴールド</summary>
+    AmberFlame,
+    /// <summary>ディープエメラルド</summary>
+    EmeraldAbyss,
+    /// <summary>変更しない（通常の卓背景のまま）</summary>
+    None,
+}
+
+/// <summary>革命時背景カラーの表示情報とグラデーション色。</summary>
+public sealed record RevolutionBgColorInfo(
+    RevolutionBgColor Color,
+    string DisplayName,
+    string CenterHex,
+    string MidHex,
+    string OuterHex,
+    string EdgeHex)
+{
+    public static IReadOnlyList<RevolutionBgColorInfo> All { get; } = new[]
+    {
+        new RevolutionBgColorInfo(RevolutionBgColor.DeepCrimson, "深紅（クリムゾン）", "#FF461926", "#FF34131E", "#FF240D15", "#FF14070C"),
+        new RevolutionBgColorInfo(RevolutionBgColor.VioletNight, "バイオレット", "#FF381E52", "#FF2B1640", "#FF1E102E", "#FF11081B"),
+        new RevolutionBgColorInfo(RevolutionBgColor.AmberFlame, "アンバーゴールド", "#FF472C14", "#FF36210F", "#FF26170A", "#FF140C05"),
+        new RevolutionBgColorInfo(RevolutionBgColor.EmeraldAbyss, "ディープエメラルド", "#FF143E32", "#FF0F3027", "#FF0A221B", "#FF05130F"),
+        new RevolutionBgColorInfo(RevolutionBgColor.None, "変更しない（通常）", "#FF223047", "#FF1D2636", "#FF151B26", "#FF0E121A"),
+    };
+
+    public static RevolutionBgColorInfo Get(RevolutionBgColor color)
+        => All.FirstOrDefault(c => c.Color == color) ?? All[0];
+}
+
+/// <summary>プレイヤーが選択できるアイコンの定義。</summary>
+public sealed record PlayerIconInfo(string Id, string DisplayName, string Glyph, string AccentHex)
+{
+    public static IReadOnlyList<PlayerIconInfo> All { get; } = new[]
+    {
+        new PlayerIconInfo("default", "標準", "\uE77B", "#3E8EF7"),
+        new PlayerIconInfo("crown", "王冠", "\uE734", "#F4C430"),
+        new PlayerIconInfo("flame", "ボム・炎", "\uE945", "#E5484D"),
+        new PlayerIconInfo("bolt", "稲妻", "\uE945", "#FF8A3D"),
+        new PlayerIconInfo("heart", "ハート", "\uEB52", "#FF4FA3"),
+        new PlayerIconInfo("shield", "シールド", "\uEA18", "#2FBF84"),
+        new PlayerIconInfo("spark", "スター", "\uE735", "#9B6CFF"),
+        new PlayerIconInfo("game", "ゲーム", "\uE7FC", "#5EC8FF"),
+        new PlayerIconInfo("music", "ミュージック", "\uEC4F", "#B6F24A"),
+        new PlayerIconInfo("bot", "メカ", "\uE99A", "#C4CBD8"),
+    };
+
+    public static PlayerIconInfo Get(string? id)
+        => All.FirstOrDefault(i => string.Equals(i.Id, id, StringComparison.Ordinal)) ?? All[0];
+}
+
 /// <summary>操作ガイド・割り込み確認の表示レベル。</summary>
 public enum GuideLevel : byte
 {
-    /// <summary>初心者用：ルールや操作のヒントを出し、4止め・砂嵐を持っていなくても割り込みの確認を出す。</summary>
+    /// <summary>初心者用：ルールや操作のヒントを出す。</summary>
     Beginner = 0,
-    /// <summary>中級者用（標準）：止められる手を持つときだけ確認。革命や特殊効果の初回など重要な場面だけ控えめなヒント。</summary>
+    /// <summary>中級者用（標準）：革命や特殊効果の初回など、重要な場面だけ控えめなヒント。</summary>
     Intermediate,
-    /// <summary>上級者用：ヒントなし。止められる手を持つときだけ確認。</summary>
+    /// <summary>上級者用：ヒント・手番の案内・まとめて選ぶ候補を出さない。</summary>
     Expert,
 }
 
@@ -80,13 +138,16 @@ public static class GuideLevelInfo
     /// <summary>説明文。</summary>
     public static string Description(this GuideLevel level) => level switch
     {
-        GuideLevel.Beginner => "ルールや操作のヒントを表示します。4止め・砂嵐を持っていなくても、8切りやろくろ首などが出るたびに「止める／パス（流す）」を確認します。",
-        GuideLevel.Expert => "ヒントは表示しません。4止め・砂嵐を実際に持っているときだけ、割り込みの確認を出します。",
-        _ => "4止め・砂嵐を実際に持っているときだけ、割り込みの確認を出します。革命や特殊効果の初回など、重要な場面でだけ控えめなヒントを表示します。",
+        GuideLevel.Beginner => "ルールや操作のヒントを、場面ごとに表示します。",
+        GuideLevel.Expert => "ヒント・手番の案内（「あなたのターンです」など）・「まとめて選ぶ」の候補を表示しない、すっきりした画面です。",
+        _ => "革命や特殊効果の初回など、重要な場面でだけ控えめなヒントを表示します。",
     };
 
-    /// <summary>止められる手を持っていなくても割り込みの確認を出すか。</summary>
-    public static bool AlwaysAsksInterrupt(this GuideLevel level) => level == GuideLevel.Beginner;
+    /// <summary>
+    /// 止められる手（4止め・砂嵐）を持っていなくても、8切り・ろくろ首・99車・エンペラーの割り込みの確認を出すか。
+    /// 人が操作する席には、ガイドのレベルに関わらず常に確認を出す（勝手に場が流れないように）。
+    /// </summary>
+    public static bool AlwaysAsksInterrupt(this GuideLevel level) => true;
 }
 
 /// <summary>外見設定。</summary>
@@ -100,6 +161,9 @@ public sealed class AppearanceSettings
 
     /// <summary>アニメーションを有効にする。</summary>
     public bool AnimationsEnabled { get; set; } = true;
+
+    /// <summary>手札カードのホバー演出を有効にする。</summary>
+    public bool CardHoverEnabled { get; set; } = true;
 
     /// <summary>効果音を有効にする。</summary>
     public bool SoundEnabled { get; set; } = true;
@@ -116,6 +180,18 @@ public sealed class AppearanceSettings
     /// <summary>操作ガイド・割り込み確認の表示レベル（既定は中級者用：止められる手を持つときだけ確認）。</summary>
     public GuideLevel GuideLevel { get; set; } = GuideLevel.Intermediate;
 
+    /// <summary>出せる手がないとき（通常ターン・割り込みとも）に自動でパスするか。対戦中も切り替え可能。</summary>
+    public bool AutoPassWhenCannotPlay { get; set; } = false;
+
+    /// <summary>革命中の卓背景カラー。</summary>
+    public RevolutionBgColor RevolutionBgColor { get; set; } = RevolutionBgColor.DeepCrimson;
+
+    /// <summary>プレイヤーのアイコンID（プリセット識別子）。</summary>
+    public string PlayerIconId { get; set; } = "default";
+
+    /// <summary>カスタム画像アバターのファイルパス（任意）。</summary>
+    public string? CustomAvatarPath { get; set; }
+
     /// <summary>効果音の既定音量。</summary>
     public const int DefaultSeVolume = 80;
 
@@ -129,6 +205,10 @@ public sealed class AppearanceSettings
         {
             ThemeColor = ThemeColor.DeepAzure;
         }
+        if (!Enum.IsDefined(RevolutionBgColor))
+        {
+            RevolutionBgColor = RevolutionBgColor.DeepCrimson;
+        }
         if (!Enum.IsDefined(GameSpeed))
         {
             GameSpeed = GameSpeed.Normal;
@@ -137,6 +217,8 @@ public sealed class AppearanceSettings
         {
             GuideLevel = GuideLevel.Intermediate;
         }
+        PlayerIconId = PlayerIconInfo.Get(PlayerIconId).Id;
+        CustomAvatarPath = string.IsNullOrWhiteSpace(CustomAvatarPath) ? null : CustomAvatarPath.Trim();
         SeVolume = Math.Clamp(SeVolume, 0, 100);
         BgmVolume = Math.Clamp(BgmVolume, 0, 100);
     }
@@ -209,6 +291,12 @@ public sealed class CustomRulePreset
     /// <summary>ルール設定（<see cref="RuleSettings.ToJson"/> の出力）。</summary>
     public string RulesJson { get; set; } = "";
 
+    /// <summary>保存したテーマカラー（任意）。</summary>
+    public ThemeColor? ThemeColor { get; set; }
+
+    /// <summary>保存した革命時背景カラー（任意）。</summary>
+    public RevolutionBgColor? RevolutionBgColor { get; set; }
+
     /// <summary>保存した日時。</summary>
     public DateTimeOffset SavedAt { get; set; }
 
@@ -257,7 +345,12 @@ public sealed class CustomRulePresetList
     /// 現在のルール構成を名前を付けて保存する。同じ名前があれば上書きし、先頭（最新）へ移す。
     /// </summary>
     /// <returns>保存したプリセット。名前が使えない、または上限に達していて新規追加できない場合は null。</returns>
-    public CustomRulePreset? Upsert(string? name, RuleSettings rules, DateTimeOffset now)
+    public CustomRulePreset? Upsert(
+        string? name,
+        RuleSettings rules,
+        DateTimeOffset now,
+        ThemeColor? themeColor = null,
+        RevolutionBgColor? revolutionBgColor = null)
     {
         ArgumentNullException.ThrowIfNull(rules);
         var clean = SanitizeName(name);
@@ -274,7 +367,14 @@ public sealed class CustomRulePresetList
         {
             Presets.Remove(existing);
         }
-        var preset = new CustomRulePreset { Name = clean, RulesJson = rules.ToJson(), SavedAt = now };
+        var preset = new CustomRulePreset
+        {
+            Name = clean,
+            RulesJson = rules.ToJson(),
+            ThemeColor = themeColor,
+            RevolutionBgColor = revolutionBgColor,
+            SavedAt = now,
+        };
         Presets.Insert(0, preset);
         return preset;
     }

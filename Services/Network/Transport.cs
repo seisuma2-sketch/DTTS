@@ -51,34 +51,80 @@ public static class FrameCodec
             throw new InvalidDataException($"不正なフレーム長です: {length}");
         }
         var payload = new byte[length];
-        await stream.ReadExactlyAsync(payload, cancellationToken).ConfigureAwait(false);
+        if (length > 0)
+        {
+            using var payloadCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            payloadCts.CancelAfter(TimeSpan.FromSeconds(10));
+            await stream.ReadExactlyAsync(payload, payloadCts.Token).ConfigureAwait(false);
+        }
         return payload;
     }
 }
 
 /// <summary>
+/// メッセージ単位の双方向通信接続（TCP・Bluetooth LE 等で共通に利用する）。
+/// </summary>
+public interface IMessageConnection : IAsyncDisposable
+{
+    /// <summary>接続ID。</summary>
+    string Id { get; }
+
+    /// <summary>切断済みか。</summary>
+    bool IsClosed { get; }
+
+    /// <summary>鍵交換トランスクリプトから導出した6桁の確認コード（SAS）。確立前は null。</summary>
+    string? ShortAuthCode => null;
+
+    /// <summary>メッセージを受信した。</summary>
+    event Action<IMessageConnection, NetMessage>? MessageReceived;
+
+    /// <summary>切断された（1回だけ呼ばれる。正常切断なら null）。</summary>
+    event Action<IMessageConnection, Exception?>? Closed;
+
+    /// <summary>送受信を開始する。</summary>
+    void Start();
+
+    /// <summary>メッセージを送信キューに積む（切断後は無視）。</summary>
+    bool Send(NetMessage message);
+
+    /// <summary>キューを送り切ってから切断する。</summary>
+    Task CloseAsync(Exception? reason = null);
+}
+
+/// <summary>
 /// 1本のTCP接続上でメッセージを送受信する。
+/// <para>
+/// すべてのメッセージは <see cref="SecureChannel"/> で暗号化・認証する（接続直後に鍵を交換し、以降のフレームは AES-GCM）。
+/// 経路上で盗み見ても、手札・参加 PIN・再接続トークンは読めない。
+/// </para>
 /// <para>
 /// 受信はソケットの非同期読み取りを待つイベント駆動（待機ループや定期確認はしない）。
 /// 送信はチャネルに積んで単一の書き込みタスクが順に送るため、呼び出し側をブロックせず順序も保証される。
 /// 相手の無応答は TCP キープアライブ（OS 機能）で検出する。
 /// </para>
 /// </summary>
-public sealed class MessageConnection : IAsyncDisposable
+public sealed class MessageConnection : IMessageConnection
 {
     private readonly TcpClient _client;
     private readonly NetworkStream _stream;
-    private readonly Channel<NetMessage> _outgoing = Channel.CreateUnbounded<NetMessage>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<NetMessage> _outgoing = Channel.CreateBounded<NetMessage>(
+        new BoundedChannelOptions(1024) { SingleReader = true, FullMode = BoundedChannelFullMode.DropOldest });
     private readonly CancellationTokenSource _cts = new();
+    private readonly SecureChannel _secure;
     private int _closed;
+    private int _ctsDisposed;
     private Task? _readTask;
     private Task? _writeTask;
 
     /// <summary>接続をラップする（<see cref="Start"/> で送受信を開始）。</summary>
-    public MessageConnection(TcpClient client, string id)
+    /// <param name="client">TCP 接続。</param>
+    /// <param name="id">接続ID。</param>
+    /// <param name="role">暗号化の立場（接続した側＝ゲストは Initiator、受け付けた側＝ホストは Responder）。</param>
+    public MessageConnection(TcpClient client, string id, SecureChannelRole role = SecureChannelRole.Initiator)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
         Id = id;
+        _secure = new SecureChannel(role);
         ConfigureKeepAlive(client.Client);
         client.NoDelay = true;
         _stream = client.GetStream();
@@ -94,11 +140,17 @@ public sealed class MessageConnection : IAsyncDisposable
     /// <summary>切断済みか。</summary>
     public bool IsClosed => Volatile.Read(ref _closed) != 0;
 
+    /// <summary>暗号化の鍵交換が済んでいるか。</summary>
+    public bool IsSecured => _secure.IsEstablished;
+
+    /// <inheritdoc />
+    public string? ShortAuthCode => _secure.ShortAuthCode;
+
     /// <summary>メッセージを受信した（スレッドプール上で呼ばれる）。</summary>
-    public event Action<MessageConnection, NetMessage>? MessageReceived;
+    public event Action<IMessageConnection, NetMessage>? MessageReceived;
 
     /// <summary>切断された（1回だけ呼ばれる。原因の例外は正常切断なら null）。</summary>
-    public event Action<MessageConnection, Exception?>? Closed;
+    public event Action<IMessageConnection, Exception?>? Closed;
 
     /// <summary>送受信を開始する。</summary>
     public void Start()
@@ -126,6 +178,20 @@ public sealed class MessageConnection : IAsyncDisposable
             }
         }
         Shutdown(reason);
+        if (_readTask is not null)
+        {
+            try { await _readTask.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Transport read wait: {ex.Message}"); }
+        }
+        if (_writeTask is not null)
+        {
+            try { await _writeTask.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(false); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Transport write wait: {ex.Message}"); }
+        }
+        if (Interlocked.Exchange(ref _ctsDisposed, 1) == 0)
+        {
+            _cts.Dispose();
+        }
     }
 
     /// <inheritdoc />
@@ -144,7 +210,13 @@ public sealed class MessageConnection : IAsyncDisposable
                 {
                     break; // 相手が切断
                 }
-                var message = NetProtocol.Deserialize(frame);
+                if (!_secure.IsEstablished)
+                {
+                    // 最初のフレームは鍵交換（Hello）。平文のメッセージ（旧版）はここで例外になり、切断する
+                    _secure.AcceptHello(frame);
+                    continue;
+                }
+                var message = _secure.OpenMessage(frame);
                 if (message is null)
                 {
                     throw new InvalidDataException("解釈できないメッセージを受信しました。");
@@ -167,9 +239,20 @@ public sealed class MessageConnection : IAsyncDisposable
         Exception? error = null;
         try
         {
+            // 鍵交換：ゲストが先に Hello を送り、ホストは相手の Hello を受け取ってから返す。済むまでメッセージは送らない
+            if (_secure.Role == SecureChannelRole.Initiator)
+            {
+                await FrameCodec.WriteAsync(_stream, _secure.CreateHello(), _cts.Token).ConfigureAwait(false);
+            }
+            await _secure.Established.WaitAsync(SecureChannel.HandshakeTimeout, _cts.Token).ConfigureAwait(false);
+            if (_secure.Role == SecureChannelRole.Responder)
+            {
+                await FrameCodec.WriteAsync(_stream, _secure.CreateHello(), _cts.Token).ConfigureAwait(false);
+            }
+
             await foreach (var message in _outgoing.Reader.ReadAllAsync(_cts.Token).ConfigureAwait(false))
             {
-                await FrameCodec.WriteAsync(_stream, NetProtocol.Serialize(message), _cts.Token).ConfigureAwait(false);
+                await FrameCodec.WriteAsync(_stream, _secure.SealMessage(message), _cts.Token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -190,13 +273,16 @@ public sealed class MessageConnection : IAsyncDisposable
         }
         _outgoing.Writer.TryComplete();
         _cts.Cancel();
+        _secure.Abort(reason);
         try
         {
             _client.Close();
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is ObjectDisposedException or SocketException)
         {
+            System.Diagnostics.Debug.WriteLine($"Transport close: {ex.Message}");
         }
+        _secure.Dispose();
         Closed?.Invoke(this, reason);
     }
 
@@ -205,9 +291,10 @@ public sealed class MessageConnection : IAsyncDisposable
         try
         {
             socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
-            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 5);      // 5秒無通信で確認開始
-            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 2);  // 2秒間隔
-            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 3); // 3回で切断
+            // Wi-Fi 省電力モード（PSM）の不要な起床を抑えるため 20 秒無通信で確認開始
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 20);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 5);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 3);
         }
         catch (SocketException)
         {
@@ -253,7 +340,7 @@ public sealed class TcpMessageServer : IAsyncDisposable
             while (!_cts.IsCancellationRequested)
             {
                 var client = await _listener.AcceptTcpClientAsync(_cts.Token).ConfigureAwait(false);
-                var connection = new MessageConnection(client, "c" + Interlocked.Increment(ref _counter));
+                var connection = new MessageConnection(client, "c" + Interlocked.Increment(ref _counter), SecureChannelRole.Responder);
                 ConnectionAccepted?.Invoke(connection);
             }
         }
@@ -277,6 +364,7 @@ public sealed class TcpMessageServer : IAsyncDisposable
         {
             await _acceptTask.ConfigureAwait(false);
         }
+        _cts.Dispose();
     }
 }
 

@@ -81,6 +81,9 @@ public interface IAudioService : IDisposable
 
     /// <summary>外見設定のサウンド項目をまとめて反映する。</summary>
     void ApplySettings(AppearanceSettings settings);
+
+    /// <summary>ウィンドウ最小化時などの省電力一時停止・再開を切り替える。</summary>
+    void SetSuspended(bool suspended) { }
 }
 
 /// <summary>効果音ファイルの対応表。</summary>

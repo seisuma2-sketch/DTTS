@@ -41,6 +41,8 @@ internal static class InterruptTests
         EightCutStoppedBySandstorm();
         SandstormIsNeverInterrupted();
         JudgeAcceptsBothStoppers();
+        FourStopLocksTheField();
+        SandstormInNormalPlay();
         GuideHintLevels();
         return (_pass, _fail);
     }
@@ -380,6 +382,87 @@ internal static class InterruptTests
     }
 
     // ------------------------------------------------------------------
+    // 4止めの成立後は、場が流れるまで砂嵐しか出せない
+    // ------------------------------------------------------------------
+
+    private static void FourStopLocksTheField()
+    {
+        RuleSettings Rules(bool sandstorm)
+        {
+            var r = RuleSettings.CreateDefault();
+            r.Flow.FourStopEnabled = true;
+            r.Flow.SandstormEnabled = sandstorm;
+            return r;
+        }
+
+        // ほかの人は強いペアを持っていても出せず、全員パスで流れて、4止めした人が親になる
+        {
+            var (e, l, a, b, c, rec) = Start(Rules(sandstorm: true));
+            e.GetPlayer(l).SetHand(C("D3 H8 SK"));
+            e.GetPlayer(a).SetHand(C("S4 C4 C5"));
+            e.GetPlayer(b).SetHand(C("SA HA D7"));     // 4のペアより強いエースのペア
+            e.GetPlayer(c).SetHand(C("D9 C9 CK"));
+            Play(e, l, "D3", "4lock");
+            Pass(e, a, "4lock"); Pass(e, b, "4lock"); Pass(e, c, "4lock");
+            Play(e, l, "H8", "4lock");
+            Play(e, a, "S4 C4", "4lock stop");
+            Check(e.Field.IsFourStopLocked && e.PendingDecision!.PlayerId == b, "4lock: the field is locked after the stop");
+            Check(e.GetLegalPlays(b).Count == 0 && e.SubmitPlay(b, C("SA HA")).PlayReject == PlayRejectReason.FourStopLocked,
+                "4lock: a stronger pair is refused");
+            Pass(e, b, "4lock");
+            Check(e.GetLegalPlays(c).Count == 0, "4lock: the 9 pair is refused too");
+            rec.Clear();
+            Pass(e, c, "4lock");
+            Pass(e, l, "4lock");
+            Check(rec.Flushes.Count == 1 && rec.Flushes[0].NextLeaderId == a && !e.Field.IsFourStopLocked && e.Field.IsEmpty,
+                "4lock: everyone passes -> flush, the stopper leads and the lock is gone");
+        }
+
+        // 砂嵐だけは出せて、すぐに場が流れる（砂嵐を出した人が親）
+        {
+            var (e, l, a, b, c, rec) = Start(Rules(sandstorm: true));
+            e.GetPlayer(l).SetHand(C("D3 H8 SK"));
+            e.GetPlayer(a).SetHand(C("S4 C4 C5"));
+            e.GetPlayer(b).SetHand(C("S3 H3 C3 D7"));
+            e.GetPlayer(c).SetHand(C("D9 C9 CK"));
+            Play(e, l, "D3", "4lock-storm");
+            Pass(e, a, "4lock-storm"); Pass(e, b, "4lock-storm"); Pass(e, c, "4lock-storm");
+            Play(e, l, "H8", "4lock-storm");
+            Play(e, a, "S4 C4", "4lock-storm stop");
+            var legal = e.GetLegalPlays(b);
+            Check(legal.Count == 1 && legal[0].BeatMethod == BeatMethod.Sandstorm, "4lock-storm: only the sandstorm is legal");
+            rec.Clear();
+            Play(e, b, "S3 H3 C3", "4lock-storm sandstorm");
+            Check(rec.Flushes.Count == 1 && rec.Flushes[0].Cause == SpecialEffectType.Sandstorm && e.PendingDecision!.PlayerId == b
+                && !e.Field.IsFourStopLocked, "4lock-storm: the sandstorm flushes and its player leads");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 砂嵐は、ふつうの自分の番でも、どんな場に出せる（すぐに場が流れる）
+    // ------------------------------------------------------------------
+
+    private static void SandstormInNormalPlay()
+    {
+        var r = RuleSettings.CreateDefault();
+        r.Flow.SandstormEnabled = true;
+        r.Revolution.Enabled = true;
+        var (e, l, a, b, c, rec) = Start(r);
+        e.GetPlayer(l).SetHand(C("D3 S2 SK"));
+        e.GetPlayer(a).SetHand(C("S3 H3 C3 D7"));
+        e.GetPlayer(b).SetHand(C("D9 CK"));
+        e.GetPlayer(c).SetHand(C("D10 CQ"));
+        Play(e, l, "D3", "storm-normal");
+        Pass(e, a, "storm-normal"); Pass(e, b, "storm-normal"); Pass(e, c, "storm-normal");
+        Play(e, l, "S2", "storm-normal single 2");
+        Check(e.GetLegalPlays(a).Any(p => p.BeatMethod == BeatMethod.Sandstorm), "storm-normal: the sandstorm is legal over a single 2");
+        rec.Clear();
+        Play(e, a, "S3 H3 C3", "storm-normal sandstorm");
+        Check(rec.Asked.Count == 0 && rec.Flushes.Count == 1 && rec.Flushes[0].Cause == SpecialEffectType.Sandstorm
+            && e.PendingDecision!.PlayerId == a && e.Field.IsEmpty, "storm-normal: it flushes at once and its player leads");
+    }
+
+    // ------------------------------------------------------------------
     // 判定：8切りの割り込み中は、4止めと砂嵐の両方を受け付ける
     // ------------------------------------------------------------------
 
@@ -435,13 +518,16 @@ internal static class InterruptTests
         Check(first is not null && first.Contains("♦3") && !first.Contains("好きなカード"),
             "guide beginner: the very first lead names the required ♦3 instead of 'any card'");
         {
-            // エンジンの場にも、最初の親番で ♦3 が必須として載っている（画面はここからヒントを作る）
+            // ♦3 を持つ人が親になるが、最初の1手に ♦3 を含める必要はない
             var r = RuleSettings.CreateDefault();
             r.Progress.DiamondThreeStarts = true;
             var e = new GameEngine(r, Enumerable.Range(0, 4).Select(i => new PlayerSetup("P" + i, PlayerKind.Human)).ToList(), new SystemRandomSource(5));
             e.StartGame();
-            Check(e.Field.RequiredCard?.ToString() == "♦3" && e.GetLegalPlays(e.PendingDecision!.PlayerId).All(p => p.Play!.Cards.Contains(Card.Of(Suit.Diamond, Rank.Three))),
-                "guide: the first lead requires ♦3 and every legal play contains it");
+            var d3 = Card.Of(Suit.Diamond, Rank.Three);
+            Check(e.GetPlayer(e.PendingDecision!.PlayerId).Hand.Contains(d3)
+                && e.Field.RequiredCard is null
+                && e.GetLegalPlays(e.PendingDecision.PlayerId).Any(p => !p.Play!.Cards.Contains(d3)),
+                "guide: the first lead starts with the ♦3 holder without requiring ♦3");
         }
         Check(beginner.ForTurn(false, false)!.Contains("パス"), "guide beginner: no-legal-play hint suggests passing");
         string? locked = beginner.ForTurn(false, true, reversed: true, suitLocked: true);

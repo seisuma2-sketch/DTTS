@@ -7,11 +7,12 @@
     xmlns:db="using:DTTS.Services.Database"
     xmlns:vm="using:DTTS.ViewModels"
     mc:Ignorable="d"
-    Background="{StaticResource AppBackgroundDeepBrush}"
+    Background="{StaticResource AppPageBackgroundBrush}"
     Loaded="OnPageLoaded">
 
     <Grid Padding="24">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
@@ -26,28 +27,59 @@
             </Grid.ColumnDefinitions>
 
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
-                <Button Command="{x:Bind ViewModel.GoBackCommand}" Background="Transparent" BorderThickness="0" Padding="8,4">
-                    <TextBlock Text="← タイトルへ戻る" Foreground="{StaticResource AppTextSecondaryBrush}" FontSize="14" />
-                </Button>
+                <Button Command="{x:Bind ViewModel.GoBackCommand}" Style="{StaticResource AppBackButtonStyle}" Content="← タイトルへ戻る" AutomationProperties.Name="タイトルへ戻る" />
                 <TextBlock Text="フィードバック ＆ 要望（オフライン対応）" FontSize="22" FontWeight="Bold" Foreground="{StaticResource AppAccentBrush}" VerticalAlignment="Center" />
             </StackPanel>
 
             <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="12">
-                <Button Click="OnExportJsonClicked" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="{StaticResource ButtonCornerRadius}">
+                <Button Click="OnExportJsonClicked" AutomationProperties.Name="JSONエクスポート" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="{StaticResource ButtonCornerRadius}">
                     <TextBlock Text="JSONエクスポート..." FontSize="13" Foreground="{StaticResource AppTextSecondaryBrush}" />
                 </Button>
-                <Button Command="{x:Bind ViewModel.SyncPendingCommand}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="{StaticResource ButtonCornerRadius}">
+                <Button Command="{x:Bind ViewModel.SyncPendingCommand}" AutomationProperties.Name="クラウドへ同期" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" CornerRadius="{StaticResource ButtonCornerRadius}">
                     <TextBlock Text="クラウドへ同期" FontSize="13" Foreground="{StaticResource AppAccentBrush}" />
                 </Button>
             </StackPanel>
         </Grid>
 
+        <!-- 同期先 Webhook URL 設定＆ステータス -->
+        <Border Grid.Row="1" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="14,10" Margin="0,0,0,12">
+            <StackPanel Spacing="8">
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="同期先 Webhook URL" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource AppTextSecondaryBrush}" VerticalAlignment="Center" />
+                    <TextBox
+                        Grid.Column="1"
+                        PlaceholderText="https://example.com/webhook（空欄でローカル保存のみ）"
+                        Text="{x:Bind ViewModel.WebhookUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        AutomationProperties.Name="同期先 Webhook URL" />
+                    <Button
+                        Grid.Column="2"
+                        Command="{x:Bind ViewModel.SaveWebhookUrlCommand}"
+                        Background="{StaticResource AppAccentBrush}"
+                        Foreground="{StaticResource AppOnAccentBrush}"
+                        CornerRadius="{StaticResource ButtonCornerRadius}"
+                        Padding="14,6">
+                        <TextBlock Text="保存" FontSize="12" FontWeight="Bold" />
+                    </Button>
+                </Grid>
+                <TextBlock
+                    Text="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+                    FontSize="12"
+                    Foreground="{StaticResource AppAccentBrush}"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
         <!-- メインチャットタイムライン -->
-        <Border Grid.Row="1" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="16" Margin="0,0,0,16">
+        <Border Grid.Row="2" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="16" Margin="0,0,0,16">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel Spacing="12">
                     <TextBlock
-                        Text="フィードバックや要望を書き込むとローカルDBに安全に蓄積されます。オンライン時にGoogle DriveやWebhookへ送信できます。"
+                        Text="フィードバックや要望を書き込むとローカルDBに安全に蓄積されます。Webhook URL（https://）を設定すると「クラウドへ同期」から送信できます。"
                         FontSize="12"
                         Foreground="{StaticResource AppTextMutedBrush}"
                         HorizontalAlignment="Center"
@@ -84,7 +116,7 @@
         </Border>
 
         <!-- 下部入力バー -->
-        <Border Grid.Row="2" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="16">
+        <Border Grid.Row="3" CornerRadius="{StaticResource PanelCornerRadius}" Background="{StaticResource AppBackgroundElevatedBrush}" BorderBrush="{StaticResource AppBorderSubtleBrush}" BorderThickness="1" Padding="16">
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="140" />
@@ -98,6 +130,7 @@
                     HorizontalAlignment="Stretch"
                     VerticalAlignment="Center"
                     SelectedIndex="1"
+                    AutomationProperties.Name="フィードバックカテゴリ"
                     SelectionChanged="OnCategoryChanged">
                     <ComboBoxItem Content="不具合報告" Tag="Bug" />
                     <ComboBoxItem Content="機能要望" Tag="Request" />
@@ -107,8 +140,10 @@
                 <!-- テキスト入力 -->
                 <TextBox
                     Grid.Column="1"
-                    PlaceholderText="メッセージを入力してください..."
+                    PlaceholderText="メッセージを入力してください（最大2000文字）..."
                     Text="{x:Bind ViewModel.InputMessage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    MaxLength="2000"
+                    AutomationProperties.Name="フィードバック本文"
                     VerticalAlignment="Center"
                     KeyDown="OnInputKeyDown" />
 
@@ -116,6 +151,7 @@
                 <Button
                     Grid.Column="2"
                     Command="{x:Bind ViewModel.SendMessageCommand}"
+                    AutomationProperties.Name="フィードバックを送信"
                     Background="{StaticResource AppAccentBrush}"
                     Foreground="{StaticResource AppOnAccentBrush}"
                     CornerRadius="{StaticResource ButtonCornerRadius}"

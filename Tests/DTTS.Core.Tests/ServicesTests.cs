@@ -30,7 +30,7 @@ internal static class ServicesTests
         if (cond) { _pass++; } else { _fail++; Console.WriteLine("FAIL(services): " + name); }
     }
 
-    private static readonly string ScratchRoot = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "tmp");
+    private static readonly string ScratchRoot = Path.Combine(Path.GetTempPath(), "DTTS_Tests_" + Environment.ProcessId);
 
     private static string TempDir()
     {
@@ -41,17 +41,28 @@ internal static class ServicesTests
 
     public static async Task<(int Pass, int Fail)> RunAsync()
     {
-        await DatabaseTests();
-        await FeedbackTests();
-        SkinTests();
-        ProtocolTests();
-        int loops = int.TryParse(Environment.GetEnvironmentVariable("DTTS_NET_LOOPS"), out var n) ? n : 1;
-        for (int i = 0; i < loops; i++)
+        try
         {
-            await NetworkGameTests();
+            await DatabaseTests();
+            await FeedbackTests();
+            SkinTests();
+            ProtocolTests();
+            int loops = int.TryParse(Environment.GetEnvironmentVariable("DTTS_NET_LOOPS"), out var n) ? n : 1;
+            for (int i = 0; i < loops; i++)
+            {
+                await NetworkGameTests();
+            }
+            Console.WriteLine($"  network section x{loops}");
+            return (_pass, _fail);
         }
-        Console.WriteLine($"  network section x{loops}");
-        return (_pass, _fail);
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            if (Directory.Exists(ScratchRoot))
+            {
+                try { Directory.Delete(ScratchRoot, recursive: true); } catch { }
+            }
+        }
     }
 
     // ==================================================================
@@ -152,8 +163,7 @@ internal static class ServicesTests
 
         // 操作ガイド・確認レベル（既定は中級者用。持っていないのに確認が出ることはない）
         Check((await settings.LoadAppearanceAsync()).GuideLevel == GuideLevel.Intermediate, "guide level: older settings -> intermediate");
-        Check(!GuideLevel.Intermediate.AlwaysAsksInterrupt() && !GuideLevel.Expert.AlwaysAsksInterrupt() && GuideLevel.Beginner.AlwaysAsksInterrupt(),
-            "guide level: only beginner asks without a stopper");
+        Check(GuideLevelInfo.All.All(l => l.AlwaysAsksInterrupt()), "guide level: a human is asked without a stopper at every level");
         foreach (var level in GuideLevelInfo.All)
         {
             await settings.UpdateAppearanceAsync(a => a.GuideLevel = level);
@@ -455,21 +465,26 @@ internal static class ServicesTests
         Check(info.BackImagePath is not null && info.CardImages.Count == 6 && info.MissingCardCount == 48, "back + missing count");
 
         // zip インストール
+        byte[] pngHeader = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+        byte[] webpHeader = { (byte)'R', (byte)'I', (byte)'F', (byte)'F', 0, 0, 0, 0, (byte)'W', (byte)'E', (byte)'B', (byte)'P' };
         var zipPath = Path.Combine(root, "My Pack!.zip");
         using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create))
         {
-            void Add(string name, int size = 3) { using var s = zip.CreateEntry(name).Open(); s.Write(new byte[size]); }
-            Add("cards/S5.png");
-            Add("../../evil.png");
-            Add("cards/virus.exe");
-            Add("JK0.webp");
-            Add("skin.json");
+            void AddBytes(string name, byte[] bytes) { using var s = zip.CreateEntry(name).Open(); s.Write(bytes); }
+            AddBytes("cards/S5.png", pngHeader);
+            AddBytes("cards/S6.png", new byte[] { 0x4D, 0x5A, 0x90, 0x00 }); // 拡張子偽装（EXE ヘッダ）は弾かれる
+            AddBytes("../../evil.png", pngHeader);
+            AddBytes("cards/virus.exe", new byte[3]);
+            AddBytes("JK0.webp", webpHeader);
+            AddBytes("skin.json", new byte[] { (byte)'{', (byte)'}' });
         }
         var installed = SkinPackInstaller.InstallFromZip(zipPath, root);
         Check(installed.Id == "My_Pack!", "safe id " + installed.Id);
         Check(installed.CardImages.ContainsKey(Card.Parse("S5").Id) && installed.CardImages.ContainsKey(Card.Joker(0).Id), "zip extracted (flattened)");
+        Check(!installed.CardImages.ContainsKey(Card.Parse("S6").Id), "spoofed image signature rejected");
         Check(!File.Exists(Path.Combine(root, "evil.png")) && !File.Exists(Path.Combine(Path.GetDirectoryName(root)!, "evil.png")), "zip slip prevented");
         Check(!File.Exists(Path.Combine(installed.DirectoryPath, "virus.exe")), "unsupported skipped");
+        Check(SkinPackInstaller.MakeSafeId("CON") == "skin_CON", "reserved windows name avoided");
 
         var badZip = Path.Combine(root, "bad.zip");
         using (var zip = ZipFile.Open(badZip, ZipArchiveMode.Create))
@@ -606,7 +621,10 @@ internal static class ServicesTests
             Check(ov.Field.IsElevenBack && ov.Field.IsElevenBackOneTurn && !ov.Field.IsElevenBackPersistent, "view carries the one-turn 11back flag");
             oe.SubmitPass(ob);
             var ov2 = ClientViewBuilder.Build(oe, oc, 9);
-            Check(!ov2.Field.IsElevenBack && !ov2.Field.IsElevenBackOneTurn && ov2.Decision!.PlayerId == oc, "one-turn 11back is gone in the next view");
+            Check(ov2.Field.IsElevenBack && ov2.Field.IsElevenBackOneTurn && ov2.Decision!.PlayerId == oc, "one-turn 11back stays on after pass");
+            oe.SubmitPlay(oc, Card.ParseMany("D4"));
+            var ov3 = ClientViewBuilder.Build(oe, ol, 10);
+            Check(!ov3.Field.IsElevenBack && !ov3.Field.IsElevenBackOneTurn, "one-turn 11back is gone after play");
             // あがりの通知には順位が載る
             var finished = ClientViewBuilder.ToNotice(new PlayerFinishedEvent(2, FinishKind.Normal, 3), 0)!;
             Check(finished.Kind == "PlayerFinished" && finished.PlayerId == 2 && finished.Count == 3 && finished.FinishKind == FinishKind.Normal, "finish notice carries the place");
@@ -892,7 +910,8 @@ internal static class ServicesTests
             await queue.DisposeAsync();
         }
 
-        // --- 操作ガイド「初心者用」のゲストだけ、止められなくても割り込みの確認を受ける。切断で NPC が引き継ぐと外れる ---
+        // --- 人が操作する席（ホスト・参加者）は、ガイドのレベルや参加者のアプリの版に関わらず、止められなくても割り込みの確認を受ける。
+        //     切断で NPC が引き継ぐと外れる ---
         {
             GateScheduler? gate = null;
             var (host, queue, _) = await CreateHostAsync(70, false, q => gate = new GateScheduler(q));
@@ -903,8 +922,8 @@ internal static class ServicesTests
             await WaitUntilAsync(queue, () => host.Engine is not null);
             await queue.FlushAsync();
             var ids = host.Engine!.AlwaysAskInterruptPlayerIds;
-            Check(ids.Contains(beginner.SeatId) && !ids.Contains(normal.SeatId) && !ids.Contains(0),
-                "guide: only the beginner guest is always asked (host option off)");
+            Check(ids.Contains(beginner.SeatId) && ids.Contains(normal.SeatId) && ids.Contains(0) && !ids.Contains(3),
+                "guide: every human seat (host and both guests) is always asked; the NPC seat is not");
             await beginner.DisposeAsync();
             await WaitUntilAsync(queue, () => host.Seats.First(s => s.SeatId == 1).Kind == PlayerKind.Npc);
             Check(!host.Engine.AlwaysAskInterruptPlayerIds.Contains(beginner.SeatId), "guide: an NPC taking over the seat is asked only when it can stop");

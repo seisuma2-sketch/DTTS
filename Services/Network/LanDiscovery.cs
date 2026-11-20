@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -30,6 +31,7 @@ public sealed class LanDiscoveryResponder : IDisposable
     private readonly UdpClient _udp;
     private readonly Func<RoomInfo> _roomProvider;
     private readonly CancellationTokenSource _cts = new();
+    private readonly ConcurrentDictionary<IPAddress, long> _lastReplyByIp = new();
 
     /// <summary>応答を開始する。</summary>
     /// <param name="roomProvider">現在の部屋情報を返す関数。</param>
@@ -64,6 +66,30 @@ public sealed class LanDiscoveryResponder : IDisposable
                 {
                     continue; // 他アプリ・他バージョンの探索は無視
                 }
+                // 同一IPからの連続プローブによる増幅・負荷を制限する（300msクールダウン）
+                long nowMs = Environment.TickCount64;
+                var srcIp = received.RemoteEndPoint.Address;
+                if (_lastReplyByIp.TryGetValue(srcIp, out long lastMs) && nowMs - lastMs < 300)
+                {
+                    continue;
+                }
+                if (_lastReplyByIp.Count > 512)
+                {
+                    foreach (var kv in _lastReplyByIp)
+                    {
+                        if (nowMs - kv.Value >= 300)
+                        {
+                            _lastReplyByIp.TryRemove(kv.Key, out _);
+                        }
+                    }
+                    if (_lastReplyByIp.Count > 512)
+                    {
+                        var oldest = _lastReplyByIp.OrderBy(kv => kv.Value).Take(_lastReplyByIp.Count - 256).Select(kv => kv.Key).ToList();
+                        foreach (var k in oldest) _lastReplyByIp.TryRemove(k, out _);
+                    }
+                }
+                _lastReplyByIp[srcIp] = nowMs;
+
                 var reply = JsonSerializer.SerializeToUtf8Bytes(_roomProvider(), NetJsonContext.Default.RoomInfo);
                 await _udp.SendAsync(reply, received.RemoteEndPoint, _cts.Token).ConfigureAwait(false);
             }
@@ -84,6 +110,7 @@ public sealed class LanDiscoveryResponder : IDisposable
     {
         _cts.Cancel();
         _udp.Dispose();
+        _cts.Dispose();
     }
 }
 
@@ -143,10 +170,15 @@ public static class LanDiscovery
                 {
                     continue;
                 }
-                if (room is null || room.ProtocolVersion != NetProtocol.Version)
+                if (room is null || room.ProtocolVersion != NetProtocol.Version || room.Port is < 1 or > 65535)
                 {
                     continue;
                 }
+                room = room with
+                {
+                    RoomName = SanitizeText(room.RoomName, 64, "対戦部屋"),
+                    HostName = SanitizeText(room.HostName, 32, "ホスト"),
+                };
                 var remote = received.RemoteEndPoint.Address;
                 // 同じホストが loopback と LAN の両方から応答した場合は LAN 側のアドレスを優先する
                 var key = $"{room.RoomName}|{room.HostName}|{room.Port}";
@@ -161,6 +193,14 @@ public static class LanDiscovery
             // 収集期間の終了
         }
         return rooms.Values.OrderBy(r => r.RoomName, StringComparer.CurrentCulture).ToList();
+    }
+
+    private static string SanitizeText(string? raw, int maxLen, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return fallback;
+        var filtered = new string(raw.Where(c => !char.IsControl(c)).ToArray()).Trim();
+        if (filtered.Length == 0) return fallback;
+        return filtered.Length > maxLen ? filtered[..maxLen] : filtered;
     }
 
     /// <summary>

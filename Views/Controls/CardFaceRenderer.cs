@@ -84,6 +84,8 @@ internal static class CardFaceRenderer
     public static int PipCount(Card card)
         => card.IsJoker ? 0 : (int)card.Rank is >= 2 and <= 10 ? (int)card.Rank : 0;
 
+    private static readonly SolidColorBrush JokerGoldBrush = new(Microsoft.UI.ColorHelper.FromArgb(255, 0xE2, 0xA8, 0x1C));
+
     /// <summary>カード表面の中央部分を描く。</summary>
     public static void Render(Canvas canvas, Card card, Brush suitBrush)
     {
@@ -92,10 +94,9 @@ internal static class CardFaceRenderer
         if (card.IsJoker)
         {
             // ゴールドの星を、パープルの線で縁取る
-            var gold = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(255, 0xE2, 0xA8, 0x1C));
             var box = new Viewbox { Width = 38, Height = 38, Stretch = Stretch.Uniform };
             var star = CreatePath(StarData, suitBrush, filled: false, strokeThickness: 5);
-            star.Fill = gold;
+            star.Fill = JokerGoldBrush;
             box.Child = star;
             Canvas.SetLeft(box, 35 - 19);
             Canvas.SetTop(box, 51 - 19);

@@ -34,14 +34,21 @@ public sealed class AudioGraphService : IAudioService
     private readonly Dictionary<BgmTrack, AudioFileInputNode> _bgmNodes = new();
     private readonly BgmMixer _bgmMixer = new();
     private System.Threading.Timer? _fadeTimer;
+    private System.Threading.Timer? _idleStopTimer;
     private DateTime _lastFadeTick;
 
     /// <summary>フェード中に音量を進める間隔。</summary>
     private static readonly TimeSpan FadeInterval = TimeSpan.FromMilliseconds(30);
+    /// <summary>効果音再生後、無音になったら AudioGraph を自動停止するまでの猶予時間。</summary>
+    private static readonly TimeSpan SeIdleGrace = TimeSpan.FromSeconds(2);
     private Task? _initTask;
     private bool _enabled = true;
     private double _seVolume = 0.8;
     private double _bgmVolume = 0.6;
+    private bool _isSuspended;
+    private bool _isGraphRunning;
+    private bool _isBgmActive;
+    private bool _hasRecentSeActivity;
     private bool _disposed;
 
     /// <summary>サービスを生成する。</summary>
@@ -104,42 +111,45 @@ public sealed class AudioGraphService : IAudioService
     /// <inheritdoc />
     public void Play(SoundEffect effect)
     {
-        if (!_enabled || _seVolume <= 0.0 || _disposed)
+        if (!_enabled || _seVolume <= 0.0 || _isSuspended || _disposed)
         {
             return;
         }
 
-        AudioFileInputNode? voice = null;
         lock (_gate)
         {
-            if (_graph is null)
+            if (_disposed || _isSuspended || _graph is null)
             {
                 // 未初期化・復旧待ち：この音は鳴らさず、次回に向けて準備だけ始める
-                _initTask ??= InitializeCoreAsync();
+                if (!_disposed && !_isSuspended)
+                {
+                    _initTask ??= InitializeCoreAsync();
+                }
                 return;
             }
+            _hasRecentSeActivity = true;
+            if (!_isGraphRunning)
+            {
+                UpdatePowerStateLocked();
+            }
+            ScheduleSeIdleStopLocked();
             if (_voices.TryGetValue(effect, out var nodes) && nodes.Length > 0)
             {
                 int index = _nextVoice.TryGetValue(effect, out var n) ? n : 0;
                 _nextVoice[effect] = (index + 1) % nodes.Length;
-                voice = nodes[index];
+                var voice = nodes[index];
+                try
+                {
+                    voice.Stop();
+                    voice.Seek(TimeSpan.Zero);
+                    voice.Start();
+                }
+                catch (Exception ex)
+                {
+                    // 再生失敗でアプリを止めない（デバイス切断直後など）
+                    Debug.WriteLine($"[Audio] 再生に失敗しました: {effect}: {ex.Message}");
+                }
             }
-        }
-
-        if (voice is null)
-        {
-            return; // その効果音のファイルが無い
-        }
-        try
-        {
-            voice.Stop();
-            voice.Seek(TimeSpan.Zero);
-            voice.Start();
-        }
-        catch (Exception ex)
-        {
-            // 再生失敗でアプリを止めない（デバイス切断直後など）
-            Debug.WriteLine($"[Audio] 再生に失敗しました: {effect}: {ex.Message}");
         }
     }
 
@@ -163,9 +173,20 @@ public sealed class AudioGraphService : IAudioService
                 _initTask ??= InitializeCoreAsync();
                 return;
             }
+            bool canPlayBgm = !_isSuspended && _enabled && _bgmVolume > 0.0;
+            if (!canPlayBgm)
+            {
+                UpdatePowerStateLocked();
+                return;
+            }
+            if (!_isGraphRunning)
+            {
+                UpdatePowerStateLocked();
+            }
             if (start is { } t)
             {
                 StartBgmNode(t);
+                _isBgmActive = true;
             }
             EnsureFadeTimer();
         }
@@ -237,8 +258,9 @@ public sealed class AudioGraphService : IAudioService
                     {
                         node.Stop();
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
+                        System.Diagnostics.Debug.WriteLine($"AudioGraph BGM node stop: {ex.Message}");
                     }
                 }
             }
@@ -281,6 +303,20 @@ public sealed class AudioGraphService : IAudioService
     }
 
     /// <inheritdoc />
+    public void SetSuspended(bool suspended)
+    {
+        lock (_gate)
+        {
+            if (_disposed || _isSuspended == suspended)
+            {
+                return;
+            }
+            _isSuspended = suspended;
+            UpdatePowerStateLocked();
+        }
+    }
+
+    /// <inheritdoc />
     public void Dispose()
     {
         lock (_gate)
@@ -292,6 +328,8 @@ public sealed class AudioGraphService : IAudioService
             _disposed = true;
             _fadeTimer?.Dispose();
             _fadeTimer = null;
+            _idleStopTimer?.Dispose();
+            _idleStopTimer = null;
             TearDown();
         }
     }
@@ -305,7 +343,8 @@ public sealed class AudioGraphService : IAudioService
         {
             var settings = new AudioGraphSettings(AudioRenderCategory.GameEffects)
             {
-                QuantumSizeSelectionMode = QuantumSizeSelectionMode.LowestLatency,
+                // 省電力のため SystemDefault を使用（LowestLatency はアイドル時も高頻度割り込みを起こす）
+                QuantumSizeSelectionMode = QuantumSizeSelectionMode.SystemDefault,
             };
             var created = await AudioGraph.CreateAsync(settings);
             if (created.Status != AudioGraphCreationStatus.Success)
@@ -410,16 +449,13 @@ public sealed class AudioGraphService : IAudioService
                 }
                 _nextVoice.Clear();
             }
-            ApplyGain();
-            graph.Start();
             lock (_gate)
             {
-                // 準備中に指定された曲（または作り直す前に流れていた曲）をフェードインで始める
-                if (_bgmMixer.Rewind() is { } current)
-                {
-                    StartBgmNode(current);
-                }
-                EnsureFadeTimer();
+                if (_disposed || !ReferenceEquals(_graph, graph)) return;
+                _isGraphRunning = false;
+                _isBgmActive = false;
+                ApplyGainLocked();
+                UpdatePowerStateLocked();
             }
         }
         catch (Exception ex)
@@ -456,6 +492,8 @@ public sealed class AudioGraphService : IAudioService
     {
         var graph = _graph;
         _graph = null;
+        _isGraphRunning = false;
+        _isBgmActive = false;
         _effectsBus = null;
         _bgmBus = null;
         _bgmNodes.Clear();
@@ -469,8 +507,9 @@ public sealed class AudioGraphService : IAudioService
             {
                 graph.Stop();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine($"AudioGraph stop: {ex.Message}");
             }
             graph.Dispose();
         }
@@ -478,13 +517,106 @@ public sealed class AudioGraphService : IAudioService
 
     private void ApplyGain()
     {
-        AudioSubmixNode? bus;
-        AudioSubmixNode? bgmBus;
         lock (_gate)
         {
-            bus = _effectsBus;
-            bgmBus = _bgmBus;
+            ApplyGainLocked();
+            UpdatePowerStateLocked();
         }
+    }
+
+    private void ScheduleSeIdleStopLocked()
+    {
+        _idleStopTimer ??= new System.Threading.Timer(OnSeIdleTimerTick, null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+        _idleStopTimer.Change(SeIdleGrace, System.Threading.Timeout.InfiniteTimeSpan);
+    }
+
+    private void OnSeIdleTimerTick(object? state)
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _hasRecentSeActivity = false;
+            UpdatePowerStateLocked();
+        }
+    }
+
+    /// <summary>
+    /// サウンド有効状態・音量・最小化状態・無音状態に応じて AudioGraph と BGM ノードの稼働／停止を切り替える。
+    /// ミュート時・最小化時・無音アイドル時に AudioGraph を完全停止し、CPU の省電力状態移行を妨げないようにする。
+    /// ロック内で呼ぶこと。
+    /// </summary>
+    private void UpdatePowerStateLocked()
+    {
+        var graph = _graph;
+        if (graph is null || _disposed)
+        {
+            return;
+        }
+
+        bool shouldRunBgm = !_isSuspended && _enabled && _bgmVolume > 0.0 && _bgmMixer.Current != BgmTrack.None;
+        bool shouldRunSe = !_isSuspended && _enabled && _seVolume > 0.0 && _hasRecentSeActivity;
+        bool shouldRun = shouldRunBgm || shouldRunSe;
+
+        try
+        {
+            if (!shouldRun)
+            {
+                StopAllBgmNodesLocked();
+                if (_isGraphRunning)
+                {
+                    graph.Stop();
+                    _isGraphRunning = false;
+                }
+                return;
+            }
+
+            if (!_isGraphRunning)
+            {
+                graph.Start();
+                _isGraphRunning = true;
+            }
+
+            if (!shouldRunBgm)
+            {
+                StopAllBgmNodesLocked();
+            }
+            else if (!_isBgmActive)
+            {
+                if (_bgmMixer.Rewind() is { } current)
+                {
+                    StartBgmNode(current);
+                    _isBgmActive = true;
+                }
+                EnsureFadeTimer();
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Audio] 省電力状態の切替に失敗しました: {ex.Message}");
+        }
+    }
+
+    private void StopAllBgmNodesLocked()
+    {
+        _fadeTimer?.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+        foreach (var node in _bgmNodes.Values)
+        {
+            try
+            {
+                node.Stop();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"AudioGraph StopAllBgmNodes: {ex.Message}");
+            }
+        }
+        _isBgmActive = false;
+    }
+
+    private void ApplyGainLocked()
+    {
+        var bus = _effectsBus;
+        var bgmBus = _bgmBus;
         try
         {
             if (bus is not null)
