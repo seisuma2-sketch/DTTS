@@ -4,9 +4,9 @@ import { Bluetooth, EyeOff, KeyRound, Laptop, Network, RefreshCw, ShieldCheck, U
 import Reveal from "./Reveal";
 
 const peers = [
-  { x: "12%", y: "18%", label: "Guest A" },
-  { x: "80%", y: "22%", label: "Guest B" },
-  { x: "50%", y: "84%", label: "Guest C" },
+  { x: "15%", y: "14%", label: "Guest A" },
+  { x: "85%", y: "18%", label: "Guest B" },
+  { x: "50%", y: "90%", label: "Guest C" },
 ];
 
 const draw: Variants = {
@@ -54,7 +54,7 @@ function TopologyVisual() {
         <div key={p.label} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: p.x, top: p.y }}>
           <div className="glass flex flex-col items-center gap-1 rounded-2xl px-3 py-2.5">
             <Laptop className="h-5 w-5 text-ice-body" />
-            <span className="text-[10px] text-ice-mute">{p.label}</span>
+            <span className="whitespace-nowrap text-[10px] text-ice-mute">{p.label}</span>
           </div>
         </div>
       ))}
@@ -64,11 +64,11 @@ function TopologyVisual() {
           <motion.span
             key={i}
             className="absolute inset-0 rounded-3xl border border-azure/50"
-            animate={{ scale: [1, 1.9], opacity: [0.7, 0] }}
+            animate={{ scale: [1, 1.6], opacity: [0.7, 0] }}
             transition={{ duration: 2.8, repeat: Infinity, delay: i * 1.4 }}
           />
         ))}
-        <div className="relative flex flex-col items-center gap-1 rounded-3xl border border-azure/50 bg-abyss-800/90 px-5 py-4 shadow-[0_0_60px_-10px_rgba(62,142,247,0.8)] backdrop-blur-xl">
+        <div className="relative flex flex-col items-center gap-1 rounded-3xl border border-azure/50 bg-abyss-800/90 px-4 py-3 sm:px-5 sm:py-4 shadow-[0_0_60px_-10px_rgba(62,142,247,0.8)] backdrop-blur-xl">
           <ShieldCheck className="h-7 w-7 text-azure-soft" />
           <span className="text-xs font-semibold text-ice">Host</span>
           <span className="text-[9px] text-ice-mute">権威サーバー</span>
@@ -95,9 +95,7 @@ function SasCard() {
             whileInView={{ rotateX: 0, opacity: 1 }}
             viewport={{ once: true }}
             transition={{ delay: 0.3 + i * 0.08, type: "spring", stiffness: 200, damping: 16 }}
-            className={`flex aspect-[3/4] items-center justify-center rounded-xl border border-white/10 bg-abyss-900/80 font-mono text-2xl font-bold text-ice sm:text-3xl ${
-              i === 2 ? "mr-1 sm:mr-2" : ""
-            }`}
+            className={`flex aspect-[3/4] items-center justify-center rounded-xl border border-white/10 bg-abyss-900/80 font-mono text-2xl font-bold text-ice sm:text-3xl`}
           >
             {d}
           </motion.span>

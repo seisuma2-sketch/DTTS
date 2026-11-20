@@ -92,7 +92,7 @@ export default function TableMockup() {
     <div className="relative">
       {/* 卓下の光 */}
       <div className="absolute -inset-x-10 -bottom-10 top-1/3 rounded-full bg-azure/20 blur-[90px]" />
-      <div className="glass relative aspect-[4/3] overflow-hidden rounded-[28px] !bg-[#06142c]/70 shadow-[0_40px_120px_-30px_rgba(0,0,0,0.9)] sm:aspect-[16/10] sm:rounded-[36px]">
+      <div className="glass relative aspect-[4/5] overflow-hidden min-[480px]:aspect-[4/3] rounded-[28px] !bg-[#06142c]/70 shadow-[0_40px_120px_-30px_rgba(0,0,0,0.9)] sm:aspect-[16/10] sm:rounded-[36px]">
         {/* フェルト */}
         <div className="absolute inset-3 rounded-[22px] bg-[radial-gradient(ellipse_at_center,#0f2b57_0%,#0a1c3c_55%,#061329_100%)] sm:inset-5 sm:rounded-[28px]" />
         <div className="absolute inset-3 rounded-[22px] border border-white/[0.06] sm:inset-5 sm:rounded-[28px]" />
@@ -124,7 +124,7 @@ export default function TableMockup() {
         <Seat name="NPC 東" count={9} rank="貧民" className="absolute right-[4%] top-[38%] sm:right-[7%]" />
 
         {/* 場札 */}
-        <div className="absolute left-1/2 top-[44%] flex -translate-x-1/2 -translate-y-1/2 items-center">
+        <div className="absolute left-1/2 top-[45%] flex -translate-x-1/2 -translate-y-1/2 items-center">
           <motion.div
             initial={{ y: -80, rotate: -30, opacity: 0 }}
             animate={{ y: 0, rotate: -8, opacity: 1 }}
@@ -142,7 +142,7 @@ export default function TableMockup() {
           </motion.div>
         </div>
         <motion.div
-          className="absolute left-1/2 top-[60%] flex -translate-x-1/2 items-center gap-1 whitespace-nowrap text-[10px] text-ice-mute sm:top-[62%] sm:text-xs"
+          className="absolute left-1/2 top-[59%] flex -translate-x-1/2 items-center gap-1 whitespace-nowrap text-[10px] text-ice-mute min-[480px]:top-[61%] sm:top-[62%] sm:text-xs"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 1.8 }}

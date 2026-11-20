@@ -161,7 +161,7 @@ export default function BentoFeatures() {
           delay={0.08}
           icon={<Wifi className="h-4 w-4" />}
           eyebrow="Offline Play"
-          title="ルーター不要の近距離対戦。"
+          title={<><span className="inline-block">ルーター不要の</span><span className="inline-block">近距離対戦。</span></>}
           visual={<SignalVisual />}
         >
           Bluetooth LE と LAN の両方に対応。
@@ -182,7 +182,7 @@ export default function BentoFeatures() {
           delay={0.05}
           icon={<Sparkles className="h-4 w-4" />}
           eyebrow="60fps Motion"
-          title="カードが、ばねのように舞う。"
+          title={<>カードが、<span className="inline-block">ばねのように舞う。</span></>}
           visual={<FlightVisual />}
         >
           Windows Composition API によるカード飛翔と物理ばね演出。場流れには Prism Flash / Aurora Sweep。
@@ -194,7 +194,7 @@ export default function BentoFeatures() {
           delay={0.1}
           icon={<BrainCircuit className="h-4 w-4" />}
           eyebrow="AI & Efficiency"
-          title="考える AI と、徹底した省電力。"
+          title={<>考える AI と、<span className="inline-block">徹底した省電力。</span></>}
         >
           未出カードを記憶し、終盤の勝ち筋を読む AI。完全イベント駆動、無音時のオーディオ自動停止、最小化・非アクティブ時のアニメーション停止で、
           バッテリー消費を極限まで抑えます。

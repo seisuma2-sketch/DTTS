@@ -68,7 +68,7 @@ function Item({ q, a, open, onToggle, idx }: { q: string; a: string; open: boole
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
             className="overflow-hidden"
           >
-            <p className="max-w-3xl pb-6 pr-12 text-[15px] leading-relaxed text-ice-mute">{a}</p>
+            <p className="max-w-3xl pb-6 text-[15px] sm:pr-12 leading-relaxed text-ice-mute">{a}</p>
           </motion.div>
         )}
       </AnimatePresence>

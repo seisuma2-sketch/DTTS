@@ -64,7 +64,7 @@ export default function DownloadSection() {
             <span className="text-gradient-x">数秒で準備できる。</span>
           </h2>
           <p className="mt-6 text-base text-ice-mute sm:text-lg">
-            {PRODUCT.fullName} · <span className="font-mono text-ice-body">{PRODUCT.version}</span> · 無料
+            <span className="inline-block">{PRODUCT.fullName}</span> · <span className="font-mono text-ice-body">{PRODUCT.version}</span> · 無料
           </p>
         </Reveal>
 
@@ -73,7 +73,7 @@ export default function DownloadSection() {
           {options.map((o, i) => {
             const file = DOWNLOADS[o.kind];
             return (
-              <Reveal key={o.kind} delay={i * 0.08}>
+              <Reveal key={o.kind} delay={i * 0.08} className="min-w-0">
                 <div
                   className={`relative flex h-full flex-col rounded-[28px] border p-7 backdrop-blur-xl transition sm:p-9 ${
                     o.recommended
@@ -110,11 +110,12 @@ export default function DownloadSection() {
                       className={`${o.recommended ? "btn-primary" : "btn-ghost"} w-full`}
                     >
                       <Download className="h-4 w-4" />
-                      {file.fileName} をダウンロード
+                      <span className="sm:hidden">ダウンロード</span>
+                      <span className="hidden sm:inline">{file.fileName} をダウンロード</span>
                     </button>
                     <a
                       href={file.href}
-                      className="mt-3 block text-center font-mono text-[11px] text-ice-mute/70 underline-offset-4 hover:text-ice-mute hover:underline"
+                      className="mt-3 block break-all text-center font-mono text-[11px] text-ice-mute/70 underline-offset-4 hover:text-ice-mute hover:underline"
                     >
                       {file.href}
                     </a>

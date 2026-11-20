@@ -51,9 +51,12 @@ export default function Hero() {
           transition={{ duration: 1, delay: 0.25, ease }}
           className="mx-auto mt-7 max-w-2xl text-pretty text-base leading-relaxed text-ice-body sm:text-lg"
         >
-          約60のローカルルールと近距離オフライン対戦を、ひとつの美しい卓に。
-          <br className="hidden sm:block" />
-          Windows のための 4 人対戦大富豪、<span className="font-semibold text-ice">DTTS</span>。
+          約60のローカルルールと近距離オフライン対戦を、
+          <span className="inline-block">ひとつの美しい卓に。</span>
+          <span className="block">
+            Windows のための<span className="inline-block">&nbsp;4 人対戦大富豪、</span>
+            <span className="inline-block font-semibold text-ice">DTTS。</span>
+          </span>
         </motion.p>
 
         <motion.div
@@ -75,10 +78,12 @@ export default function Hero() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.7 }}
-          className="mt-4 inline-flex items-center gap-1.5 text-xs text-ice-mute"
+          className="mx-auto mt-4 flex max-w-xs items-start justify-center gap-1.5 text-left text-xs text-ice-mute sm:max-w-none sm:items-center"
         >
-          <ShieldCheck className="h-3.5 w-3.5 text-azure-soft" />
-          管理者権限・テスト証明書は不要。ダブルクリックで導入できます。
+          <ShieldCheck className="mt-px h-3.5 w-3.5 shrink-0 text-azure-soft sm:mt-0" />
+          <span>
+            管理者権限・テスト証明書は不要。<span className="inline-block">ダブルクリックで導入できます。</span>
+          </span>
         </motion.p>
       </motion.div>
 
