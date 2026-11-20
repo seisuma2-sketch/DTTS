@@ -1,6 +1,7 @@
 ﻿<#
 .SYNOPSIS
-  証明書・管理者権限不要の単一インストーラー (DTTS_Setup.exe) と配布用 ZIP を生成する。
+  証明書・管理者権限不要の単一インストーラー (DTTS_Setup.exe) と、
+  展開してそのまま起動できるポータブル版 ZIP (DTTS_v<version>_<platform>.zip) を生成する。
 #>
 param(
     [ValidateSet("x64", "x86", "ARM64")]
@@ -84,22 +85,33 @@ if ([string]::IsNullOrWhiteSpace($CertThumbprint)) {
     Write-Warning "CertThumbprint 未指定のため DTTS_Setup.exe は未署名です。公開配布時は -CertThumbprint を指定してください。"
 }
 
-# 4. 配布用フォルダと ZIP を作成する
-Write-Host "4/4: Creating distribution ZIP..."
+# 4. ポータブル版（本体そのもの）の配布フォルダと ZIP を作成する
+Write-Host "4/4: Creating portable ZIP..."
 if (Test-Path $distDir) { Remove-Item $distDir -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
-Copy-Item -Path $finalExe -Destination (Join-Path $distDir "DTTS_Setup.exe") -Force
+Copy-Item -Path (Join-Path $publishDir "*") -Destination $distDir -Recurse -Force
 
 $readme = @"
 ============================================================
-DTTS (大富豪) 導入ガイド (v${version} / ${Platform})
+DTTS (大富豪) ポータブル版 (v${version} / ${Platform})
 ============================================================
 
-【インストール方法】
-1. 「DTTS_Setup.exe」をダブルクリックしてください。
-   （ZIP の場合は展開してから実行してください）
-2. 自動でパソコンに導入され、デスクトップに「DTTS」のアイコンが作成されて起動します。
-   ※テスト証明書の登録や管理者権限は不要です。
+【使い方】
+1. ZIP をすべて展開（解凍）し、好きなフォルダーに置いてください。
+   ※ ZIP を開いたまま実行せず、必ず展開してから起動してください。
+2. 展開したフォルダー内の「DTTS.exe」をダブルクリックすると起動します。
+   インストール操作・管理者権限・証明書は不要です。
+
+【データの保存先】
+設定と戦績は %LOCALAPPDATA%\DTTS に保存されます（インストーラー版と共通）。
+アプリのフォルダーを移動・削除しても、設定と戦績は残ります。
+
+【アンインストール】
+展開したフォルダーを削除してください。設定と戦績も消す場合は
+%LOCALAPPDATA%\DTTS 内の dtts.db も削除してください。
+
+【インストーラー版について】
+「DTTS_Setup.exe」を使うと自動で導入され、デスクトップに「DTTS」のアイコンが作成されます。
 
 【Bluetooth LE で近くの相手と対戦する方法】
 1. お互いの Windows PC で「設定」→「Bluetooth とデバイス」から Bluetooth をオンにしてください。
@@ -110,7 +122,22 @@ DTTS (大富豪) 導入ガイド (v${version} / ${Platform})
 [IO.File]::WriteAllText((Join-Path $distDir "はじめに.txt"), $readme, [System.Text.UTF8Encoding]::new($true))
 
 if (Test-Path $finalZip) { Remove-Item $finalZip -Force }
-[System.IO.Compression.ZipFile]::CreateFromDirectory($distDir, $finalZip, [System.IO.Compression.CompressionLevel]::Optimal, $true)
+# エントリ名は "/" 区切りで書く（Windows PowerShell 5.1 の CreateFromDirectory は "\" で書くため、他の展開ツールで階層が崩れる）
+Add-Type -AssemblyName System.IO.Compression
+$zipStream = [System.IO.File]::Open($finalZip, [System.IO.FileMode]::CreateNew)
+try {
+    $archive = New-Object System.IO.Compression.ZipArchive($zipStream, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $root = (Resolve-Path $distDir).Path.TrimEnd('\')
+        Get-ChildItem -LiteralPath $root -Recurse -File | ForEach-Object {
+            $relative = $_.FullName.Substring($root.Length + 1).Replace('\', '/')
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $archive, $_.FullName, "$distName/$relative", [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+        }
+    }
+    finally { $archive.Dispose() }
+}
+finally { $zipStream.Dispose() }
 
 # 中間ファイルを片付ける
 Remove-Item $payloadZip -Force -ErrorAction SilentlyContinue
