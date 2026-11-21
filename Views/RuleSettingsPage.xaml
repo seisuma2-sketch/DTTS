@@ -462,6 +462,24 @@
                                 OnContent="オン（カーソルを合わせると少し浮く）"
                                 OffContent="オフ"
                                 ToolTipService.ToolTip="手札カードにカーソルを合わせたときに軽く浮かせる演出を切り替えます" />
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <Slider
+                                    Header="カード交換結果の表示時間（表示中は NPC も待機します）"
+                                    Width="320"
+                                    Minimum="0"
+                                    Maximum="15"
+                                    StepFrequency="1"
+                                    TickFrequency="1"
+                                    Value="{x:Bind ViewModel.ExchangeSummarySeconds, Mode=TwoWay}"
+                                    ToolTipService.ToolTip="カード交換で渡した札・受け取った札を中央に表示する秒数（0 秒で非表示）" />
+                                <TextBlock
+                                    Text="{x:Bind ViewModel.ExchangeSummarySecondsLabel, Mode=OneWay}"
+                                    FontSize="14"
+                                    FontWeight="SemiBold"
+                                    Foreground="{StaticResource AppAccentBrush}"
+                                    VerticalAlignment="Bottom"
+                                    Margin="0,0,0,8" />
+                            </StackPanel>
 
                             <!-- サウンド（変更は即座に反映・保存） -->
                             <TextBlock Text="サウンド" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource AppTextPrimaryBrush}" Margin="0,8,0,0" />

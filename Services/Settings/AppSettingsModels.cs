@@ -165,6 +165,9 @@ public sealed class AppearanceSettings
     /// <summary>手札カードのホバー演出を有効にする。</summary>
     public bool CardHoverEnabled { get; set; } = true;
 
+    /// <summary>カード交換の結果を表示する秒数（0 のときは表示しない、既定 6 秒）。</summary>
+    public int ExchangeSummarySeconds { get; set; } = 6;
+
     /// <summary>効果音を有効にする。</summary>
     public bool SoundEnabled { get; set; } = true;
 
@@ -221,6 +224,7 @@ public sealed class AppearanceSettings
         CustomAvatarPath = string.IsNullOrWhiteSpace(CustomAvatarPath) ? null : CustomAvatarPath.Trim();
         SeVolume = Math.Clamp(SeVolume, 0, 100);
         BgmVolume = Math.Clamp(BgmVolume, 0, 100);
+        ExchangeSummarySeconds = Math.Clamp(ExchangeSummarySeconds, 0, 15);
     }
 
     /// <summary>0〜100 の音量を 0.0〜1.0 に変換する。</summary>

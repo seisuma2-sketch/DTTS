@@ -4,7 +4,7 @@
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>DTTS</RootNamespace>
-    <Version>1.1.6</Version>
+    <Version>1.1.7</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\WindowIcon.ico</ApplicationIcon>
     <Platforms>x86;x64;ARM64</Platforms>

@@ -129,6 +129,7 @@
                         FontSize="14"
                         VerticalAlignment="Center" />
                 </StackPanel>
+                <!-- 2行目：サウンド・進行スピード・自動パス -->
                 <StackPanel Orientation="Horizontal" Spacing="4">
                     <!-- サウンド ON/OFF（ワンクリックで切り替え・設定に保存） -->
                     <ctrl:SoundToggleButton IsTabStop="False" VerticalAlignment="Center" />
@@ -165,6 +166,9 @@
                             <TextBlock Text="{x:Bind ViewModel.AutoPassLabel, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource AppTextSecondaryBrush}" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
+                </StackPanel>
+                <!-- 3行目：ルール変更・ひとこと・履歴（240px 列内に収めて見切れを防ぐ） -->
+                <StackPanel Orientation="Horizontal" Spacing="4">
                     <!-- 親（ホスト・1人プレイ）による対戦中のルール変更 -->
                     <Button
                         Command="{x:Bind ViewModel.OpenInMatchRulesCommand}"

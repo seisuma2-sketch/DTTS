@@ -5,6 +5,7 @@ using DTTS.Common;
 using DTTS.Services.Audio;
 using DTTS.Views;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -25,6 +26,7 @@ public sealed partial class MainWindow : Window
     {
         InitializeComponent();
         Title = "DTTS - 4-Player Daifugo Tabletop Suite";
+        ApplyDarkTitleBar();
 
         // ウィンドウ左上・タスクバーのアイコン（パッケージ内の Assets\WindowIcon.ico）
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "WindowIcon.ico");
@@ -50,6 +52,38 @@ public sealed partial class MainWindow : Window
 
         // タイトル画面へ遷移
         nav.NavigateToTitle();
+    }
+
+    /// <summary>
+    /// システムのタイトルバーをアプリの背景に馴染むダークなカスタムタイトルバー（AppTitleBar）に置き換える。
+    /// 最小化・最大化・閉じるボタンも同じ配色にする。
+    /// </summary>
+    private void ApplyDarkTitleBar()
+    {
+        try
+        {
+            ExtendsContentIntoTitleBar = true;
+            SetTitleBar(AppTitleBar);
+
+            if (!AppWindowTitleBar.IsCustomizationSupported())
+            {
+                return;
+            }
+            var bar = AppWindow.TitleBar;
+            bar.ButtonBackgroundColor = Colors.Transparent;
+            bar.ButtonInactiveBackgroundColor = Colors.Transparent;
+            bar.ButtonForegroundColor = ColorHelper.FromArgb(0xFF, 0xE6, 0xEA, 0xF2);
+            bar.ButtonInactiveForegroundColor = ColorHelper.FromArgb(0xFF, 0x6B, 0x73, 0x82);
+            bar.ButtonHoverBackgroundColor = ColorHelper.FromArgb(0x1F, 0xFF, 0xFF, 0xFF);
+            bar.ButtonHoverForegroundColor = ColorHelper.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
+            bar.ButtonPressedBackgroundColor = ColorHelper.FromArgb(0x33, 0xFF, 0xFF, 0xFF);
+            bar.ButtonPressedForegroundColor = ColorHelper.FromArgb(0xFF, 0xFF, 0xFF, 0xFF);
+        }
+        catch (Exception ex)
+        {
+            // タイトルバーの装飾に失敗しても、標準のタイトルバーのまま起動を続ける
+            App.WriteCrashLog("MainWindow.TitleBar", ex);
+        }
     }
 
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)

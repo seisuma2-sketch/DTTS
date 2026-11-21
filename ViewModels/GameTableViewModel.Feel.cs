@@ -159,8 +159,8 @@ public sealed partial class GameTableViewModel
     private bool _exchangeShown;
     private DispatcherQueueTimer? _exchangeTimer;
 
-    /// <summary>交換の結果を見せる時間。</summary>
-    private static readonly TimeSpan ExchangeSummaryDuration = TimeSpan.FromSeconds(6);
+    /// <summary>交換の結果を見せる時間（設定画面で変更可能、既定 6 秒）。</summary>
+    private TimeSpan _exchangeSummaryDuration = TimeSpan.FromSeconds(6);
 
     /// <summary>交換の結果を表示しているか。</summary>
     [ObservableProperty]
@@ -210,18 +210,28 @@ public sealed partial class GameTableViewModel
         }
     }
 
-    /// <summary>交換が終わって対戦が始まったら（最初の「出すかパスか」の判断で）、結果をしばらく見せる。</summary>
+    /// <summary>交換の結果を見せる間、NPC がカードを出さないよう一時停止／再開を切り替える。</summary>
+    private void SetExchangeNpcPaused(bool paused)
+    {
+        _npcController?.SetPaused(paused);
+        _hostSession?.SetNpcPaused(paused);
+    }
+
+    /// <summary>交換が終わって対戦が始まったら（最初の「出すかパスか」の判断で）、設定された秒数だけ結果を見せる。</summary>
     private void MaybeShowExchangeSummary(DecisionKind? kind)
     {
-        if (_exchangeShown || !_exchange.HasAny || kind != DecisionKind.PlayOrPass || _isFastForwarding)
+        if (_exchangeShown || !_exchange.HasAny || kind != DecisionKind.PlayOrPass || _isFastForwarding || _exchangeSummaryDuration <= TimeSpan.Zero)
         {
             return;
         }
         _exchangeShown = true;
         PopulateExchangeSummary();
         IsExchangeSummaryOpen = true;
+        // 交換結果を表示している間は NPC が先出ししないよう待機させる
+        SetExchangeNpcPaused(true);
 
-        _exchangeTimer ??= CreateOneShot(ExchangeSummaryDuration, DismissExchangeSummary);
+        _exchangeTimer ??= CreateOneShot(_exchangeSummaryDuration, DismissExchangeSummary);
+        _exchangeTimer.Interval = _exchangeSummaryDuration;
         _exchangeTimer.Stop();
         _exchangeTimer.Start();
     }
@@ -242,12 +252,13 @@ public sealed partial class GameTableViewModel
         ExchangeSummaryText = "カード交換：" + _exchange.Describe(Partner);
     }
 
-    /// <summary>交換の結果を閉じる（時間切れ・クリック）。</summary>
+    /// <summary>交換の結果を閉じる（時間切れ・クリック）。閉じたタイミングで NPC の待機を解除する。</summary>
     [RelayCommand]
     private void DismissExchangeSummary()
     {
         _exchangeTimer?.Stop();
         IsExchangeSummaryOpen = false;
+        SetExchangeNpcPaused(false);
     }
 
     private DispatcherQueueTimer CreateOneShot(TimeSpan interval, Action action)

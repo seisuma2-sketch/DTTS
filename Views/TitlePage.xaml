@@ -53,13 +53,11 @@
             </VisualStateGroup>
         </VisualStateManager.VisualStateGroups>
 
-        <!-- 背景：共通ラジアルグラデーション + アクセントカラーの微発光 -->
-        <Grid IsHitTestVisible="False" Background="{StaticResource AppPageBackgroundBrush}">
-            <Ellipse Width="520" Height="520" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="40,0,0,40" Fill="{StaticResource AppAccentBrush}" Opacity="0.07" />
-        </Grid>
+        <!-- 背景：共通ラジアルグラデーション -->
+        <Grid IsHitTestVisible="False" Background="{StaticResource AppPageBackgroundBrush}" />
 
         <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-            <Grid x:Name="HeroGrid" MaxWidth="1180" Padding="48,40" ColumnSpacing="56" VerticalAlignment="Center">
+            <Grid x:Name="HeroGrid" MaxWidth="1080" Padding="40,36" ColumnSpacing="48" VerticalAlignment="Center">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition x:Name="RightColumnDef" Width="420" />
@@ -68,6 +66,19 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
+
+                <!-- 左カラム背後のアクセント発光（全画面時でもロゴ・トランプと連動して中央に保つ） -->
+                <Ellipse
+                    Grid.Column="0"
+                    Grid.Row="0"
+                    Width="460"
+                    Height="460"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    Margin="-40,-20,0,0"
+                    Fill="{StaticResource AppAccentBrush}"
+                    Opacity="0.07"
+                    IsHitTestVisible="False" />
 
                 <!-- ============================ 左カラム ============================ -->
                 <StackPanel Grid.Column="0" Grid.Row="0" Spacing="22" VerticalAlignment="Center">
@@ -94,11 +105,11 @@
                                     <FontIcon Glyph="&#xE9D2;" FontSize="14" Foreground="{StaticResource AppAccentBrush}" />
                                     <TextBlock Text="通算戦績" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AppTextSecondaryBrush}" />
                                 </StackPanel>
-                                <Grid ColumnSpacing="10">
+                                <Grid ColumnSpacing="12">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
                                         <TextBlock Text="{x:Bind ViewModel.GamesText, Mode=OneWay}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />
@@ -123,11 +134,11 @@
                                     <FontIcon Glyph="&#xE713;" FontSize="14" Foreground="{StaticResource AppAccentBrush}" />
                                     <TextBlock Text="現在の設定" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AppTextSecondaryBrush}" />
                                 </StackPanel>
-                                <Grid ColumnSpacing="10">
+                                <Grid ColumnSpacing="12">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
                                         <TextBlock Text="{x:Bind ViewModel.RulesText, Mode=OneWay}" FontSize="18" FontWeight="Bold" Foreground="{StaticResource AppTextPrimaryBrush}" />

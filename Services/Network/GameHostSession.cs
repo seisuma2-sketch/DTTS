@@ -240,6 +240,9 @@ public sealed class GameHostSession : IAsyncDisposable
     /// <summary>ホスト（座席0）が定型リアクションを送る（ディスパッチャ上で全員へ配る）。</summary>
     public void SendReaction(string code) => _dispatcher.Post(() => RelayReaction(0, code));
 
+    /// <summary>カード交換結果の表示中など、ホスト側 NPC の思考・行動を一時停止／再開する。</summary>
+    public void SetNpcPaused(bool paused) => _dispatcher.Post(() => Npc?.SetPaused(paused));
+
     /// <summary>その席の NPC の設定（人が操作している席でも、切断時に引き継ぐ NPC の設定を返す）。</summary>
     public NpcProfile NpcProfileOf(int seatId)
         => seatId >= 0 && seatId < _seats.Length ? _seats[seatId].NpcProfile : NpcProfile.Default;

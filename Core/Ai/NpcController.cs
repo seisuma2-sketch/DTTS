@@ -120,7 +120,32 @@ public sealed class NpcController : IDisposable
     private readonly HashSet<Card> _seenCards = new();
     private PendingDecision? _lastHandled;
     private PendingDecision? _fallbackUsed;
+    private volatile bool _isPaused;
     private bool _disposed;
+
+    /// <summary>一時停止中か（カード交換結果の表示中など、NPC の手を止める間は true）。</summary>
+    public bool IsPaused => _isPaused;
+
+    /// <summary>
+    /// NPC の行動を一時停止・再開する。
+    /// 一時停止中に届いた判断要求は保持され、再開時に実行をスケジュールする。
+    /// </summary>
+    public void SetPaused(bool paused)
+    {
+        if (_disposed || _isPaused == paused)
+        {
+            return;
+        }
+        _isPaused = paused;
+        if (!paused && _engine.PendingDecision is { } pending && IsControlled(pending.PlayerId))
+        {
+            if (ReferenceEquals(_lastHandled, pending))
+            {
+                _lastHandled = null;
+            }
+            Handle(pending);
+        }
+    }
 
     /// <summary>コントローラーを生成し、エンジンのイベント購読を開始する。</summary>
     /// <param name="engine">ゲームエンジン。</param>
@@ -210,7 +235,7 @@ public sealed class NpcController : IDisposable
 
     private void Handle(PendingDecision decision)
     {
-        if (_disposed || !IsControlled(decision.PlayerId) || ReferenceEquals(decision, _lastHandled))
+        if (_disposed || _isPaused || !IsControlled(decision.PlayerId) || ReferenceEquals(decision, _lastHandled))
         {
             return;
         }
@@ -227,14 +252,14 @@ public sealed class NpcController : IDisposable
 
     private void Execute(PendingDecision decision)
     {
-        // 待っている間に状況が変わった（他の操作主体へ切替・ラウンド終了など）なら何もしない
+        // 待っている間に状況が変わった（一時停止・他の操作主体へ切替・ラウンド終了など）なら何もしない
         if (_disposed || !ReferenceEquals(_engine.PendingDecision, decision))
         {
             return;
         }
-        if (!IsControlled(decision.PlayerId))
+        if (_isPaused || !IsControlled(decision.PlayerId))
         {
-            // 人間・通信へ切り替わった。再びNPCに戻されたとき同じ判断を処理できるよう記録を戻す
+            // 一時停止または人間・通信へ切り替わった。再開時に同じ判断を処理できるよう記録を戻す
             if (ReferenceEquals(_lastHandled, decision))
             {
                 _lastHandled = null;

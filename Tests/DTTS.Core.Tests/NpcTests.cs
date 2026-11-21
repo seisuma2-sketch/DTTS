@@ -443,5 +443,18 @@ internal static class NpcTests
         Console.WriteLine($"  revolutions/game: steady={steady.Revolutions / 40.0:F2} seeker={seeker.Revolutions / 40.0:F2} conserver={conserver.Revolutions / 40.0:F2} aggressive={aggressive.Revolutions / 40.0:F2}");
         Check(PassRate(conserver) > PassRate(steady) && PassRate(steady) > PassRate(aggressive), "pass tendency conserver > steady > aggressive");
         Check(seeker.Revolutions > steady.Revolutions, "seeker revolts more");
+
+        // NpcController.SetPaused：一時停止中は手番を実行せず、解除後に再開すること
+        {
+            var r = RuleSettings.CreateDefault();
+            var e = new GameEngine(r, Enumerable.Range(0, 4).Select(i => new PlayerSetup("P" + i, PlayerKind.Npc)).ToList(), new SystemRandomSource(7));
+            using var ctrl = new NpcController(e, ImmediateNpcScheduler.Instance, NpcTimingOptions.Instant, new SystemRandomSource(7));
+            for (int i = 0; i < 4; i++) ctrl.Assign(i, new NpcProfile(NpcDifficulty.Normal, NpcPersonality.Steady));
+            ctrl.SetPaused(true);
+            e.StartGame();
+            Check(e.Field.IsEmpty && e.Field.TurnNumber == 0, "npc pause: does not play while paused");
+            ctrl.SetPaused(false);
+            Check(e.Phase != GamePhase.Playing || !e.Field.IsEmpty || e.Field.TurnNumber > 0, "npc pause: resumes and plays after unpause");
+        }
     }
 }

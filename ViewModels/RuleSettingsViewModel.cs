@@ -395,6 +395,25 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
         }
     }
 
+    /// <summary>カード交換結果の表示秒数（0〜15 秒、0 は非表示）。</summary>
+    public int ExchangeSummarySeconds
+    {
+        get => Appearance.ExchangeSummarySeconds;
+        set
+        {
+            int v = Math.Clamp(value, 0, 15);
+            if (Appearance.ExchangeSummarySeconds == v) return;
+            Appearance.ExchangeSummarySeconds = v;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ExchangeSummarySecondsLabel));
+            _ = SaveAppearanceAsync();
+        }
+    }
+
+    /// <summary>カード交換結果の表示秒数ラベル。</summary>
+    public string ExchangeSummarySecondsLabel
+        => Appearance.ExchangeSummarySeconds == 0 ? "表示しない" : $"{Appearance.ExchangeSummarySeconds} 秒";
+
     /// <summary>効果音の有効・無効。</summary>
     public bool SoundEnabled
     {
@@ -464,6 +483,8 @@ public sealed partial class RuleSettingsViewModel : ViewModelBase
         Appearance = await _settingsRepo.LoadAppearanceAsync();
         Npc = await _settingsRepo.LoadNpcAsync();
         OnPropertyChanged(nameof(CardHoverEnabled));
+        OnPropertyChanged(nameof(ExchangeSummarySeconds));
+        OnPropertyChanged(nameof(ExchangeSummarySecondsLabel));
         OnPropertyChanged(nameof(SoundEnabled));
         OnPropertyChanged(nameof(SeVolume));
         OnPropertyChanged(nameof(BgmVolume));

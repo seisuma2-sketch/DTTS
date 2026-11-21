@@ -597,6 +597,7 @@ public sealed partial class GameTableViewModel : ViewModelBase
         {
             var appearance = await _settingsRepo.LoadAppearanceAsync();
             DTTS.Views.Controls.CardControl.GlobalHoverEnabled = appearance.CardHoverEnabled;
+            _exchangeSummaryDuration = TimeSpan.FromSeconds(Math.Clamp(appearance.ExchangeSummarySeconds, 0, 15));
             Speed = appearance.GameSpeed;
             AutoPassWhenCannotPlay = appearance.AutoPassWhenCannotPlay;
             RevolutionBgColor = appearance.RevolutionBgColor;

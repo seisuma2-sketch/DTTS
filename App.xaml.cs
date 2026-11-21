@@ -50,7 +50,7 @@ public partial class App : Application
         }
         catch (InvalidOperationException)
         {
-            return typeof(App).Assembly.GetName().Version?.ToString(3) ?? "1.1.6";
+            return typeof(App).Assembly.GetName().Version?.ToString(3) ?? "1.1.7";
         }
     }
 
